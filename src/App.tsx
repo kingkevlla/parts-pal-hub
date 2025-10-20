@@ -9,6 +9,7 @@ import { Header } from "@/components/layout/Header";
 import { AuthProvider, useAuth } from "@/contexts/AuthContext";
 import Dashboard from "./pages/Dashboard";
 import Inventory from "./pages/Inventory";
+import Categories from "./pages/Categories";
 import StockIn from "./pages/StockIn";
 import StockOut from "./pages/StockOut";
 import Suppliers from "./pages/Suppliers";
@@ -65,6 +66,7 @@ const App = () => (
             <Route path="/auth" element={<Auth />} />
             <Route path="/" element={<ProtectedRoute><Layout><Dashboard /></Layout></ProtectedRoute>} />
             <Route path="/inventory" element={<ProtectedRoute><Layout><Inventory /></Layout></ProtectedRoute>} />
+            <Route path="/categories" element={<ProtectedRoute><Layout><Categories /></Layout></ProtectedRoute>} />
             <Route path="/stock-in" element={<ProtectedRoute><Layout><StockIn /></Layout></ProtectedRoute>} />
             <Route path="/stock-out" element={<ProtectedRoute><Layout><StockOut /></Layout></ProtectedRoute>} />
             <Route path="/suppliers" element={<ProtectedRoute><Layout><Suppliers /></Layout></ProtectedRoute>} />

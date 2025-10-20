@@ -21,6 +21,7 @@ interface Product {
   selling_price: number;
   reorder_level: number;
   category_id: string | null;
+  unit: string;
   categories: { name: string } | null;
 }
 
@@ -102,6 +103,7 @@ export default function Inventory() {
       selling_price: parseFloat(formData.get('selling_price') as string),
       reorder_level: parseInt(formData.get('reorder_level') as string),
       category_id: formData.get('category_id') as string || null,
+      unit: formData.get('unit') as string || 'piece',
     };
 
     if (editingProduct) {
@@ -199,7 +201,7 @@ export default function Inventory() {
                 <Label htmlFor="description">Description</Label>
                 <Textarea id="description" name="description" defaultValue={editingProduct?.description || ''} />
               </div>
-              <div className="grid grid-cols-2 gap-4">
+              <div className="grid grid-cols-3 gap-4">
                 <div className="space-y-2">
                   <Label htmlFor="cost_price">Cost Price</Label>
                   <Input id="cost_price" name="cost_price" type="number" step="0.01" min="0" required defaultValue={editingProduct?.cost_price} />
@@ -207,6 +209,23 @@ export default function Inventory() {
                 <div className="space-y-2">
                   <Label htmlFor="selling_price">Selling Price</Label>
                   <Input id="selling_price" name="selling_price" type="number" step="0.01" min="0" required defaultValue={editingProduct?.selling_price} />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="unit">Unit</Label>
+                  <Select name="unit" defaultValue={editingProduct?.unit || 'piece'}>
+                    <SelectTrigger>
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="piece">Piece</SelectItem>
+                      <SelectItem value="box">Box</SelectItem>
+                      <SelectItem value="set">Set</SelectItem>
+                      <SelectItem value="pair">Pair</SelectItem>
+                      <SelectItem value="kg">Kilogram</SelectItem>
+                      <SelectItem value="liter">Liter</SelectItem>
+                      <SelectItem value="meter">Meter</SelectItem>
+                    </SelectContent>
+                  </Select>
                 </div>
               </div>
               <div className="grid grid-cols-2 gap-4">
