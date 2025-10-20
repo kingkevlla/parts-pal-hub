@@ -1,4 +1,4 @@
-import { LayoutDashboard, Package, TrendingUp, TrendingDown, Users, Building2, FileText, Settings } from "lucide-react";
+import { LayoutDashboard, Package, TrendingUp, TrendingDown, Users, Building2, FileText, Settings, ShoppingCart, DollarSign, Warehouse, LifeBuoy, Receipt, UserCog } from "lucide-react";
 import { NavLink, useLocation } from "react-router-dom";
 import { cn } from "@/lib/utils";
 import {
@@ -17,9 +17,15 @@ const navigation = [
   { name: "Inventory", href: "/inventory", icon: Package },
   { name: "Stock In", href: "/stock-in", icon: TrendingUp },
   { name: "Stock Out", href: "/stock-out", icon: TrendingDown },
+  { name: "POS", href: "/pos", icon: ShoppingCart },
+  { name: "Transactions", href: "/transactions", icon: Receipt },
+  { name: "Loans", href: "/loans", icon: DollarSign },
+  { name: "Warehouses", href: "/warehouses", icon: Warehouse },
   { name: "Suppliers", href: "/suppliers", icon: Building2 },
   { name: "Customers", href: "/customers", icon: Users },
+  { name: "Support", href: "/support", icon: LifeBuoy },
   { name: "Reports", href: "/reports", icon: FileText },
+  { name: "Users", href: "/users", icon: UserCog },
   { name: "Settings", href: "/settings", icon: Settings },
 ];
 

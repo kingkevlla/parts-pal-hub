@@ -1,9 +1,12 @@
-import { Bell, Search } from "lucide-react";
+import { Bell, Search, LogOut } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { SidebarTrigger } from "@/components/ui/sidebar";
+import { useAuth } from "@/contexts/AuthContext";
 
 export function Header() {
+  const { signOut, user } = useAuth();
+
   return (
     <header className="flex h-16 items-center gap-4 border-b bg-card px-4 md:px-6">
       <SidebarTrigger className="md:hidden" />
@@ -19,6 +22,11 @@ export function Header() {
       <Button variant="ghost" size="icon" className="shrink-0">
         <Bell className="h-5 w-5" />
       </Button>
+      {user && (
+        <Button variant="ghost" size="icon" className="shrink-0" onClick={signOut} title="Sign out">
+          <LogOut className="h-5 w-5" />
+        </Button>
+      )}
     </header>
   );
 }
