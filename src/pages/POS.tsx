@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -20,12 +20,24 @@ interface CartItem {
 
 export default function POS() {
   const [cart, setCart] = useState<CartItem[]>([]);
+  const [products, setProducts] = useState<any[]>([]);
   const [customerName, setCustomerName] = useState('');
   const [customerPhone, setCustomerPhone] = useState('');
   const [paymentMethod, setPaymentMethod] = useState('cash');
   const [isProcessing, setIsProcessing] = useState(false);
+  const [selectedProduct, setSelectedProduct] = useState('');
+  const [quantity, setQuantity] = useState(1);
   const { toast } = useToast();
   const { user } = useAuth();
+
+  useEffect(() => {
+    fetchProducts();
+  }, []);
+
+  const fetchProducts = async () => {
+    const { data, error } = await supabase.from('products').select('*').order('name');
+    if (!error) setProducts(data || []);
+  };
 
   const addToCart = (item: CartItem) => {
     setCart(prev => {
@@ -143,6 +155,55 @@ export default function POS() {
             </CardTitle>
           </CardHeader>
           <CardContent>
+            <div className="mb-4 space-y-4">
+              <div className="space-y-2">
+                <Label>Select Product</Label>
+                <Select value={selectedProduct} onValueChange={setSelectedProduct}>
+                  <SelectTrigger>
+                    <SelectValue placeholder="Choose a product" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {products.map((product) => (
+                      <SelectItem key={product.id} value={product.id}>
+                        {product.name} - ${product.selling_price.toFixed(2)}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="flex gap-2">
+                <div className="flex-1">
+                  <Label>Quantity</Label>
+                  <Input
+                    type="number"
+                    min="1"
+                    value={quantity}
+                    onChange={(e) => setQuantity(parseInt(e.target.value) || 1)}
+                  />
+                </div>
+                <Button
+                  className="mt-6"
+                  onClick={() => {
+                    const product = products.find(p => p.id === selectedProduct);
+                    if (product) {
+                      addToCart({
+                        productId: product.id,
+                        name: product.name,
+                        quantity,
+                        price: product.selling_price,
+                        subtotal: product.selling_price * quantity,
+                      });
+                      setSelectedProduct('');
+                      setQuantity(1);
+                    }
+                  }}
+                  disabled={!selectedProduct}
+                >
+                  <Plus className="h-4 w-4 mr-2" />
+                  Add
+                </Button>
+              </div>
+            </div>
             {cart.length === 0 ? (
               <p className="text-center text-muted-foreground py-8">Cart is empty</p>
             ) : (

@@ -8,6 +8,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { useToast } from '@/hooks/use-toast';
 import { Plus, Warehouse } from 'lucide-react';
 import { supabase } from '@/integrations/supabase/client';
+import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog';
 
 interface WarehouseData {
   id: string;
@@ -20,6 +21,8 @@ export default function Warehouses() {
   const [warehouses, setWarehouses] = useState<WarehouseData[]>([]);
   const [isOpen, setIsOpen] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
+  const [editingWarehouse, setEditingWarehouse] = useState<WarehouseData | null>(null);
+  const [deleteWarehouse, setDeleteWarehouse] = useState<WarehouseData | null>(null);
   const { toast } = useToast();
 
   useEffect(() => {
@@ -53,24 +56,39 @@ export default function Warehouses() {
       location: formData.get('location') as string,
     };
 
-    const { error } = await supabase.from('warehouses').insert(warehouseData);
+    let error;
+    if (editingWarehouse) {
+      const result = await supabase.from('warehouses').update(warehouseData).eq('id', editingWarehouse.id);
+      error = result.error;
+    } else {
+      const result = await supabase.from('warehouses').insert(warehouseData);
+      error = result.error;
+    }
 
     if (error) {
-      toast({
-        title: 'Error',
-        description: error.message,
-        variant: 'destructive',
-      });
+      toast({ title: 'Error', description: error.message, variant: 'destructive' });
     } else {
-      toast({
-        title: 'Success',
-        description: 'Warehouse created successfully',
-      });
+      toast({ title: 'Success', description: `Warehouse ${editingWarehouse ? 'updated' : 'created'} successfully` });
       setIsOpen(false);
+      setEditingWarehouse(null);
       fetchWarehouses();
     }
 
     setIsLoading(false);
+  };
+
+  const handleDelete = async () => {
+    if (!deleteWarehouse) return;
+
+    const { error } = await supabase.from('warehouses').delete().eq('id', deleteWarehouse.id);
+
+    if (error) {
+      toast({ title: 'Error', description: error.message, variant: 'destructive' });
+    } else {
+      toast({ title: 'Success', description: 'Warehouse deleted successfully' });
+      fetchWarehouses();
+    }
+    setDeleteWarehouse(null);
   };
 
   return (
@@ -80,7 +98,7 @@ export default function Warehouses() {
           <h1 className="text-3xl font-bold">Warehouse Management</h1>
           <p className="text-muted-foreground">Manage storage locations and inventory</p>
         </div>
-        <Dialog open={isOpen} onOpenChange={setIsOpen}>
+        <Dialog open={isOpen} onOpenChange={(open) => { setIsOpen(open); if (!open) setEditingWarehouse(null); }}>
           <DialogTrigger asChild>
             <Button className="gap-2">
               <Plus className="h-4 w-4" />
@@ -89,19 +107,19 @@ export default function Warehouses() {
           </DialogTrigger>
           <DialogContent>
             <DialogHeader>
-              <DialogTitle>Add New Warehouse</DialogTitle>
+              <DialogTitle>{editingWarehouse ? 'Edit Warehouse' : 'Add New Warehouse'}</DialogTitle>
             </DialogHeader>
             <form onSubmit={handleSubmit} className="space-y-4">
               <div className="space-y-2">
                 <Label htmlFor="name">Warehouse Name</Label>
-                <Input id="name" name="name" required placeholder="e.g., Main Warehouse" />
+                <Input id="name" name="name" required placeholder="e.g., Main Warehouse" defaultValue={editingWarehouse?.name} />
               </div>
               <div className="space-y-2">
                 <Label htmlFor="location">Location</Label>
-                <Input id="location" name="location" required placeholder="e.g., 123 Storage St" />
+                <Input id="location" name="location" required placeholder="e.g., 123 Storage St" defaultValue={editingWarehouse?.location} />
               </div>
               <Button type="submit" className="w-full" disabled={isLoading}>
-                {isLoading ? 'Creating...' : 'Create Warehouse'}
+                {isLoading ? 'Saving...' : editingWarehouse ? 'Update Warehouse' : 'Create Warehouse'}
               </Button>
             </form>
           </DialogContent>
@@ -136,6 +154,7 @@ export default function Warehouses() {
                 <TableHead>Name</TableHead>
                 <TableHead>Location</TableHead>
                 <TableHead>Created</TableHead>
+                <TableHead>Actions</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -144,12 +163,33 @@ export default function Warehouses() {
                   <TableCell className="font-medium">{warehouse.name}</TableCell>
                   <TableCell>{warehouse.location}</TableCell>
                   <TableCell>{new Date(warehouse.created_at).toLocaleDateString()}</TableCell>
+                  <TableCell>
+                    <div className="flex gap-2">
+                      <Button variant="ghost" size="sm" onClick={() => { setEditingWarehouse(warehouse); setIsOpen(true); }}>Edit</Button>
+                      <Button variant="ghost" size="sm" onClick={() => setDeleteWarehouse(warehouse)}>Delete</Button>
+                    </div>
+                  </TableCell>
                 </TableRow>
               ))}
             </TableBody>
           </Table>
         </CardContent>
       </Card>
+
+      <AlertDialog open={!!deleteWarehouse} onOpenChange={(open) => !open && setDeleteWarehouse(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Are you sure?</AlertDialogTitle>
+            <AlertDialogDescription>
+              This will permanently delete {deleteWarehouse?.name}. This action cannot be undone.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction onClick={handleDelete}>Delete</AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }

@@ -10,6 +10,7 @@ import { useToast } from '@/hooks/use-toast';
 import { Plus, DollarSign } from 'lucide-react';
 import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from '@/contexts/AuthContext';
+import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog';
 
 interface Loan {
   id: string;
@@ -27,6 +28,8 @@ export default function Loans() {
   const [loans, setLoans] = useState<Loan[]>([]);
   const [isOpen, setIsOpen] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
+  const [editingLoan, setEditingLoan] = useState<Loan | null>(null);
+  const [deleteLoan, setDeleteLoan] = useState<Loan | null>(null);
   const { toast } = useToast();
   const { user } = useAuth();
 
@@ -65,24 +68,39 @@ export default function Loans() {
       user_id: user?.id,
     };
 
-    const { error } = await supabase.from('loans').insert(loanData);
+    let error;
+    if (editingLoan) {
+      const result = await supabase.from('loans').update(loanData).eq('id', editingLoan.id);
+      error = result.error;
+    } else {
+      const result = await supabase.from('loans').insert(loanData);
+      error = result.error;
+    }
 
     if (error) {
-      toast({
-        title: 'Error',
-        description: error.message,
-        variant: 'destructive',
-      });
+      toast({ title: 'Error', description: error.message, variant: 'destructive' });
     } else {
-      toast({
-        title: 'Success',
-        description: 'Loan created successfully',
-      });
+      toast({ title: 'Success', description: `Loan ${editingLoan ? 'updated' : 'created'} successfully` });
       setIsOpen(false);
+      setEditingLoan(null);
       fetchLoans();
     }
 
     setIsLoading(false);
+  };
+
+  const handleDelete = async () => {
+    if (!deleteLoan) return;
+
+    const { error } = await supabase.from('loans').delete().eq('id', deleteLoan.id);
+
+    if (error) {
+      toast({ title: 'Error', description: error.message, variant: 'destructive' });
+    } else {
+      toast({ title: 'Success', description: 'Loan deleted successfully' });
+      fetchLoans();
+    }
+    setDeleteLoan(null);
   };
 
   const getStatusBadge = (status: string) => {
@@ -105,7 +123,7 @@ export default function Loans() {
           <h1 className="text-3xl font-bold">Loan Management</h1>
           <p className="text-muted-foreground">Track loans and payments</p>
         </div>
-        <Dialog open={isOpen} onOpenChange={setIsOpen}>
+        <Dialog open={isOpen} onOpenChange={(open) => { setIsOpen(open); if (!open) setEditingLoan(null); }}>
           <DialogTrigger asChild>
             <Button className="gap-2">
               <Plus className="h-4 w-4" />
@@ -114,31 +132,31 @@ export default function Loans() {
           </DialogTrigger>
           <DialogContent>
             <DialogHeader>
-              <DialogTitle>Create New Loan</DialogTitle>
+              <DialogTitle>{editingLoan ? 'Edit Loan' : 'Create New Loan'}</DialogTitle>
             </DialogHeader>
             <form onSubmit={handleSubmit} className="space-y-4">
               <div className="space-y-2">
                 <Label htmlFor="borrower_name">Borrower Name</Label>
-                <Input id="borrower_name" name="borrower_name" required />
+                <Input id="borrower_name" name="borrower_name" required defaultValue={editingLoan?.borrower_name} />
               </div>
               <div className="space-y-2">
                 <Label htmlFor="borrower_phone">Phone Number</Label>
-                <Input id="borrower_phone" name="borrower_phone" />
+                <Input id="borrower_phone" name="borrower_phone" defaultValue={editingLoan?.borrower_phone} />
               </div>
               <div className="space-y-2">
                 <Label htmlFor="amount">Loan Amount</Label>
-                <Input id="amount" name="amount" type="number" step="0.01" required />
+                <Input id="amount" name="amount" type="number" step="0.01" required defaultValue={editingLoan?.amount} />
               </div>
               <div className="space-y-2">
                 <Label htmlFor="interest_rate">Interest Rate (%)</Label>
-                <Input id="interest_rate" name="interest_rate" type="number" step="0.01" defaultValue="0" />
+                <Input id="interest_rate" name="interest_rate" type="number" step="0.01" defaultValue={editingLoan?.interest_rate || 0} />
               </div>
               <div className="space-y-2">
                 <Label htmlFor="due_date">Due Date</Label>
-                <Input id="due_date" name="due_date" type="date" required />
+                <Input id="due_date" name="due_date" type="date" required defaultValue={editingLoan?.due_date} />
               </div>
               <Button type="submit" className="w-full" disabled={isLoading}>
-                {isLoading ? 'Creating...' : 'Create Loan'}
+                {isLoading ? 'Saving...' : editingLoan ? 'Update Loan' : 'Create Loan'}
               </Button>
             </form>
           </DialogContent>
@@ -192,6 +210,7 @@ export default function Loans() {
                 <TableHead>Balance</TableHead>
                 <TableHead>Due Date</TableHead>
                 <TableHead>Status</TableHead>
+                <TableHead>Actions</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -204,12 +223,33 @@ export default function Loans() {
                   <TableCell>${getBalance(loan).toFixed(2)}</TableCell>
                   <TableCell>{new Date(loan.due_date).toLocaleDateString()}</TableCell>
                   <TableCell>{getStatusBadge(loan.status)}</TableCell>
+                  <TableCell>
+                    <div className="flex gap-2">
+                      <Button variant="ghost" size="sm" onClick={() => { setEditingLoan(loan); setIsOpen(true); }}>Edit</Button>
+                      <Button variant="ghost" size="sm" onClick={() => setDeleteLoan(loan)}>Delete</Button>
+                    </div>
+                  </TableCell>
                 </TableRow>
               ))}
             </TableBody>
           </Table>
         </CardContent>
       </Card>
+
+      <AlertDialog open={!!deleteLoan} onOpenChange={(open) => !open && setDeleteLoan(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Are you sure?</AlertDialogTitle>
+            <AlertDialogDescription>
+              This will permanently delete the loan for {deleteLoan?.borrower_name}. This action cannot be undone.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction onClick={handleDelete}>Delete</AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }
