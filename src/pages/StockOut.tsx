@@ -81,22 +81,8 @@ export default function StockOut() {
     const warehouseId = formData.get('warehouse_id') as string;
     const quantity = parseInt(formData.get('quantity') as string);
 
-    // Check inventory
-    const { data: existingInventory } = await supabase
-      .from('inventory')
-      .select('*')
-      .eq('product_id', productId)
-      .eq('warehouse_id', warehouseId)
-      .single();
-
-    if (!existingInventory || existingInventory.quantity < quantity) {
-      toast({ title: 'Error', description: 'Insufficient inventory', variant: 'destructive' });
-      setIsLoading(false);
-      return;
-    }
-
-    // Create stock movement
-    const { error: movementError } = await supabase.from('stock_movements').insert({
+    // Create stock movement - inventory check and update will be handled by database trigger
+    const { error } = await supabase.from('stock_movements').insert({
       product_id: productId,
       warehouse_id: warehouseId,
       type: 'out',
@@ -106,21 +92,20 @@ export default function StockOut() {
       user_id: user?.id,
     });
 
-    if (movementError) {
-      toast({ title: 'Error', description: movementError.message, variant: 'destructive' });
-      setIsLoading(false);
-      return;
+    if (error) {
+      toast({ 
+        title: 'Error', 
+        description: error.message.includes('Insufficient stock') 
+          ? 'Insufficient stock in selected warehouse' 
+          : error.message, 
+        variant: 'destructive' 
+      });
+    } else {
+      toast({ title: 'Success', description: 'Stock out recorded successfully' });
+      setIsOpen(false);
+      fetchStockMovements();
     }
 
-    // Update inventory
-    await supabase
-      .from('inventory')
-      .update({ quantity: existingInventory.quantity - quantity })
-      .eq('id', existingInventory.id);
-
-    toast({ title: 'Success', description: 'Stock out recorded successfully' });
-    setIsOpen(false);
-    fetchStockMovements();
     setIsLoading(false);
   };
 

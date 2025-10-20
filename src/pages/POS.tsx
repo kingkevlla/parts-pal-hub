@@ -18,9 +18,17 @@ interface CartItem {
   subtotal: number;
 }
 
+interface Warehouse {
+  id: string;
+  name: string;
+  location: string;
+}
+
 export default function POS() {
   const [cart, setCart] = useState<CartItem[]>([]);
   const [products, setProducts] = useState<any[]>([]);
+  const [warehouses, setWarehouses] = useState<Warehouse[]>([]);
+  const [selectedWarehouse, setSelectedWarehouse] = useState('');
   const [customerName, setCustomerName] = useState('');
   const [customerPhone, setCustomerPhone] = useState('');
   const [paymentMethod, setPaymentMethod] = useState('cash');
@@ -32,6 +40,7 @@ export default function POS() {
 
   useEffect(() => {
     fetchProducts();
+    fetchWarehouses();
   }, []);
 
   const fetchProducts = async () => {
@@ -39,7 +48,40 @@ export default function POS() {
     if (!error) setProducts(data || []);
   };
 
-  const addToCart = (item: CartItem) => {
+  const fetchWarehouses = async () => {
+    const { data, error } = await supabase.from('warehouses').select('*').order('name');
+    if (!error) {
+      setWarehouses(data || []);
+      if (data && data.length > 0) setSelectedWarehouse(data[0].id);
+    }
+  };
+
+  const addToCart = async (item: CartItem) => {
+    if (!selectedWarehouse) {
+      toast({ title: 'Error', description: 'Please select a warehouse', variant: 'destructive' });
+      return;
+    }
+
+    // Check available stock
+    const { data: inventory } = await supabase
+      .from('inventory')
+      .select('quantity')
+      .eq('product_id', item.productId)
+      .eq('warehouse_id', selectedWarehouse)
+      .single();
+
+    const currentCartQty = cart.find(i => i.productId === item.productId)?.quantity || 0;
+    const totalQty = currentCartQty + item.quantity;
+
+    if (!inventory || inventory.quantity < totalQty) {
+      toast({ 
+        title: 'Error', 
+        description: `Insufficient stock. Available: ${inventory?.quantity || 0}`, 
+        variant: 'destructive' 
+      });
+      return;
+    }
+
     setCart(prev => {
       const existing = prev.find(i => i.productId === item.productId);
       if (existing) {
@@ -63,11 +105,12 @@ export default function POS() {
 
   const processSale = async () => {
     if (cart.length === 0) {
-      toast({
-        title: 'Error',
-        description: 'Cart is empty',
-        variant: 'destructive',
-      });
+      toast({ title: 'Error', description: 'Cart is empty', variant: 'destructive' });
+      return;
+    }
+
+    if (!selectedWarehouse) {
+      toast({ title: 'Error', description: 'Please select a warehouse', variant: 'destructive' });
       return;
     }
 
@@ -98,29 +141,35 @@ export default function POS() {
         subtotal: item.subtotal,
       }));
 
-      const { error: itemsError } = await supabase
-        .from('sale_items')
-        .insert(saleItems);
-
+      const { error: itemsError } = await supabase.from('sale_items').insert(saleItems);
       if (itemsError) throw itemsError;
 
+      // Create stock movements for each sale item (inventory auto-updates via trigger)
+      const stockMovements = cart.map(item => ({
+        product_id: item.productId,
+        warehouse_id: selectedWarehouse,
+        quantity: item.quantity,
+        type: 'sale',
+        reference: `SALE-${sale.id.substring(0, 8)}`,
+        notes: `POS Sale to ${customerName || 'Walk-in customer'}`,
+        user_id: user?.id,
+      }));
+
+      const { error: movementError } = await supabase.from('stock_movements').insert(stockMovements);
+      if (movementError) throw movementError;
+
       // Create transaction record
-      const { error: transactionError } = await supabase
-        .from('transactions')
-        .insert({
-          type: 'sale',
-          amount: getTotalAmount(),
-          description: `Sale to ${customerName || 'Walk-in customer'}`,
-          category: 'Sales',
-          user_id: user?.id,
-        });
+      const { error: transactionError } = await supabase.from('transactions').insert({
+        type: 'income',
+        amount: getTotalAmount(),
+        description: `Sale to ${customerName || 'Walk-in customer'}`,
+        category: 'sales',
+        user_id: user?.id,
+      });
 
       if (transactionError) throw transactionError;
 
-      toast({
-        title: 'Success',
-        description: 'Sale completed successfully',
-      });
+      toast({ title: 'Success', description: 'Sale completed successfully' });
 
       // Reset form
       setCart([]);
@@ -129,11 +178,10 @@ export default function POS() {
       setPaymentMethod('cash');
 
     } catch (error: any) {
-      toast({
-        title: 'Error',
-        description: error.message,
-        variant: 'destructive',
-      });
+      const errorMsg = error.message.includes('Insufficient stock') 
+        ? 'Insufficient stock in warehouse' 
+        : error.message;
+      toast({ title: 'Error', description: errorMsg, variant: 'destructive' });
     } finally {
       setIsProcessing(false);
     }
@@ -156,6 +204,21 @@ export default function POS() {
           </CardHeader>
           <CardContent>
             <div className="mb-4 space-y-4">
+              <div className="space-y-2">
+                <Label>Select Warehouse</Label>
+                <Select value={selectedWarehouse} onValueChange={setSelectedWarehouse}>
+                  <SelectTrigger>
+                    <SelectValue placeholder="Choose warehouse" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {warehouses.map((warehouse) => (
+                      <SelectItem key={warehouse.id} value={warehouse.id}>
+                        {warehouse.name} - {warehouse.location}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
               <div className="space-y-2">
                 <Label>Select Product</Label>
                 <Select value={selectedProduct} onValueChange={setSelectedProduct}>
@@ -197,7 +260,7 @@ export default function POS() {
                       setQuantity(1);
                     }
                   }}
-                  disabled={!selectedProduct}
+                  disabled={!selectedProduct || !selectedWarehouse}
                 >
                   <Plus className="h-4 w-4 mr-2" />
                   Add

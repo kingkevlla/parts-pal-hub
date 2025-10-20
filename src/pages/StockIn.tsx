@@ -81,8 +81,8 @@ export default function StockIn() {
     const warehouseId = formData.get('warehouse_id') as string;
     const quantity = parseInt(formData.get('quantity') as string);
 
-    // Create stock movement
-    const { error: movementError } = await supabase.from('stock_movements').insert({
+    // Create stock movement - inventory will be automatically updated by database trigger
+    const { error } = await supabase.from('stock_movements').insert({
       product_id: productId,
       warehouse_id: warehouseId,
       type: 'in',
@@ -92,36 +92,14 @@ export default function StockIn() {
       user_id: user?.id,
     });
 
-    if (movementError) {
-      toast({ title: 'Error', description: movementError.message, variant: 'destructive' });
-      setIsLoading(false);
-      return;
-    }
-
-    // Update inventory
-    const { data: existingInventory } = await supabase
-      .from('inventory')
-      .select('*')
-      .eq('product_id', productId)
-      .eq('warehouse_id', warehouseId)
-      .single();
-
-    if (existingInventory) {
-      await supabase
-        .from('inventory')
-        .update({ quantity: existingInventory.quantity + quantity })
-        .eq('id', existingInventory.id);
+    if (error) {
+      toast({ title: 'Error', description: error.message, variant: 'destructive' });
     } else {
-      await supabase.from('inventory').insert({
-        product_id: productId,
-        warehouse_id: warehouseId,
-        quantity,
-      });
+      toast({ title: 'Success', description: 'Stock in recorded successfully' });
+      setIsOpen(false);
+      fetchStockMovements();
     }
 
-    toast({ title: 'Success', description: 'Stock in recorded successfully' });
-    setIsOpen(false);
-    fetchStockMovements();
     setIsLoading(false);
   };
 
