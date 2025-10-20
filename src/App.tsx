@@ -3,6 +3,7 @@ import { Toaster as Sonner } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { BrowserRouter, Routes, Route } from "react-router-dom";
+import { SidebarProvider } from "@/components/ui/sidebar";
 import { Sidebar } from "@/components/layout/Sidebar";
 import { Header } from "@/components/layout/Header";
 import Dashboard from "./pages/Dashboard";
@@ -18,15 +19,17 @@ import NotFound from "./pages/NotFound";
 const queryClient = new QueryClient();
 
 const Layout = ({ children }: { children: React.ReactNode }) => (
-  <div className="flex h-screen bg-background">
-    <Sidebar />
-    <div className="flex flex-1 flex-col overflow-hidden">
-      <Header />
-      <main className="flex-1 overflow-y-auto">
-        {children}
-      </main>
+  <SidebarProvider>
+    <div className="flex min-h-screen w-full bg-background">
+      <Sidebar />
+      <div className="flex flex-1 flex-col overflow-hidden">
+        <Header />
+        <main className="flex-1 overflow-y-auto p-4 md:p-6">
+          {children}
+        </main>
+      </div>
     </div>
-  </div>
+  </SidebarProvider>
 );
 
 const App = () => (
