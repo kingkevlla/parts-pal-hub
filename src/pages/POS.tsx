@@ -5,8 +5,10 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { Badge } from '@/components/ui/badge';
 import { useToast } from '@/hooks/use-toast';
-import { Plus, Trash2, ShoppingCart } from 'lucide-react';
+import { Plus, Trash2, ShoppingCart, CreditCard, DollarSign } from 'lucide-react';
 import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from '@/contexts/AuthContext';
 
@@ -32,15 +34,21 @@ export default function POS() {
   const [customerName, setCustomerName] = useState('');
   const [customerPhone, setCustomerPhone] = useState('');
   const [paymentMethod, setPaymentMethod] = useState('cash');
+  const [dueDate, setDueDate] = useState('');
+  const [interestRate, setInterestRate] = useState(0);
   const [isProcessing, setIsProcessing] = useState(false);
   const [selectedProduct, setSelectedProduct] = useState('');
   const [quantity, setQuantity] = useState(1);
+  const [loans, setLoans] = useState<any[]>([]);
+  const [selectedLoan, setSelectedLoan] = useState('');
+  const [paymentAmount, setPaymentAmount] = useState(0);
   const { toast } = useToast();
   const { user } = useAuth();
 
   useEffect(() => {
     fetchProducts();
     fetchWarehouses();
+    fetchLoans();
   }, []);
 
   const fetchProducts = async () => {
@@ -54,6 +62,15 @@ export default function POS() {
       setWarehouses(data || []);
       if (data && data.length > 0) setSelectedWarehouse(data[0].id);
     }
+  };
+
+  const fetchLoans = async () => {
+    const { data, error } = await supabase
+      .from('loans')
+      .select('*')
+      .in('status', ['active', 'overdue'])
+      .order('created_at', { ascending: false });
+    if (!error) setLoans(data || []);
   };
 
   const addToCart = async (item: CartItem) => {
@@ -114,74 +131,174 @@ export default function POS() {
       return;
     }
 
+    if (paymentMethod === 'credit' && !customerName) {
+      toast({ title: 'Error', description: 'Customer name is required for credit sales', variant: 'destructive' });
+      return;
+    }
+
     setIsProcessing(true);
 
     try {
-      // Create sale record
-      const { data: sale, error: saleError } = await supabase
-        .from('sales')
-        .insert({
-          customer_name: customerName || null,
-          customer_phone: customerPhone || null,
-          total_amount: getTotalAmount(),
-          payment_method: paymentMethod,
+      if (paymentMethod === 'credit') {
+        // Create loan instead of immediate sale
+        const { data: loan, error: loanError } = await supabase
+          .from('loans')
+          .insert({
+            borrower_name: customerName,
+            borrower_phone: customerPhone || null,
+            amount: getTotalAmount(),
+            amount_paid: 0,
+            interest_rate: interestRate,
+            status: 'active',
+            due_date: dueDate || null,
+            user_id: user?.id,
+          })
+          .select()
+          .single();
+
+        if (loanError) throw loanError;
+
+        // Create stock movements for loan items
+        const stockMovements = cart.map(item => ({
+          product_id: item.productId,
+          warehouse_id: selectedWarehouse,
+          quantity: item.quantity,
+          type: 'sale',
+          reference: `LOAN-${loan.id.substring(0, 8)}`,
+          notes: `Credit sale to ${customerName} (Loan)`,
           user_id: user?.id,
-        })
-        .select()
-        .single();
+        }));
 
-      if (saleError) throw saleError;
+        const { error: movementError } = await supabase.from('stock_movements').insert(stockMovements);
+        if (movementError) throw movementError;
 
-      // Insert sale items
-      const saleItems = cart.map(item => ({
-        sale_id: sale.id,
-        product_id: item.productId,
-        quantity: item.quantity,
-        unit_price: item.price,
-        subtotal: item.subtotal,
-      }));
+        toast({ title: 'Success', description: 'Loan created successfully' });
+        fetchLoans();
+      } else {
+        // Regular sale process
+        const { data: sale, error: saleError } = await supabase
+          .from('sales')
+          .insert({
+            customer_name: customerName || null,
+            customer_phone: customerPhone || null,
+            total_amount: getTotalAmount(),
+            payment_method: paymentMethod,
+            user_id: user?.id,
+          })
+          .select()
+          .single();
 
-      const { error: itemsError } = await supabase.from('sale_items').insert(saleItems);
-      if (itemsError) throw itemsError;
+        if (saleError) throw saleError;
 
-      // Create stock movements for each sale item (inventory auto-updates via trigger)
-      const stockMovements = cart.map(item => ({
-        product_id: item.productId,
-        warehouse_id: selectedWarehouse,
-        quantity: item.quantity,
-        type: 'sale',
-        reference: `SALE-${sale.id.substring(0, 8)}`,
-        notes: `POS Sale to ${customerName || 'Walk-in customer'}`,
-        user_id: user?.id,
-      }));
+        const saleItems = cart.map(item => ({
+          sale_id: sale.id,
+          product_id: item.productId,
+          quantity: item.quantity,
+          unit_price: item.price,
+          subtotal: item.subtotal,
+        }));
 
-      const { error: movementError } = await supabase.from('stock_movements').insert(stockMovements);
-      if (movementError) throw movementError;
+        const { error: itemsError } = await supabase.from('sale_items').insert(saleItems);
+        if (itemsError) throw itemsError;
 
-      // Create transaction record
-      const { error: transactionError } = await supabase.from('transactions').insert({
-        type: 'income',
-        amount: getTotalAmount(),
-        description: `Sale to ${customerName || 'Walk-in customer'}`,
-        category: 'sales',
-        user_id: user?.id,
-      });
+        const stockMovements = cart.map(item => ({
+          product_id: item.productId,
+          warehouse_id: selectedWarehouse,
+          quantity: item.quantity,
+          type: 'sale',
+          reference: `SALE-${sale.id.substring(0, 8)}`,
+          notes: `POS Sale to ${customerName || 'Walk-in customer'}`,
+          user_id: user?.id,
+        }));
 
-      if (transactionError) throw transactionError;
+        const { error: movementError } = await supabase.from('stock_movements').insert(stockMovements);
+        if (movementError) throw movementError;
 
-      toast({ title: 'Success', description: 'Sale completed successfully' });
+        const { error: transactionError } = await supabase.from('transactions').insert({
+          type: 'income',
+          amount: getTotalAmount(),
+          description: `Sale to ${customerName || 'Walk-in customer'}`,
+          category: 'sales',
+          user_id: user?.id,
+        });
+
+        if (transactionError) throw transactionError;
+
+        toast({ title: 'Success', description: 'Sale completed successfully' });
+      }
 
       // Reset form
       setCart([]);
       setCustomerName('');
       setCustomerPhone('');
       setPaymentMethod('cash');
+      setDueDate('');
+      setInterestRate(0);
 
     } catch (error: any) {
       const errorMsg = error.message.includes('Insufficient stock') 
         ? 'Insufficient stock in warehouse' 
         : error.message;
       toast({ title: 'Error', description: errorMsg, variant: 'destructive' });
+    } finally {
+      setIsProcessing(false);
+    }
+  };
+
+  const processLoanPayment = async () => {
+    if (!selectedLoan || paymentAmount <= 0) {
+      toast({ title: 'Error', description: 'Please select a loan and enter payment amount', variant: 'destructive' });
+      return;
+    }
+
+    setIsProcessing(true);
+
+    try {
+      const loan = loans.find(l => l.id === selectedLoan);
+      const newAmountPaid = parseFloat(loan.amount_paid) + paymentAmount;
+      const totalDue = parseFloat(loan.amount) * (1 + parseFloat(loan.interest_rate) / 100);
+      
+      const newStatus = newAmountPaid >= totalDue ? 'paid' : 'active';
+
+      // Update loan
+      const { error: loanError } = await supabase
+        .from('loans')
+        .update({ 
+          amount_paid: newAmountPaid,
+          status: newStatus,
+        })
+        .eq('id', selectedLoan);
+
+      if (loanError) throw loanError;
+
+      // Create loan payment record
+      const { error: paymentError } = await supabase.from('loan_payments').insert({
+        loan_id: selectedLoan,
+        amount: paymentAmount,
+        user_id: user?.id,
+      });
+
+      if (paymentError) throw paymentError;
+
+      // Create transaction record
+      const { error: transactionError } = await supabase.from('transactions').insert({
+        type: 'income',
+        amount: paymentAmount,
+        description: `Loan payment from ${loan.borrower_name}`,
+        category: 'loan_repayment',
+        user_id: user?.id,
+      });
+
+      if (transactionError) throw transactionError;
+
+      toast({ title: 'Success', description: 'Payment recorded successfully' });
+      
+      setSelectedLoan('');
+      setPaymentAmount(0);
+      fetchLoans();
+
+    } catch (error: any) {
+      toast({ title: 'Error', description: error.message, variant: 'destructive' });
     } finally {
       setIsProcessing(false);
     }
@@ -194,7 +311,20 @@ export default function POS() {
         <p className="text-muted-foreground">Process sales and manage transactions</p>
       </div>
 
-      <div className="grid gap-6 md:grid-cols-2">
+      <Tabs defaultValue="sale" className="space-y-6">
+        <TabsList>
+          <TabsTrigger value="sale">
+            <ShoppingCart className="h-4 w-4 mr-2" />
+            New Sale
+          </TabsTrigger>
+          <TabsTrigger value="loans">
+            <CreditCard className="h-4 w-4 mr-2" />
+            Loan Payments
+          </TabsTrigger>
+        </TabsList>
+
+        <TabsContent value="sale" className="space-y-6">
+          <div className="grid gap-6 md:grid-cols-2">
         <Card>
           <CardHeader>
             <CardTitle className="flex items-center gap-2">
@@ -349,9 +479,36 @@ export default function POS() {
                   <SelectItem value="card">Card</SelectItem>
                   <SelectItem value="mobile_money">Mobile Money</SelectItem>
                   <SelectItem value="bank_transfer">Bank Transfer</SelectItem>
+                  <SelectItem value="credit">Credit/Loan</SelectItem>
                 </SelectContent>
               </Select>
             </div>
+
+            {paymentMethod === 'credit' && (
+              <>
+                <div className="space-y-2">
+                  <Label htmlFor="due-date">Due Date (Optional)</Label>
+                  <Input
+                    id="due-date"
+                    type="date"
+                    value={dueDate}
+                    onChange={(e) => setDueDate(e.target.value)}
+                  />
+                </div>
+
+                <div className="space-y-2">
+                  <Label htmlFor="interest-rate">Interest Rate (%)</Label>
+                  <Input
+                    id="interest-rate"
+                    type="number"
+                    min="0"
+                    step="0.1"
+                    value={interestRate}
+                    onChange={(e) => setInterestRate(parseFloat(e.target.value) || 0)}
+                  />
+                </div>
+              </>
+            )}
 
             <Button
               className="w-full"
@@ -359,11 +516,163 @@ export default function POS() {
               onClick={processSale}
               disabled={isProcessing || cart.length === 0}
             >
-              {isProcessing ? 'Processing...' : `Complete Sale - $${getTotalAmount().toFixed(2)}`}
+              {isProcessing ? 'Processing...' : paymentMethod === 'credit' 
+                ? `Create Loan - $${getTotalAmount().toFixed(2)}` 
+                : `Complete Sale - $${getTotalAmount().toFixed(2)}`}
             </Button>
           </CardContent>
         </Card>
-      </div>
+          </div>
+        </TabsContent>
+
+        <TabsContent value="loans" className="space-y-6">
+          <div className="grid gap-6 md:grid-cols-2">
+            <Card>
+              <CardHeader>
+                <CardTitle>Active Loans</CardTitle>
+              </CardHeader>
+              <CardContent>
+                {loans.length === 0 ? (
+                  <p className="text-center text-muted-foreground py-8">No active loans</p>
+                ) : (
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead>Borrower</TableHead>
+                        <TableHead>Amount</TableHead>
+                        <TableHead>Paid</TableHead>
+                        <TableHead>Balance</TableHead>
+                        <TableHead>Status</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {loans.map((loan) => {
+                        const totalDue = parseFloat(loan.amount) * (1 + parseFloat(loan.interest_rate) / 100);
+                        const balance = totalDue - parseFloat(loan.amount_paid);
+                        return (
+                          <TableRow 
+                            key={loan.id}
+                            className="cursor-pointer hover:bg-accent"
+                            onClick={() => {
+                              setSelectedLoan(loan.id);
+                              setPaymentAmount(balance);
+                            }}
+                          >
+                            <TableCell>
+                              <div>
+                                <div className="font-medium">{loan.borrower_name}</div>
+                                {loan.borrower_phone && (
+                                  <div className="text-sm text-muted-foreground">{loan.borrower_phone}</div>
+                                )}
+                              </div>
+                            </TableCell>
+                            <TableCell>${parseFloat(loan.amount).toFixed(2)}</TableCell>
+                            <TableCell>${parseFloat(loan.amount_paid).toFixed(2)}</TableCell>
+                            <TableCell className="font-medium">${balance.toFixed(2)}</TableCell>
+                            <TableCell>
+                              <Badge variant={loan.status === 'active' ? 'default' : 'destructive'}>
+                                {loan.status}
+                              </Badge>
+                            </TableCell>
+                          </TableRow>
+                        );
+                      })}
+                    </TableBody>
+                  </Table>
+                )}
+              </CardContent>
+            </Card>
+
+            <Card>
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2">
+                  <DollarSign className="h-5 w-5" />
+                  Record Payment
+                </CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                <div className="space-y-2">
+                  <Label>Select Loan</Label>
+                  <Select value={selectedLoan} onValueChange={setSelectedLoan}>
+                    <SelectTrigger>
+                      <SelectValue placeholder="Choose a loan" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {loans.map((loan) => {
+                        const totalDue = parseFloat(loan.amount) * (1 + parseFloat(loan.interest_rate) / 100);
+                        const balance = totalDue - parseFloat(loan.amount_paid);
+                        return (
+                          <SelectItem key={loan.id} value={loan.id}>
+                            {loan.borrower_name} - Balance: ${balance.toFixed(2)}
+                          </SelectItem>
+                        );
+                      })}
+                    </SelectContent>
+                  </Select>
+                </div>
+
+                {selectedLoan && (
+                  <>
+                    <div className="p-4 bg-muted rounded-lg space-y-2">
+                      {(() => {
+                        const loan = loans.find(l => l.id === selectedLoan);
+                        if (!loan) return null;
+                        const totalDue = parseFloat(loan.amount) * (1 + parseFloat(loan.interest_rate) / 100);
+                        const balance = totalDue - parseFloat(loan.amount_paid);
+                        return (
+                          <>
+                            <div className="flex justify-between">
+                              <span className="text-sm text-muted-foreground">Original Amount:</span>
+                              <span className="font-medium">${parseFloat(loan.amount).toFixed(2)}</span>
+                            </div>
+                            <div className="flex justify-between">
+                              <span className="text-sm text-muted-foreground">Interest ({loan.interest_rate}%):</span>
+                              <span className="font-medium">${(totalDue - parseFloat(loan.amount)).toFixed(2)}</span>
+                            </div>
+                            <div className="flex justify-between">
+                              <span className="text-sm text-muted-foreground">Total Due:</span>
+                              <span className="font-medium">${totalDue.toFixed(2)}</span>
+                            </div>
+                            <div className="flex justify-between">
+                              <span className="text-sm text-muted-foreground">Paid:</span>
+                              <span className="font-medium">${parseFloat(loan.amount_paid).toFixed(2)}</span>
+                            </div>
+                            <div className="flex justify-between border-t pt-2">
+                              <span className="font-semibold">Balance:</span>
+                              <span className="font-bold text-lg">${balance.toFixed(2)}</span>
+                            </div>
+                          </>
+                        );
+                      })()}
+                    </div>
+
+                    <div className="space-y-2">
+                      <Label htmlFor="payment-amount">Payment Amount</Label>
+                      <Input
+                        id="payment-amount"
+                        type="number"
+                        min="0"
+                        step="0.01"
+                        value={paymentAmount}
+                        onChange={(e) => setPaymentAmount(parseFloat(e.target.value) || 0)}
+                      />
+                    </div>
+
+                    <Button
+                      className="w-full"
+                      size="lg"
+                      onClick={processLoanPayment}
+                      disabled={isProcessing || !selectedLoan || paymentAmount <= 0}
+                    >
+                      {isProcessing ? 'Processing...' : `Record Payment - $${paymentAmount.toFixed(2)}`}
+                    </Button>
+                  </>
+                )}
+              </CardContent>
+            </Card>
+          </div>
+        </TabsContent>
+      </Tabs>
     </div>
   );
 }
