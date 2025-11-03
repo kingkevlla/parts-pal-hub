@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
+import { useCurrency } from "@/hooks/useCurrency";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -47,6 +48,7 @@ interface UserProfile {
 export default function OwnerDashboard() {
   const { user } = useAuth();
   const { toast } = useToast();
+  const { formatAmount } = useCurrency();
   const [isOwner, setIsOwner] = useState(false);
   const [loading, setLoading] = useState(true);
   const [stats, setStats] = useState<Stats>({
@@ -131,7 +133,7 @@ export default function OwnerDashboard() {
         activities.push({
           id: sale.id,
           type: 'sale',
-          description: `Sale of $${sale.total_amount} ${sale.customer_name ? `to ${sale.customer_name}` : ''}`,
+          description: `Sale of ${formatAmount(Number(sale.total_amount))} ${sale.customer_name ? `to ${sale.customer_name}` : ''}`,
           timestamp: new Date(sale.created_at),
           user: 'User'
         });
@@ -315,7 +317,7 @@ export default function OwnerDashboard() {
             <div className="flex items-center justify-between">
               <div>
                 <p className="text-sm font-medium text-muted-foreground">Total Revenue</p>
-                <p className="text-2xl sm:text-3xl font-bold">${stats.totalRevenue.toFixed(2)}</p>
+                <p className="text-2xl sm:text-3xl font-bold">{formatAmount(stats.totalRevenue)}</p>
                 <p className="text-xs text-success mt-1 flex items-center gap-1">
                   <TrendingUp className="h-3 w-3" />
                   {stats.totalSales} sales

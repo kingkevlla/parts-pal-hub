@@ -3,6 +3,7 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/com
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Button } from "@/components/ui/button";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
 
@@ -121,12 +122,35 @@ export default function SystemSettings() {
 
           <div className="space-y-2">
             <Label htmlFor="currency">Default Currency</Label>
-            <Input
-              id="currency"
-              value={settings.currency || ""}
-              onChange={(e) => setSettings({ ...settings, currency: e.target.value })}
-              placeholder="USD"
-            />
+            <Select
+              value={settings.currency || "USD"}
+              onValueChange={(value) => setSettings({ ...settings, currency: value })}
+            >
+              <SelectTrigger id="currency">
+                <SelectValue placeholder="Select currency" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="USD">$ - US Dollar (USD)</SelectItem>
+                <SelectItem value="EUR">€ - Euro (EUR)</SelectItem>
+                <SelectItem value="GBP">£ - British Pound (GBP)</SelectItem>
+                <SelectItem value="JPY">¥ - Japanese Yen (JPY)</SelectItem>
+                <SelectItem value="CNY">¥ - Chinese Yuan (CNY)</SelectItem>
+                <SelectItem value="INR">₹ - Indian Rupee (INR)</SelectItem>
+                <SelectItem value="AUD">A$ - Australian Dollar (AUD)</SelectItem>
+                <SelectItem value="CAD">C$ - Canadian Dollar (CAD)</SelectItem>
+                <SelectItem value="CHF">Fr - Swiss Franc (CHF)</SelectItem>
+                <SelectItem value="KRW">₩ - South Korean Won (KRW)</SelectItem>
+                <SelectItem value="BRL">R$ - Brazilian Real (BRL)</SelectItem>
+                <SelectItem value="ZAR">R - South African Rand (ZAR)</SelectItem>
+                <SelectItem value="MXN">$ - Mexican Peso (MXN)</SelectItem>
+                <SelectItem value="SGD">S$ - Singapore Dollar (SGD)</SelectItem>
+                <SelectItem value="AED">د.إ - UAE Dirham (AED)</SelectItem>
+                <SelectItem value="SAR">﷼ - Saudi Riyal (SAR)</SelectItem>
+                <SelectItem value="TZS">TSh - Tanzanian Shilling (TZS)</SelectItem>
+                <SelectItem value="KES">KSh - Kenyan Shilling (KES)</SelectItem>
+                <SelectItem value="NGN">₦ - Nigerian Naira (NGN)</SelectItem>
+              </SelectContent>
+            </Select>
           </div>
         </CardContent>
       </Card>
