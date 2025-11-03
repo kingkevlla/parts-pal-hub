@@ -42,10 +42,13 @@ export default function UserManagement() {
       return;
     }
 
-    // Fetch user roles separately
+    // Fetch user roles separately with role names
     const { data: roles, error: rolesError } = await supabase
       .from('user_roles')
-      .select('user_id, role');
+      .select(`
+        user_id,
+        roles (name)
+      `);
 
     if (rolesError) {
       toast({
@@ -58,11 +61,11 @@ export default function UserManagement() {
 
     // Group roles by user_id
     const rolesMap: Record<string, UserRole[]> = {};
-    roles?.forEach(role => {
-      if (!rolesMap[role.user_id]) {
-        rolesMap[role.user_id] = [];
+    roles?.forEach((userRole: any) => {
+      if (!rolesMap[userRole.user_id]) {
+        rolesMap[userRole.user_id] = [];
       }
-      rolesMap[role.user_id].push({ role: role.role });
+      rolesMap[userRole.user_id].push({ role: userRole.roles.name });
     });
 
     setUsers(profiles || []);
