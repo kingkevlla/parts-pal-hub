@@ -1,4 +1,4 @@
-import { LayoutDashboard, Package, TrendingUp, TrendingDown, Users, Building2, FileText, Settings, ShoppingCart, DollarSign, Warehouse, LifeBuoy, Receipt, UserCog, FolderOpen } from "lucide-react";
+import { LayoutDashboard, Package, TrendingUp, TrendingDown, Users, Building2, FileText, Settings, ShoppingCart, DollarSign, Warehouse, LifeBuoy, Receipt, UserCog, FolderOpen, Crown } from "lucide-react";
 import { NavLink, useLocation } from "react-router-dom";
 import { cn } from "@/lib/utils";
 import {
@@ -14,6 +14,7 @@ import {
 
 const navigation = [
   { name: "Dashboard", href: "/", icon: LayoutDashboard },
+  { name: "Owner", href: "/owner", icon: Crown },
   { name: "Inventory", href: "/inventory", icon: Package },
   { name: "Categories", href: "/categories", icon: FolderOpen },
   { name: "Stock In", href: "/stock-in", icon: TrendingUp },

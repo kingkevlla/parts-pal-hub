@@ -23,6 +23,7 @@ import Warehouses from "./pages/Warehouses";
 import Support from "./pages/Support";
 import Transactions from "./pages/Transactions";
 import UserManagement from "./pages/UserManagement";
+import OwnerDashboard from "./pages/OwnerDashboard";
 import NotFound from "./pages/NotFound";
 
 const queryClient = new QueryClient();
@@ -78,6 +79,7 @@ const App = () => (
             <Route path="/support" element={<ProtectedRoute><Layout><Support /></Layout></ProtectedRoute>} />
             <Route path="/reports" element={<ProtectedRoute><Layout><Reports /></Layout></ProtectedRoute>} />
             <Route path="/users" element={<ProtectedRoute><Layout><UserManagement /></Layout></ProtectedRoute>} />
+            <Route path="/owner" element={<ProtectedRoute><Layout><OwnerDashboard /></Layout></ProtectedRoute>} />
             <Route path="/settings" element={<ProtectedRoute><Layout><Settings /></Layout></ProtectedRoute>} />
             <Route path="*" element={<NotFound />} />
           </Routes>
