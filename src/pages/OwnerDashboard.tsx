@@ -16,7 +16,11 @@ import {
   UserX,
   AlertCircle,
   ShoppingCart,
-  Warehouse
+  Warehouse,
+  HandCoins,
+  Bell,
+  Volume2,
+  VolumeX
 } from "lucide-react";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
 import { ScrollArea } from "@/components/ui/scroll-area";
@@ -45,6 +49,16 @@ interface UserProfile {
   roles: string[];
 }
 
+interface DueLoan {
+  id: string;
+  borrower_name: string;
+  borrower_phone: string;
+  amount: number;
+  amount_paid: number;
+  due_date: string;
+  status: string;
+}
+
 export default function OwnerDashboard() {
   const { user } = useAuth();
   const { toast } = useToast();
@@ -63,6 +77,11 @@ export default function OwnerDashboard() {
   const [users, setUsers] = useState<UserProfile[]>([]);
   const [showShutdownDialog, setShowShutdownDialog] = useState(false);
   const [userToDelete, setUserToDelete] = useState<string | null>(null);
+  const [dueLoans, setDueLoans] = useState<DueLoan[]>([]);
+  const [totalLoanAmount, setTotalLoanAmount] = useState(0);
+  const [showLoanDetails, setShowLoanDetails] = useState(false);
+  const [audioPlaying, setAudioPlaying] = useState(false);
+  const [audioTimer, setAudioTimer] = useState<NodeJS.Timeout | null>(null);
 
   useEffect(() => {
     checkOwnerStatus();
@@ -73,7 +92,12 @@ export default function OwnerDashboard() {
       fetchStats();
       fetchActivities();
       fetchUsers();
+      fetchDueLoans();
       subscribeToRealtime();
+      
+      // Check for due loans every minute
+      const interval = setInterval(fetchDueLoans, 60000);
+      return () => clearInterval(interval);
     }
   }, [isOwner]);
 
@@ -186,6 +210,76 @@ export default function OwnerDashboard() {
     }
   };
 
+  const fetchDueLoans = async () => {
+    try {
+      const today = new Date();
+      const nextWeek = new Date(today);
+      nextWeek.setDate(today.getDate() + 7);
+
+      const { data, error } = await supabase
+        .from('loans')
+        .select('*')
+        .eq('status', 'active')
+        .lte('due_date', nextWeek.toISOString().split('T')[0])
+        .order('due_date', { ascending: true });
+
+      if (error) throw error;
+
+      setDueLoans(data || []);
+      
+      // Calculate total loan amount
+      const total = data?.reduce((sum, loan) => sum + (Number(loan.amount) - Number(loan.amount_paid || 0)), 0) || 0;
+      setTotalLoanAmount(total);
+
+      // Play voice notification if there are due loans
+      if (data && data.length > 0 && !audioPlaying) {
+        playLoanReminder();
+      }
+    } catch (error) {
+      console.error('Error fetching due loans:', error);
+    }
+  };
+
+  const playLoanReminder = () => {
+    if (audioPlaying) return;
+    
+    setAudioPlaying(true);
+    
+    const utterance = new SpeechSynthesisUtterance(
+      `Attention boss! You have ${dueLoans.length} loan${dueLoans.length > 1 ? 's' : ''} that ${dueLoans.length > 1 ? 'are' : 'is'} due soon. Please review the loan details.`
+    );
+    
+    utterance.rate = 0.9;
+    utterance.pitch = 1;
+    utterance.volume = 1;
+    
+    utterance.onend = () => {
+      setAudioPlaying(false);
+      if (audioTimer) {
+        clearTimeout(audioTimer);
+        setAudioTimer(null);
+      }
+    };
+    
+    window.speechSynthesis.speak(utterance);
+    
+    // Auto-stop after 30 seconds
+    const timer = setTimeout(() => {
+      stopLoanReminder();
+    }, 30000);
+    
+    setAudioTimer(timer);
+  };
+
+  const stopLoanReminder = () => {
+    window.speechSynthesis.cancel();
+    setAudioPlaying(false);
+    if (audioTimer) {
+      clearTimeout(audioTimer);
+      setAudioTimer(null);
+    }
+  };
+
   const subscribeToRealtime = () => {
     const salesChannel = supabase
       .channel('owner-sales-changes')
@@ -211,10 +305,19 @@ export default function OwnerDashboard() {
       })
       .subscribe();
 
+    const loansChannel = supabase
+      .channel('owner-loans-changes')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'loans' }, () => {
+        fetchStats();
+        fetchDueLoans();
+      })
+      .subscribe();
+
     return () => {
       supabase.removeChannel(salesChannel);
       supabase.removeChannel(stockChannel);
       supabase.removeChannel(usersChannel);
+      supabase.removeChannel(loansChannel);
     };
   };
 
@@ -310,8 +413,60 @@ export default function OwnerDashboard() {
         </Button>
       </div>
 
+      {/* Loan Reminder Notification */}
+      {dueLoans.length > 0 && (
+        <Card className="bg-gradient-to-r from-destructive/20 to-warning/20 border-destructive/40 animate-pulse">
+          <CardContent className="p-4">
+            <div className="flex items-start justify-between gap-4">
+              <div className="flex items-start gap-3 flex-1">
+                <Bell className="h-6 w-6 text-destructive flex-shrink-0 mt-1 animate-bounce" />
+                <div className="flex-1">
+                  <h3 className="font-semibold text-lg flex items-center gap-2">
+                    Loan Payment Reminder
+                    {audioPlaying && <Volume2 className="h-4 w-4 animate-pulse" />}
+                  </h3>
+                  <p className="text-sm text-muted-foreground mt-1">
+                    You have {dueLoans.length} loan{dueLoans.length > 1 ? 's' : ''} that {dueLoans.length > 1 ? 'are' : 'is'} due soon!
+                  </p>
+                  <Button 
+                    variant="link" 
+                    className="h-auto p-0 mt-2 text-primary"
+                    onClick={() => setShowLoanDetails(true)}
+                  >
+                    Click to review details →
+                  </Button>
+                </div>
+              </div>
+              <div className="flex gap-2">
+                {audioPlaying ? (
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={stopLoanReminder}
+                    className="border-destructive text-destructive hover:bg-destructive/10"
+                  >
+                    <VolumeX className="h-4 w-4 mr-2" />
+                    Stop Voice
+                  </Button>
+                ) : (
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={playLoanReminder}
+                    className="border-primary text-primary hover:bg-primary/10"
+                  >
+                    <Volume2 className="h-4 w-4 mr-2" />
+                    Play Voice
+                  </Button>
+                )}
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
       {/* Stats Grid */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
         <Card className="bg-gradient-to-br from-primary/10 to-accent/10 border-primary/20">
           <CardContent className="p-4 sm:p-6">
             <div className="flex items-center justify-between">
@@ -355,6 +510,25 @@ export default function OwnerDashboard() {
                 )}
               </div>
               <Package className="h-10 w-10 sm:h-12 sm:w-12 text-warning opacity-50" />
+            </div>
+          </CardContent>
+        </Card>
+
+        <Card 
+          className="bg-gradient-to-br from-purple-500/10 to-pink-500/10 border-purple-500/20 cursor-pointer hover:shadow-lg transition-all"
+          onClick={() => setShowLoanDetails(true)}
+        >
+          <CardContent className="p-4 sm:p-6">
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-sm font-medium text-muted-foreground">Active Loans</p>
+                <p className="text-2xl sm:text-3xl font-bold">{stats.activeLoans}</p>
+                <p className="text-xs text-purple-600 dark:text-purple-400 mt-1 flex items-center gap-1">
+                  <HandCoins className="h-3 w-3" />
+                  {formatAmount(totalLoanAmount)} outstanding
+                </p>
+              </div>
+              <HandCoins className="h-10 w-10 sm:h-12 sm:w-12 text-purple-500 opacity-50" />
             </div>
           </CardContent>
         </Card>
@@ -483,6 +657,74 @@ export default function OwnerDashboard() {
               className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
             >
               Delete User
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      {/* Loan Details Dialog */}
+      <AlertDialog open={showLoanDetails} onOpenChange={setShowLoanDetails}>
+        <AlertDialogContent className="max-w-2xl max-h-[80vh] overflow-y-auto">
+          <AlertDialogHeader>
+            <AlertDialogTitle className="flex items-center gap-2">
+              <HandCoins className="h-5 w-5 text-purple-500" />
+              Loan Payment Reminders
+            </AlertDialogTitle>
+            <AlertDialogDescription>
+              Review loans that are due within the next 7 days
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <div className="space-y-3 my-4">
+            {dueLoans.length === 0 ? (
+              <p className="text-center text-muted-foreground py-8">No loans due soon</p>
+            ) : (
+              dueLoans.map((loan) => {
+                const daysUntilDue = Math.ceil(
+                  (new Date(loan.due_date).getTime() - new Date().getTime()) / (1000 * 60 * 60 * 24)
+                );
+                const remainingAmount = Number(loan.amount) - Number(loan.amount_paid || 0);
+                const isOverdue = daysUntilDue < 0;
+
+                return (
+                  <Card key={loan.id} className={isOverdue ? 'border-destructive' : 'border-warning'}>
+                    <CardContent className="p-4">
+                      <div className="flex justify-between items-start gap-4">
+                        <div className="flex-1">
+                          <h4 className="font-semibold">{loan.borrower_name}</h4>
+                          <p className="text-sm text-muted-foreground">{loan.borrower_phone}</p>
+                          <div className="mt-2 space-y-1">
+                            <div className="flex justify-between text-sm">
+                              <span className="text-muted-foreground">Total Amount:</span>
+                              <span className="font-medium">{formatAmount(Number(loan.amount))}</span>
+                            </div>
+                            <div className="flex justify-between text-sm">
+                              <span className="text-muted-foreground">Paid:</span>
+                              <span className="font-medium text-success">{formatAmount(Number(loan.amount_paid || 0))}</span>
+                            </div>
+                            <div className="flex justify-between text-sm border-t pt-1">
+                              <span className="text-muted-foreground">Remaining:</span>
+                              <span className="font-semibold text-destructive">{formatAmount(remainingAmount)}</span>
+                            </div>
+                          </div>
+                        </div>
+                        <div className="text-right">
+                          <Badge variant={isOverdue ? 'destructive' : 'default'} className="mb-2">
+                            {isOverdue ? 'OVERDUE' : `Due in ${daysUntilDue} days`}
+                          </Badge>
+                          <p className="text-xs text-muted-foreground">
+                            Due: {new Date(loan.due_date).toLocaleDateString()}
+                          </p>
+                        </div>
+                      </div>
+                    </CardContent>
+                  </Card>
+                );
+              })
+            )}
+          </div>
+          <AlertDialogFooter>
+            <AlertDialogAction onClick={() => setShowLoanDetails(false)}>
+              Close
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
