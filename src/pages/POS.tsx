@@ -329,13 +329,8 @@ export default function POS() {
   };
 
   return (
-    <div className="space-y-6">
-      <div>
-        <h1 className="text-3xl font-bold">Point of Sale</h1>
-        <p className="text-muted-foreground">Process sales and manage transactions</p>
-      </div>
-
-      <Tabs defaultValue="sale" className="space-y-6">
+    <div className="h-full p-2 sm:p-4" style={{ zoom: '0.6' }}>
+      <Tabs defaultValue="sale" className="space-y-2 sm:space-y-4">
         <TabsList>
           <TabsTrigger value="sale">
             <ShoppingCart className="h-4 w-4 mr-2" />
@@ -350,13 +345,7 @@ export default function POS() {
         <TabsContent value="sale" className="space-y-6">
           <div className="grid gap-6 md:grid-cols-2">
         <Card>
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2">
-              <ShoppingCart className="h-5 w-5" />
-              Shopping Cart
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
+          <CardContent className="pt-6">
             <div className="mb-4 space-y-4">
               <div className="space-y-2">
                 <Label>Select Warehouse</Label>
@@ -374,7 +363,6 @@ export default function POS() {
                 </Select>
               </div>
               <div className="space-y-2">
-                <Label>Search Product (Name, SKU, or QR Code)</Label>
                 <Input
                   placeholder="Type or scan product code..."
                   value={searchQuery}
@@ -519,10 +507,7 @@ export default function POS() {
         </Card>
 
         <Card>
-          <CardHeader>
-            <CardTitle>Customer & Payment</CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-4">
+          <CardContent className="pt-6 space-y-4">
             <div className="space-y-2">
               <Label htmlFor="customer-name">Customer Name (Optional)</Label>
               <Input

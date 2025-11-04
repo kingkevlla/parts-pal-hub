@@ -56,6 +56,14 @@ const Layout = ({ children }: { children: React.ReactNode }) => (
   </SidebarProvider>
 );
 
+const POSLayout = ({ children }: { children: React.ReactNode }) => (
+  <div className="min-h-screen w-full bg-background">
+    <main className="h-screen overflow-y-auto">
+      {children}
+    </main>
+  </div>
+);
+
 const App = () => (
   <QueryClientProvider client={queryClient}>
     <TooltipProvider>
@@ -72,7 +80,7 @@ const App = () => (
             <Route path="/stock-out" element={<ProtectedRoute><Layout><StockOut /></Layout></ProtectedRoute>} />
             <Route path="/suppliers" element={<ProtectedRoute><Layout><Suppliers /></Layout></ProtectedRoute>} />
             <Route path="/customers" element={<ProtectedRoute><Layout><Customers /></Layout></ProtectedRoute>} />
-            <Route path="/pos" element={<ProtectedRoute><Layout><POS /></Layout></ProtectedRoute>} />
+            <Route path="/pos" element={<ProtectedRoute><POSLayout><POS /></POSLayout></ProtectedRoute>} />
             <Route path="/transactions" element={<ProtectedRoute><Layout><Transactions /></Layout></ProtectedRoute>} />
             <Route path="/loans" element={<ProtectedRoute><Layout><Loans /></Layout></ProtectedRoute>} />
             <Route path="/warehouses" element={<ProtectedRoute><Layout><Warehouses /></Layout></ProtectedRoute>} />
