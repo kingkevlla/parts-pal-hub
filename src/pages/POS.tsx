@@ -39,7 +39,7 @@ export default function POS() {
   const [dueDate, setDueDate] = useState('');
   const [interestRate, setInterestRate] = useState(0);
   const [isProcessing, setIsProcessing] = useState(false);
-  const [selectedProduct, setSelectedProduct] = useState('');
+  const [searchQuery, setSearchQuery] = useState('');
   const [quantity, setQuantity] = useState(1);
   const [loans, setLoans] = useState<any[]>([]);
   const [selectedLoan, setSelectedLoan] = useState('');
@@ -374,51 +374,102 @@ export default function POS() {
                 </Select>
               </div>
               <div className="space-y-2">
-                <Label>Select Product</Label>
-                <Select value={selectedProduct} onValueChange={setSelectedProduct}>
-                  <SelectTrigger>
-                    <SelectValue placeholder="Choose a product" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {products.map((product) => (
-                      <SelectItem key={product.id} value={product.id}>
-                        {product.name} - {formatAmount(product.selling_price)}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-              <div className="flex gap-2">
-                <div className="flex-1">
-                  <Label>Quantity</Label>
-                  <Input
-                    type="number"
-                    min="1"
-                    value={quantity}
-                    onChange={(e) => setQuantity(parseInt(e.target.value) || 1)}
-                  />
-                </div>
-                <Button
-                  className="mt-6"
-                  onClick={() => {
-                    const product = products.find(p => p.id === selectedProduct);
-                    if (product) {
-                      addToCart({
-                        productId: product.id,
-                        name: product.name,
-                        quantity,
-                        price: product.selling_price,
-                        subtotal: product.selling_price * quantity,
-                      });
-                      setSelectedProduct('');
-                      setQuantity(1);
+                <Label>Search Product (Name, SKU, or QR Code)</Label>
+                <Input
+                  placeholder="Type or scan product code..."
+                  value={searchQuery}
+                  onChange={(e) => {
+                    const query = e.target.value.toLowerCase();
+                    setSearchQuery(e.target.value);
+                    
+                    // Auto-search and add product
+                    const matchedProduct = products.find(p => 
+                      p.name.toLowerCase().includes(query) ||
+                      p.sku.toLowerCase() === query ||
+                      p.id === query
+                    );
+                    
+                    if (matchedProduct && query.length > 2) {
+                      // Auto-add when exact match found
+                      const exactMatch = matchedProduct.sku.toLowerCase() === query || matchedProduct.id === query;
+                      if (exactMatch) {
+                        addToCart({
+                          productId: matchedProduct.id,
+                          name: matchedProduct.name,
+                          quantity,
+                          price: matchedProduct.selling_price,
+                          subtotal: matchedProduct.selling_price * quantity,
+                        });
+                        setSearchQuery('');
+                        setQuantity(1);
+                      }
                     }
                   }}
-                  disabled={!selectedProduct || !selectedWarehouse}
-                >
-                  <Plus className="h-4 w-4 mr-2" />
-                  Add
-                </Button>
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' && searchQuery) {
+                      const query = searchQuery.toLowerCase();
+                      const matchedProduct = products.find(p => 
+                        p.name.toLowerCase().includes(query) ||
+                        p.sku.toLowerCase() === query ||
+                        p.id === query
+                      );
+                      
+                      if (matchedProduct) {
+                        addToCart({
+                          productId: matchedProduct.id,
+                          name: matchedProduct.name,
+                          quantity,
+                          price: matchedProduct.selling_price,
+                          subtotal: matchedProduct.selling_price * quantity,
+                        });
+                        setSearchQuery('');
+                        setQuantity(1);
+                      }
+                    }
+                  }}
+                />
+                {searchQuery && (
+                  <div className="max-h-40 overflow-y-auto border rounded-md">
+                    {products
+                      .filter(p => 
+                        p.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
+                        p.sku.toLowerCase().includes(searchQuery.toLowerCase())
+                      )
+                      .slice(0, 5)
+                      .map(product => (
+                        <button
+                          key={product.id}
+                          type="button"
+                          className="w-full text-left px-3 py-2 hover:bg-accent transition-colors"
+                          onClick={() => {
+                            addToCart({
+                              productId: product.id,
+                              name: product.name,
+                              quantity,
+                              price: product.selling_price,
+                              subtotal: product.selling_price * quantity,
+                            });
+                            setSearchQuery('');
+                            setQuantity(1);
+                          }}
+                        >
+                          <div className="font-medium">{product.name}</div>
+                          <div className="text-sm text-muted-foreground">
+                            SKU: {product.sku} - {formatAmount(product.selling_price)}
+                          </div>
+                        </button>
+                      ))}
+                  </div>
+                )}
+              </div>
+              <div className="space-y-2">
+                <Label>Quantity</Label>
+                <Input
+                  type="number"
+                  min="1"
+                  value={quantity}
+                  onChange={(e) => setQuantity(parseInt(e.target.value) || 1)}
+                />
               </div>
             </div>
             {cart.length === 0 ? (

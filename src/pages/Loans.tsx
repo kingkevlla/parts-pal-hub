@@ -61,9 +61,12 @@ export default function Loans() {
     setIsLoading(true);
 
     const formData = new FormData(e.currentTarget);
+    const borrowerName = formData.get('borrower_name') as string;
+    const borrowerPhone = formData.get('borrower_phone') as string;
+    
     const loanData = {
-      borrower_name: formData.get('borrower_name') as string,
-      borrower_phone: formData.get('borrower_phone') as string,
+      borrower_name: borrowerName,
+      borrower_phone: borrowerPhone,
       amount: parseFloat(formData.get('amount') as string),
       interest_rate: parseFloat(formData.get('interest_rate') as string) || 0,
       due_date: formData.get('due_date') as string,
@@ -75,6 +78,20 @@ export default function Loans() {
       const result = await supabase.from('loans').update(loanData).eq('id', editingLoan.id);
       error = result.error;
     } else {
+      // Auto-register borrower as customer if creating new loan
+      const { data: existingCustomer } = await supabase
+        .from('customers')
+        .select('id')
+        .or(`name.eq.${borrowerName},phone.eq.${borrowerPhone}`)
+        .maybeSingle();
+
+      if (!existingCustomer) {
+        await supabase.from('customers').insert({
+          name: borrowerName,
+          phone: borrowerPhone,
+        });
+      }
+
       const result = await supabase.from('loans').insert(loanData);
       error = result.error;
     }
@@ -82,7 +99,7 @@ export default function Loans() {
     if (error) {
       toast({ title: 'Error', description: error.message, variant: 'destructive' });
     } else {
-      toast({ title: 'Success', description: `Loan ${editingLoan ? 'updated' : 'created'} successfully` });
+      toast({ title: 'Success', description: `Loan ${editingLoan ? 'updated' : 'created'} successfully${!editingLoan ? ' and borrower registered as customer' : ''}` });
       setIsOpen(false);
       setEditingLoan(null);
       fetchLoans();
