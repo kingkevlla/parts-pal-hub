@@ -20,10 +20,13 @@ import {
   HandCoins,
   Bell,
   Volume2,
-  VolumeX
+  VolumeX,
+  Eye
 } from "lucide-react";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
 import { ScrollArea } from "@/components/ui/scroll-area";
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { ProductDetailsDialog } from "@/components/owner/ProductDetailsDialog";
 
 interface Stats {
   totalSales: number;
@@ -59,6 +62,14 @@ interface DueLoan {
   status: string;
 }
 
+interface Product {
+  id: string;
+  name: string;
+  sku: string;
+  cost_price: number;
+  selling_price: number;
+}
+
 export default function OwnerDashboard() {
   const { user } = useAuth();
   const { toast } = useToast();
@@ -82,6 +93,9 @@ export default function OwnerDashboard() {
   const [showLoanDetails, setShowLoanDetails] = useState(false);
   const [audioPlaying, setAudioPlaying] = useState(false);
   const [audioTimer, setAudioTimer] = useState<NodeJS.Timeout | null>(null);
+  const [products, setProducts] = useState<Product[]>([]);
+  const [selectedProductId, setSelectedProductId] = useState<string | null>(null);
+  const [showProductDetails, setShowProductDetails] = useState(false);
 
   useEffect(() => {
     checkOwnerStatus();
@@ -93,6 +107,7 @@ export default function OwnerDashboard() {
       fetchActivities();
       fetchUsers();
       fetchDueLoans();
+      fetchProducts();
       subscribeToRealtime();
       
       // Check for due loans every minute
@@ -237,6 +252,20 @@ export default function OwnerDashboard() {
       }
     } catch (error) {
       console.error('Error fetching due loans:', error);
+    }
+  };
+
+  const fetchProducts = async () => {
+    try {
+      const { data, error } = await supabase
+        .from('products')
+        .select('id, name, sku, cost_price, selling_price')
+        .order('name');
+
+      if (error) throw error;
+      setProducts(data || []);
+    } catch (error) {
+      console.error('Error fetching products:', error);
     }
   };
 
@@ -534,6 +563,75 @@ export default function OwnerDashboard() {
         </Card>
       </div>
 
+      {/* Products Review */}
+      <Card>
+        <CardHeader className="pb-3">
+          <CardTitle className="flex items-center gap-2 text-lg">
+            <Package className="h-5 w-5 text-primary" />
+            Products Review
+          </CardTitle>
+        </CardHeader>
+        <CardContent>
+          <ScrollArea className="h-[400px] pr-4">
+            {products.length === 0 ? (
+              <p className="text-sm text-muted-foreground text-center py-8">No products found</p>
+            ) : (
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Product</TableHead>
+                    <TableHead>SKU</TableHead>
+                    <TableHead>Purchase Price</TableHead>
+                    <TableHead>Selling Price</TableHead>
+                    <TableHead>Profit</TableHead>
+                    <TableHead></TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {products.map((product) => {
+                    const profit = Number(product.selling_price) - Number(product.cost_price);
+                    const profitMargin = (profit / Number(product.cost_price)) * 100;
+                    
+                    return (
+                      <TableRow key={product.id}>
+                        <TableCell className="font-medium">{product.name}</TableCell>
+                        <TableCell className="text-sm text-muted-foreground">{product.sku}</TableCell>
+                        <TableCell className="text-destructive font-medium">
+                          {formatAmount(Number(product.cost_price))}
+                        </TableCell>
+                        <TableCell className="text-success font-medium">
+                          {formatAmount(Number(product.selling_price))}
+                        </TableCell>
+                        <TableCell>
+                          <div>
+                            <p className="font-medium">{formatAmount(profit)}</p>
+                            <p className="text-xs text-muted-foreground">
+                              {profitMargin.toFixed(1)}%
+                            </p>
+                          </div>
+                        </TableCell>
+                        <TableCell>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => {
+                              setSelectedProductId(product.id);
+                              setShowProductDetails(true);
+                            }}
+                          >
+                            <Eye className="h-4 w-4" />
+                          </Button>
+                        </TableCell>
+                      </TableRow>
+                    );
+                  })}
+                </TableBody>
+              </Table>
+            )}
+          </ScrollArea>
+        </CardContent>
+      </Card>
+
       {/* Live Activity and User Management */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
         {/* Live Activity */}
@@ -661,6 +759,13 @@ export default function OwnerDashboard() {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+
+      {/* Product Details Dialog */}
+      <ProductDetailsDialog
+        productId={selectedProductId}
+        open={showProductDetails}
+        onOpenChange={setShowProductDetails}
+      />
 
       {/* Loan Details Dialog */}
       <AlertDialog open={showLoanDetails} onOpenChange={setShowLoanDetails}>
