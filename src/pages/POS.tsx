@@ -11,6 +11,7 @@ import { useToast } from '@/hooks/use-toast';
 import { Plus, Trash2, ShoppingCart, CreditCard, DollarSign } from 'lucide-react';
 import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from '@/contexts/AuthContext';
+import { useCurrency } from '@/hooks/useCurrency';
 
 interface CartItem {
   productId: string;
@@ -44,6 +45,7 @@ export default function POS() {
   const [paymentAmount, setPaymentAmount] = useState(0);
   const { toast } = useToast();
   const { user } = useAuth();
+  const { formatAmount } = useCurrency();
 
   useEffect(() => {
     fetchProducts();
@@ -358,7 +360,7 @@ export default function POS() {
                   <SelectContent>
                     {products.map((product) => (
                       <SelectItem key={product.id} value={product.id}>
-                        {product.name} - ${product.selling_price.toFixed(2)}
+                        {product.name} - {formatAmount(product.selling_price)}
                       </SelectItem>
                     ))}
                   </SelectContent>
@@ -416,8 +418,8 @@ export default function POS() {
                       <TableRow key={item.productId}>
                         <TableCell>{item.name}</TableCell>
                         <TableCell>{item.quantity}</TableCell>
-                        <TableCell>${item.price.toFixed(2)}</TableCell>
-                        <TableCell>${item.subtotal.toFixed(2)}</TableCell>
+                        <TableCell>{formatAmount(item.price)}</TableCell>
+                        <TableCell>{formatAmount(item.subtotal)}</TableCell>
                         <TableCell>
                           <Button
                             variant="ghost"
@@ -435,7 +437,7 @@ export default function POS() {
                 <div className="border-t pt-4">
                   <div className="flex justify-between text-lg font-bold">
                     <span>Total:</span>
-                    <span>${getTotalAmount().toFixed(2)}</span>
+                    <span>{formatAmount(getTotalAmount())}</span>
                   </div>
                 </div>
               </div>
@@ -517,8 +519,8 @@ export default function POS() {
               disabled={isProcessing || cart.length === 0}
             >
               {isProcessing ? 'Processing...' : paymentMethod === 'credit' 
-                ? `Create Loan - $${getTotalAmount().toFixed(2)}` 
-                : `Complete Sale - $${getTotalAmount().toFixed(2)}`}
+                ? `Create Loan - ${formatAmount(getTotalAmount())}` 
+                : `Complete Sale - ${formatAmount(getTotalAmount())}`}
             </Button>
           </CardContent>
         </Card>
@@ -566,9 +568,9 @@ export default function POS() {
                                 )}
                               </div>
                             </TableCell>
-                            <TableCell>${parseFloat(loan.amount).toFixed(2)}</TableCell>
-                            <TableCell>${parseFloat(loan.amount_paid).toFixed(2)}</TableCell>
-                            <TableCell className="font-medium">${balance.toFixed(2)}</TableCell>
+                            <TableCell>{formatAmount(parseFloat(loan.amount))}</TableCell>
+                            <TableCell>{formatAmount(parseFloat(loan.amount_paid))}</TableCell>
+                            <TableCell className="font-medium">{formatAmount(balance)}</TableCell>
                             <TableCell>
                               <Badge variant={loan.status === 'active' ? 'default' : 'destructive'}>
                                 {loan.status}
@@ -603,7 +605,7 @@ export default function POS() {
                         const balance = totalDue - parseFloat(loan.amount_paid);
                         return (
                           <SelectItem key={loan.id} value={loan.id}>
-                            {loan.borrower_name} - Balance: ${balance.toFixed(2)}
+                            {loan.borrower_name} - Balance: {formatAmount(balance)}
                           </SelectItem>
                         );
                       })}
@@ -623,23 +625,23 @@ export default function POS() {
                           <>
                             <div className="flex justify-between">
                               <span className="text-sm text-muted-foreground">Original Amount:</span>
-                              <span className="font-medium">${parseFloat(loan.amount).toFixed(2)}</span>
+                              <span className="font-medium">{formatAmount(parseFloat(loan.amount))}</span>
                             </div>
                             <div className="flex justify-between">
                               <span className="text-sm text-muted-foreground">Interest ({loan.interest_rate}%):</span>
-                              <span className="font-medium">${(totalDue - parseFloat(loan.amount)).toFixed(2)}</span>
+                              <span className="font-medium">{formatAmount(totalDue - parseFloat(loan.amount))}</span>
                             </div>
                             <div className="flex justify-between">
                               <span className="text-sm text-muted-foreground">Total Due:</span>
-                              <span className="font-medium">${totalDue.toFixed(2)}</span>
+                              <span className="font-medium">{formatAmount(totalDue)}</span>
                             </div>
                             <div className="flex justify-between">
                               <span className="text-sm text-muted-foreground">Paid:</span>
-                              <span className="font-medium">${parseFloat(loan.amount_paid).toFixed(2)}</span>
+                              <span className="font-medium">{formatAmount(parseFloat(loan.amount_paid))}</span>
                             </div>
                             <div className="flex justify-between border-t pt-2">
                               <span className="font-semibold">Balance:</span>
-                              <span className="font-bold text-lg">${balance.toFixed(2)}</span>
+                              <span className="font-bold text-lg">{formatAmount(balance)}</span>
                             </div>
                           </>
                         );

@@ -11,6 +11,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
 import { useToast } from "@/hooks/use-toast";
 import { supabase } from "@/integrations/supabase/client";
+import { useCurrency } from "@/hooks/useCurrency";
 
 interface Product {
   id: string;
@@ -44,6 +45,7 @@ export default function Inventory() {
   const [editingProduct, setEditingProduct] = useState<ProductWithStock | null>(null);
   const [deleteProduct, setDeleteProduct] = useState<ProductWithStock | null>(null);
   const { toast } = useToast();
+  const { formatAmount } = useCurrency();
 
   useEffect(() => {
     fetchProducts();
@@ -315,8 +317,8 @@ export default function Inventory() {
                         {product.total_stock}
                       </span>
                     </td>
-                    <td className="py-3 px-4">${product.cost_price.toFixed(2)}</td>
-                    <td className="py-3 px-4 font-medium">${product.selling_price.toFixed(2)}</td>
+                    <td className="py-3 px-4">{formatAmount(product.cost_price)}</td>
+                    <td className="py-3 px-4 font-medium">{formatAmount(product.selling_price)}</td>
                     <td className="py-3 px-4">
                       <div className="flex gap-2">
                         <Button variant="ghost" size="sm" onClick={() => handleEdit(product)}>

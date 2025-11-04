@@ -5,6 +5,7 @@ import { Badge } from '@/components/ui/badge';
 import { useToast } from '@/hooks/use-toast';
 import { TrendingUp, TrendingDown, DollarSign } from 'lucide-react';
 import { supabase } from '@/integrations/supabase/client';
+import { useCurrency } from '@/hooks/useCurrency';
 
 interface Transaction {
   id: string;
@@ -18,6 +19,7 @@ interface Transaction {
 export default function Transactions() {
   const [transactions, setTransactions] = useState<Transaction[]>([]);
   const { toast } = useToast();
+  const { formatAmount } = useCurrency();
 
   useEffect(() => {
     fetchTransactions();
@@ -75,7 +77,7 @@ export default function Transactions() {
             <TrendingUp className="h-4 w-4 text-green-500" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold text-green-500">${getTotalIncome().toFixed(2)}</div>
+            <div className="text-2xl font-bold text-green-500">{formatAmount(getTotalIncome())}</div>
           </CardContent>
         </Card>
 
@@ -85,7 +87,7 @@ export default function Transactions() {
             <TrendingDown className="h-4 w-4 text-red-500" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold text-red-500">${getTotalExpenses().toFixed(2)}</div>
+            <div className="text-2xl font-bold text-red-500">{formatAmount(getTotalExpenses())}</div>
           </CardContent>
         </Card>
 
@@ -95,7 +97,7 @@ export default function Transactions() {
             <DollarSign className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold">${(getTotalIncome() - getTotalExpenses()).toFixed(2)}</div>
+            <div className="text-2xl font-bold">{formatAmount(getTotalIncome() - getTotalExpenses())}</div>
           </CardContent>
         </Card>
       </div>
@@ -123,7 +125,7 @@ export default function Transactions() {
                   <TableCell>{transaction.category}</TableCell>
                   <TableCell>{transaction.description}</TableCell>
                   <TableCell className="text-right font-medium">
-                    ${transaction.amount.toFixed(2)}
+                    {formatAmount(transaction.amount)}
                   </TableCell>
                 </TableRow>
               ))}

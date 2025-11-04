@@ -149,6 +149,7 @@ export default function SystemSettings() {
                 <SelectItem value="TZS">TSh - Tanzanian Shilling (TZS)</SelectItem>
                 <SelectItem value="KES">KSh - Kenyan Shilling (KES)</SelectItem>
                 <SelectItem value="NGN">₦ - Nigerian Naira (NGN)</SelectItem>
+                <SelectItem value="RWF">FRw - Rwandan Franc (RWF)</SelectItem>
               </SelectContent>
             </Select>
           </div>

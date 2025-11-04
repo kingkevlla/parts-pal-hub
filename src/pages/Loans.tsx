@@ -10,6 +10,7 @@ import { useToast } from '@/hooks/use-toast';
 import { Plus, DollarSign } from 'lucide-react';
 import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from '@/contexts/AuthContext';
+import { useCurrency } from '@/hooks/useCurrency';
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog';
 
 interface Loan {
@@ -32,6 +33,7 @@ export default function Loans() {
   const [deleteLoan, setDeleteLoan] = useState<Loan | null>(null);
   const { toast } = useToast();
   const { user } = useAuth();
+  const { formatAmount } = useCurrency();
 
   useEffect(() => {
     fetchLoans();
@@ -170,7 +172,7 @@ export default function Loans() {
             <DollarSign className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold">${loans.reduce((sum, l) => sum + l.amount, 0).toFixed(2)}</div>
+            <div className="text-2xl font-bold">{formatAmount(loans.reduce((sum, l) => sum + l.amount, 0))}</div>
           </CardContent>
         </Card>
         <Card>
@@ -189,7 +191,7 @@ export default function Loans() {
           </CardHeader>
           <CardContent>
             <div className="text-2xl font-bold">
-              ${loans.filter(l => l.status === 'active').reduce((sum, l) => sum + getBalance(l), 0).toFixed(2)}
+              {formatAmount(loans.filter(l => l.status === 'active').reduce((sum, l) => sum + getBalance(l), 0))}
             </div>
           </CardContent>
         </Card>
@@ -218,9 +220,9 @@ export default function Loans() {
                 <TableRow key={loan.id}>
                   <TableCell className="font-medium">{loan.borrower_name}</TableCell>
                   <TableCell>{loan.borrower_phone}</TableCell>
-                  <TableCell>${loan.amount.toFixed(2)}</TableCell>
-                  <TableCell>${loan.amount_paid.toFixed(2)}</TableCell>
-                  <TableCell>${getBalance(loan).toFixed(2)}</TableCell>
+                  <TableCell>{formatAmount(loan.amount)}</TableCell>
+                  <TableCell>{formatAmount(loan.amount_paid)}</TableCell>
+                  <TableCell>{formatAmount(getBalance(loan))}</TableCell>
                   <TableCell>{new Date(loan.due_date).toLocaleDateString()}</TableCell>
                   <TableCell>{getStatusBadge(loan.status)}</TableCell>
                   <TableCell>

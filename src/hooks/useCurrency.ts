@@ -4,7 +4,7 @@ import { supabase } from "@/integrations/supabase/client";
 const CURRENCY_SYMBOLS: Record<string, string> = {
   USD: "$", EUR: "€", GBP: "£", JPY: "¥", CNY: "¥", INR: "₹",
   AUD: "A$", CAD: "C$", CHF: "Fr", KRW: "₩", BRL: "R$", ZAR: "R",
-  MXN: "$", SGD: "S$", AED: "د.إ", SAR: "﷼", TZS: "TSh", KES: "KSh", NGN: "₦"
+  MXN: "$", SGD: "S$", AED: "د.إ", SAR: "﷼", TZS: "TSh", KES: "KSh", NGN: "₦", RWF: "FRw"
 };
 
 export function useCurrency() {

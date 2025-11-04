@@ -4,6 +4,8 @@ import { supabase } from "@/integrations/supabase/client";
 import { StatCard } from "@/components/dashboard/StatCard";
 import { DollarSign, Package, Users, TrendingUp, TrendingDown } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
+import { useCurrency } from "@/hooks/useCurrency";
+import { useSystemSettings } from "@/hooks/useSystemSettings";
 
 interface ReportData {
   totalSales: number;
@@ -27,6 +29,8 @@ export default function Reports() {
   });
   const [loading, setLoading] = useState(true);
   const { toast } = useToast();
+  const { formatAmount } = useCurrency();
+  const { settings } = useSystemSettings();
 
   useEffect(() => {
     fetchReportData();
@@ -77,7 +81,7 @@ export default function Reports() {
             .eq("product_id", product.id);
 
           const totalQuantity = inventory?.reduce((sum, inv) => sum + inv.quantity, 0) || 0;
-          if (totalQuantity <= (product.reorder_level || 10)) {
+          if (totalQuantity <= (product.reorder_level || settings.low_stock_threshold)) {
             lowStockCount++;
           }
         }
@@ -146,7 +150,7 @@ export default function Reports() {
                 <TrendingUp className="h-4 w-4 text-green-500" />
               </CardHeader>
               <CardContent>
-                <div className="text-2xl font-bold">${reportData.totalIncome.toFixed(2)}</div>
+                <div className="text-2xl font-bold">{formatAmount(reportData.totalIncome)}</div>
               </CardContent>
             </Card>
 
@@ -156,7 +160,7 @@ export default function Reports() {
                 <TrendingDown className="h-4 w-4 text-red-500" />
               </CardHeader>
               <CardContent>
-                <div className="text-2xl font-bold">${reportData.totalExpenses.toFixed(2)}</div>
+                <div className="text-2xl font-bold">{formatAmount(reportData.totalExpenses)}</div>
               </CardContent>
             </Card>
 
@@ -167,7 +171,7 @@ export default function Reports() {
               </CardHeader>
               <CardContent>
                 <div className={`text-2xl font-bold ${netProfit >= 0 ? "text-green-500" : "text-red-500"}`}>
-                  ${netProfit.toFixed(2)}
+                  {formatAmount(netProfit)}
                 </div>
               </CardContent>
             </Card>
