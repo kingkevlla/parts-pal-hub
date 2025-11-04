@@ -3,7 +3,8 @@ import ProfileSettings from "@/components/settings/ProfileSettings";
 import SystemSettings from "@/components/settings/SystemSettings";
 import UserManagementSettings from "@/components/settings/UserManagementSettings";
 import SecuritySettings from "@/components/settings/SecuritySettings";
-import { User, Settings as SettingsIcon, Users, Shield } from "lucide-react";
+import ReceiptSettings from "@/components/settings/ReceiptSettings";
+import { User, Settings as SettingsIcon, Users, Shield, Receipt } from "lucide-react";
 
 export default function Settings() {
   return (
@@ -16,7 +17,7 @@ export default function Settings() {
       </div>
 
       <Tabs defaultValue="profile" className="space-y-6">
-        <TabsList className="grid w-full grid-cols-4">
+        <TabsList className="grid w-full grid-cols-5">
           <TabsTrigger value="profile" className="flex items-center gap-2">
             <User className="h-4 w-4" />
             Profile
@@ -24,6 +25,10 @@ export default function Settings() {
           <TabsTrigger value="system" className="flex items-center gap-2">
             <SettingsIcon className="h-4 w-4" />
             System
+          </TabsTrigger>
+          <TabsTrigger value="receipt" className="flex items-center gap-2">
+            <Receipt className="h-4 w-4" />
+            Receipt
           </TabsTrigger>
           <TabsTrigger value="users" className="flex items-center gap-2">
             <Users className="h-4 w-4" />
@@ -41,6 +46,10 @@ export default function Settings() {
 
         <TabsContent value="system">
           <SystemSettings />
+        </TabsContent>
+
+        <TabsContent value="receipt">
+          <ReceiptSettings />
         </TabsContent>
 
         <TabsContent value="users">

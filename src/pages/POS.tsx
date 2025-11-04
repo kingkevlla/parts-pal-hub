@@ -12,6 +12,7 @@ import { Plus, Trash2, ShoppingCart, CreditCard, DollarSign } from 'lucide-react
 import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from '@/contexts/AuthContext';
 import { useCurrency } from '@/hooks/useCurrency';
+import Receipt from '@/components/pos/Receipt';
 
 interface CartItem {
   productId: string;
@@ -43,6 +44,8 @@ export default function POS() {
   const [loans, setLoans] = useState<any[]>([]);
   const [selectedLoan, setSelectedLoan] = useState('');
   const [paymentAmount, setPaymentAmount] = useState(0);
+  const [showReceipt, setShowReceipt] = useState(false);
+  const [lastSaleData, setLastSaleData] = useState<any>(null);
   const { toast } = useToast();
   const { user } = useAuth();
   const { formatAmount } = useCurrency();
@@ -225,6 +228,25 @@ export default function POS() {
         });
 
         if (transactionError) throw transactionError;
+
+        // Prepare receipt data
+        const receiptData = {
+          id: sale.id,
+          items: cart.map(item => ({
+            name: item.name,
+            quantity: item.quantity,
+            unit_price: item.price,
+            subtotal: item.subtotal,
+          })),
+          total_amount: getTotalAmount(),
+          payment_method: paymentMethod,
+          customer_name: customerName,
+          customer_phone: customerPhone,
+          sale_date: new Date().toISOString(),
+        };
+
+        setLastSaleData(receiptData);
+        setShowReceipt(true);
 
         toast({ title: 'Success', description: 'Sale completed successfully' });
       }
@@ -675,6 +697,15 @@ export default function POS() {
           </div>
         </TabsContent>
       </Tabs>
+
+      {/* Receipt Dialog */}
+      {lastSaleData && (
+        <Receipt
+          isOpen={showReceipt}
+          onClose={() => setShowReceipt(false)}
+          saleData={lastSaleData}
+        />
+      )}
     </div>
   );
 }
