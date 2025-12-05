@@ -16,9 +16,9 @@ import { useAuth } from '@/contexts/AuthContext';
 interface Ticket {
   id: string;
   title: string;
-  description: string;
-  priority: string;
-  status: string;
+  description: string | null;
+  priority: string | null;
+  status: string | null;
   created_at: string;
 }
 
@@ -35,7 +35,7 @@ export default function Support() {
 
   const fetchTickets = async () => {
     const { data, error } = await supabase
-      .from('support_tickets')
+      .from('support_tickets' as any)
       .select('*')
       .order('created_at', { ascending: false });
 
@@ -46,7 +46,7 @@ export default function Support() {
         variant: 'destructive',
       });
     } else {
-      setTickets(data || []);
+      setTickets((data as unknown as Ticket[]) || []);
     }
   };
 
@@ -62,7 +62,7 @@ export default function Support() {
       created_by: user?.id,
     };
 
-    const { error } = await supabase.from('support_tickets').insert(ticketData);
+    const { error } = await supabase.from('support_tickets' as any).insert(ticketData);
 
     if (error) {
       toast({
@@ -82,24 +82,24 @@ export default function Support() {
     setIsLoading(false);
   };
 
-  const getPriorityBadge = (priority: string) => {
-    const colors = {
+  const getPriorityBadge = (priority: string | null) => {
+    const colors: Record<string, string> = {
       low: 'bg-blue-500',
       medium: 'bg-yellow-500',
       high: 'bg-orange-500',
       urgent: 'bg-red-500',
     };
-    return <Badge className={colors[priority as keyof typeof colors]}>{priority}</Badge>;
+    return <Badge className={colors[priority || 'medium'] || 'bg-gray-500'}>{priority || 'medium'}</Badge>;
   };
 
-  const getStatusBadge = (status: string) => {
-    const colors = {
+  const getStatusBadge = (status: string | null) => {
+    const colors: Record<string, string> = {
       open: 'bg-blue-500',
       in_progress: 'bg-yellow-500',
       resolved: 'bg-green-500',
       closed: 'bg-gray-500',
     };
-    return <Badge className={colors[status as keyof typeof colors]}>{status.replace('_', ' ')}</Badge>;
+    return <Badge className={colors[status || 'open'] || 'bg-gray-500'}>{(status || 'open').replace('_', ' ')}</Badge>;
   };
 
   return (

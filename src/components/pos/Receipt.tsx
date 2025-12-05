@@ -69,13 +69,15 @@ export default function Receipt({ isOpen, onClose, saleData }: ReceiptProps) {
       const { data, error } = await supabase
         .from("system_settings")
         .select("*")
-        .eq("category", "receipt");
+        .like("key", "receipt_%");
 
       if (error) throw error;
 
       const settingsMap: any = { ...receiptSettings };
       data?.forEach((setting: any) => {
-        settingsMap[setting.key] = setting.value;
+        if (setting.value !== null) {
+          settingsMap[setting.key] = typeof setting.value === 'object' ? setting.value : setting.value;
+        }
       });
       setReceiptSettings(settingsMap);
     } catch (error) {
