@@ -1,10 +1,12 @@
 import { useState, useEffect } from 'react';
-import { ShoppingCart, Home, RefreshCw, Clock, User } from 'lucide-react';
+import { ShoppingCart, Home, RefreshCw, Clock } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { useNavigate } from 'react-router-dom';
 import { useCurrency } from '@/hooks/useCurrency';
 import { supabase } from '@/integrations/supabase/client';
+import { usePermissions } from '@/hooks/usePermissions';
+import { useToast } from '@/hooks/use-toast';
 
 interface POSHeaderProps {
   cartItemCount: number;
@@ -15,6 +17,8 @@ interface POSHeaderProps {
 export default function POSHeader({ cartItemCount, cartTotal, onRefresh }: POSHeaderProps) {
   const navigate = useNavigate();
   const { formatAmount } = useCurrency();
+  const { hasPermission } = usePermissions();
+  const { toast } = useToast();
   const [companyName, setCompanyName] = useState('POS System');
   const [currentTime, setCurrentTime] = useState(new Date());
 
@@ -51,6 +55,18 @@ export default function POSHeader({ cartItemCount, cartTotal, onRefresh }: POSHe
       month: 'short', 
       day: 'numeric'
     });
+  };
+
+  const handleHomeClick = () => {
+    if (hasPermission('dashboard')) {
+      navigate('/dashboard');
+    } else {
+      toast({
+        title: 'Access Denied',
+        description: 'You do not have permission to access the admin panel.',
+        variant: 'destructive',
+      });
+    }
   };
 
   return (
@@ -104,7 +120,7 @@ export default function POSHeader({ cartItemCount, cartTotal, onRefresh }: POSHe
             variant="ghost" 
             size="sm"
             className="text-primary-foreground hover:bg-primary-foreground/10"
-            onClick={() => navigate('/dashboard')}
+            onClick={handleHomeClick}
           >
             <Home className="h-4 w-4" />
           </Button>
