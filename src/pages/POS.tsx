@@ -1,16 +1,17 @@
 import { useState, useEffect } from 'react';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { useToast } from '@/hooks/use-toast';
-import { Plus, Trash2, ShoppingCart } from 'lucide-react';
+import { Trash2 } from 'lucide-react';
 import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from '@/contexts/AuthContext';
 import { useCurrency } from '@/hooks/useCurrency';
 import Receipt from '@/components/pos/Receipt';
+import POSHeader from '@/components/pos/POSHeader';
 
 interface CartItem {
   productId: string;
@@ -199,14 +200,22 @@ export default function POS() {
     (p.sku?.toLowerCase().includes(searchQuery.toLowerCase()) ?? false)
   );
 
-  return (
-    <div className="h-full p-4">
-      <div className="flex items-center gap-2 mb-4">
-        <ShoppingCart className="h-6 w-6" />
-        <h1 className="text-2xl font-bold">Point of Sale</h1>
-      </div>
+  const handleRefresh = () => {
+    fetchProducts();
+    fetchWarehouses();
+    toast({ title: 'Refreshed', description: 'Products and warehouses updated' });
+  };
 
-      <div className="grid gap-6 md:grid-cols-2">
+  return (
+    <div className="h-screen flex flex-col bg-muted/30">
+      <POSHeader 
+        cartItemCount={cart.length}
+        cartTotal={getTotalAmount()}
+        onRefresh={handleRefresh}
+      />
+
+      <div className="flex-1 overflow-auto p-4">
+        <div className="grid gap-4 md:grid-cols-2 max-w-6xl mx-auto">
         <Card>
           <CardContent className="pt-6 space-y-4">
             <div className="space-y-2">
@@ -337,6 +346,7 @@ export default function POS() {
       {lastSaleData && (
         <Receipt isOpen={showReceipt} onClose={() => setShowReceipt(false)} saleData={lastSaleData} />
       )}
+      </div>
     </div>
   );
 }
