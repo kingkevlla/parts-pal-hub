@@ -6,6 +6,7 @@ import { Label } from '@/components/ui/label';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Badge } from '@/components/ui/badge';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { useToast } from '@/hooks/use-toast';
 import { Plus, DollarSign } from 'lucide-react';
 import { supabase } from '@/integrations/supabase/client';
@@ -13,20 +14,27 @@ import { useAuth } from '@/contexts/AuthContext';
 import { useCurrency } from '@/hooks/useCurrency';
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog';
 
+interface Customer {
+  id: string;
+  name: string;
+  phone: string | null;
+}
+
 interface Loan {
   id: string;
-  borrower_name: string;
-  borrower_phone: string;
+  customer_id: string | null;
   amount: number;
-  amount_paid: number;
-  interest_rate: number;
+  paid_amount: number;
   status: string;
-  due_date: string;
+  due_date: string | null;
+  notes: string | null;
   created_at: string;
+  customer?: Customer | null;
 }
 
 export default function Loans() {
   const [loans, setLoans] = useState<Loan[]>([]);
+  const [customers, setCustomers] = useState<Customer[]>([]);
   const [isOpen, setIsOpen] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [editingLoan, setEditingLoan] = useState<Loan | null>(null);
@@ -37,12 +45,13 @@ export default function Loans() {
 
   useEffect(() => {
     fetchLoans();
+    fetchCustomers();
   }, []);
 
   const fetchLoans = async () => {
     const { data, error } = await supabase
       .from('loans')
-      .select('*')
+      .select('*, customers(id, name, phone)')
       .order('created_at', { ascending: false });
 
     if (error) {
@@ -52,8 +61,28 @@ export default function Loans() {
         variant: 'destructive',
       });
     } else {
-      setLoans(data || []);
+      const formattedLoans: Loan[] = (data || []).map(loan => ({
+        id: loan.id,
+        customer_id: loan.customer_id,
+        amount: loan.amount,
+        paid_amount: loan.paid_amount || 0,
+        status: loan.status || 'pending',
+        due_date: loan.due_date,
+        notes: loan.notes,
+        created_at: loan.created_at || '',
+        customer: loan.customers as Customer | null
+      }));
+      setLoans(formattedLoans);
     }
+  };
+
+  const fetchCustomers = async () => {
+    const { data, error } = await supabase
+      .from('customers')
+      .select('id, name, phone')
+      .order('name');
+
+    if (!error) setCustomers(data || []);
   };
 
   const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
@@ -61,16 +90,13 @@ export default function Loans() {
     setIsLoading(true);
 
     const formData = new FormData(e.currentTarget);
-    const borrowerName = formData.get('borrower_name') as string;
-    const borrowerPhone = formData.get('borrower_phone') as string;
     
     const loanData = {
-      borrower_name: borrowerName,
-      borrower_phone: borrowerPhone,
+      customer_id: formData.get('customer_id') as string || null,
       amount: parseFloat(formData.get('amount') as string),
-      interest_rate: parseFloat(formData.get('interest_rate') as string) || 0,
-      due_date: formData.get('due_date') as string,
-      user_id: user?.id,
+      due_date: formData.get('due_date') as string || null,
+      notes: formData.get('notes') as string || null,
+      created_by: user?.id,
     };
 
     let error;
@@ -78,20 +104,6 @@ export default function Loans() {
       const result = await supabase.from('loans').update(loanData).eq('id', editingLoan.id);
       error = result.error;
     } else {
-      // Auto-register borrower as customer if creating new loan
-      const { data: existingCustomer } = await supabase
-        .from('customers')
-        .select('id')
-        .or(`name.eq.${borrowerName},phone.eq.${borrowerPhone}`)
-        .maybeSingle();
-
-      if (!existingCustomer) {
-        await supabase.from('customers').insert({
-          name: borrowerName,
-          phone: borrowerPhone,
-        });
-      }
-
       const result = await supabase.from('loans').insert(loanData);
       error = result.error;
     }
@@ -99,7 +111,7 @@ export default function Loans() {
     if (error) {
       toast({ title: 'Error', description: error.message, variant: 'destructive' });
     } else {
-      toast({ title: 'Success', description: `Loan ${editingLoan ? 'updated' : 'created'} successfully${!editingLoan ? ' and borrower registered as customer' : ''}` });
+      toast({ title: 'Success', description: `Loan ${editingLoan ? 'updated' : 'created'} successfully` });
       setIsOpen(false);
       setEditingLoan(null);
       fetchLoans();
@@ -123,16 +135,17 @@ export default function Loans() {
   };
 
   const getStatusBadge = (status: string) => {
-    const colors = {
+    const colors: Record<string, string> = {
       active: 'bg-blue-500',
+      pending: 'bg-yellow-500',
       paid: 'bg-green-500',
       defaulted: 'bg-red-500',
     };
-    return <Badge className={colors[status as keyof typeof colors]}>{status}</Badge>;
+    return <Badge className={colors[status] || 'bg-gray-500'}>{status}</Badge>;
   };
 
   const getBalance = (loan: Loan) => {
-    return loan.amount + (loan.amount * loan.interest_rate / 100) - loan.amount_paid;
+    return loan.amount - loan.paid_amount;
   };
 
   return (
@@ -155,24 +168,31 @@ export default function Loans() {
             </DialogHeader>
             <form onSubmit={handleSubmit} className="space-y-4">
               <div className="space-y-2">
-                <Label htmlFor="borrower_name">Borrower Name</Label>
-                <Input id="borrower_name" name="borrower_name" required defaultValue={editingLoan?.borrower_name} />
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="borrower_phone">Phone Number</Label>
-                <Input id="borrower_phone" name="borrower_phone" defaultValue={editingLoan?.borrower_phone} />
+                <Label htmlFor="customer_id">Customer</Label>
+                <Select name="customer_id" defaultValue={editingLoan?.customer_id || undefined}>
+                  <SelectTrigger>
+                    <SelectValue placeholder="Select a customer" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {customers.map((customer) => (
+                      <SelectItem key={customer.id} value={customer.id}>
+                        {customer.name} {customer.phone && `(${customer.phone})`}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
               </div>
               <div className="space-y-2">
                 <Label htmlFor="amount">Loan Amount</Label>
                 <Input id="amount" name="amount" type="number" step="0.01" required defaultValue={editingLoan?.amount} />
               </div>
               <div className="space-y-2">
-                <Label htmlFor="interest_rate">Interest Rate (%)</Label>
-                <Input id="interest_rate" name="interest_rate" type="number" step="0.01" defaultValue={editingLoan?.interest_rate || 0} />
+                <Label htmlFor="due_date">Due Date</Label>
+                <Input id="due_date" name="due_date" type="date" defaultValue={editingLoan?.due_date || ''} />
               </div>
               <div className="space-y-2">
-                <Label htmlFor="due_date">Due Date</Label>
-                <Input id="due_date" name="due_date" type="date" required defaultValue={editingLoan?.due_date} />
+                <Label htmlFor="notes">Notes</Label>
+                <Input id="notes" name="notes" defaultValue={editingLoan?.notes || ''} />
               </div>
               <Button type="submit" className="w-full" disabled={isLoading}>
                 {isLoading ? 'Saving...' : editingLoan ? 'Update Loan' : 'Create Loan'}
@@ -198,7 +218,7 @@ export default function Loans() {
             <DollarSign className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold">{loans.filter(l => l.status === 'active').length}</div>
+            <div className="text-2xl font-bold">{loans.filter(l => l.status === 'active' || l.status === 'pending').length}</div>
           </CardContent>
         </Card>
         <Card>
@@ -208,7 +228,7 @@ export default function Loans() {
           </CardHeader>
           <CardContent>
             <div className="text-2xl font-bold">
-              {formatAmount(loans.filter(l => l.status === 'active').reduce((sum, l) => sum + getBalance(l), 0))}
+              {formatAmount(loans.filter(l => l.status !== 'paid').reduce((sum, l) => sum + getBalance(l), 0))}
             </div>
           </CardContent>
         </Card>
@@ -222,7 +242,7 @@ export default function Loans() {
           <Table>
             <TableHeader>
               <TableRow>
-                <TableHead>Borrower</TableHead>
+                <TableHead>Customer</TableHead>
                 <TableHead>Phone</TableHead>
                 <TableHead>Amount</TableHead>
                 <TableHead>Paid</TableHead>
@@ -233,23 +253,31 @@ export default function Loans() {
               </TableRow>
             </TableHeader>
             <TableBody>
-              {loans.map((loan) => (
-                <TableRow key={loan.id}>
-                  <TableCell className="font-medium">{loan.borrower_name}</TableCell>
-                  <TableCell>{loan.borrower_phone}</TableCell>
-                  <TableCell>{formatAmount(loan.amount)}</TableCell>
-                  <TableCell>{formatAmount(loan.amount_paid)}</TableCell>
-                  <TableCell>{formatAmount(getBalance(loan))}</TableCell>
-                  <TableCell>{new Date(loan.due_date).toLocaleDateString()}</TableCell>
-                  <TableCell>{getStatusBadge(loan.status)}</TableCell>
-                  <TableCell>
-                    <div className="flex gap-2">
-                      <Button variant="ghost" size="sm" onClick={() => { setEditingLoan(loan); setIsOpen(true); }}>Edit</Button>
-                      <Button variant="ghost" size="sm" onClick={() => setDeleteLoan(loan)}>Delete</Button>
-                    </div>
+              {loans.length === 0 ? (
+                <TableRow>
+                  <TableCell colSpan={8} className="text-center text-muted-foreground">
+                    No loans found
                   </TableCell>
                 </TableRow>
-              ))}
+              ) : (
+                loans.map((loan) => (
+                  <TableRow key={loan.id}>
+                    <TableCell className="font-medium">{loan.customer?.name || 'Unknown'}</TableCell>
+                    <TableCell>{loan.customer?.phone || 'N/A'}</TableCell>
+                    <TableCell>{formatAmount(loan.amount)}</TableCell>
+                    <TableCell>{formatAmount(loan.paid_amount)}</TableCell>
+                    <TableCell>{formatAmount(getBalance(loan))}</TableCell>
+                    <TableCell>{loan.due_date ? new Date(loan.due_date).toLocaleDateString() : 'N/A'}</TableCell>
+                    <TableCell>{getStatusBadge(loan.status)}</TableCell>
+                    <TableCell>
+                      <div className="flex gap-2">
+                        <Button variant="ghost" size="sm" onClick={() => { setEditingLoan(loan); setIsOpen(true); }}>Edit</Button>
+                        <Button variant="ghost" size="sm" onClick={() => setDeleteLoan(loan)}>Delete</Button>
+                      </div>
+                    </TableCell>
+                  </TableRow>
+                ))
+              )}
             </TableBody>
           </Table>
         </CardContent>
@@ -260,7 +288,7 @@ export default function Loans() {
           <AlertDialogHeader>
             <AlertDialogTitle>Are you sure?</AlertDialogTitle>
             <AlertDialogDescription>
-              This will permanently delete the loan for {deleteLoan?.borrower_name}. This action cannot be undone.
+              This will permanently delete the loan for {deleteLoan?.customer?.name || 'this customer'}. This action cannot be undone.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>

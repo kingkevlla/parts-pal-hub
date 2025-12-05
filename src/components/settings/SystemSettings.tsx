@@ -7,13 +7,6 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
 
-interface SystemSetting {
-  key: string;
-  value: any;
-  category: string;
-  description: string;
-}
-
 export default function SystemSettings() {
   const { toast } = useToast();
   const [loading, setLoading] = useState(false);
@@ -27,13 +20,12 @@ export default function SystemSettings() {
     try {
       const { data, error } = await supabase
         .from("system_settings")
-        .select("*")
-        .in("category", ["general", "sales", "inventory"]);
+        .select("key, value");
 
       if (error) throw error;
 
       const settingsMap: Record<string, any> = {};
-      data?.forEach((setting: SystemSetting) => {
+      data?.forEach((setting) => {
         settingsMap[setting.key] = setting.value;
       });
       setSettings(settingsMap);
@@ -42,34 +34,27 @@ export default function SystemSettings() {
     }
   };
 
-  const handleUpdateSetting = async (key: string, value: any) => {
-    try {
-      setLoading(true);
-      const { error } = await supabase
-        .from("system_settings")
-        .update({ value: value })
-        .eq("key", key);
-
-      if (error) throw error;
-
-      setSettings({ ...settings, [key]: value });
-      toast({ title: "Setting updated successfully" });
-    } catch (error: any) {
-      toast({ title: "Error updating setting", description: error.message, variant: "destructive" });
-    } finally {
-      setLoading(false);
-    }
-  };
-
   const handleSaveAll = async () => {
     try {
       setLoading(true);
       
       for (const [key, value] of Object.entries(settings)) {
-        await supabase
+        const { data: existing } = await supabase
           .from("system_settings")
-          .update({ value: value })
-          .eq("key", key);
+          .select("id")
+          .eq("key", key)
+          .maybeSingle();
+
+        if (existing) {
+          await supabase
+            .from("system_settings")
+            .update({ value: value })
+            .eq("key", key);
+        } else {
+          await supabase
+            .from("system_settings")
+            .insert({ key, value });
+        }
       }
 
       toast({ title: "All settings saved successfully" });

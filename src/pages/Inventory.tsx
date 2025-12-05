@@ -16,13 +16,12 @@ import { useCurrency } from "@/hooks/useCurrency";
 interface Product {
   id: string;
   name: string;
-  sku: string;
+  sku: string | null;
   description: string | null;
-  cost_price: number;
+  purchase_price: number;
   selling_price: number;
-  reorder_level: number;
+  min_stock_level: number;
   category_id: string | null;
-  unit: string;
   categories: { name: string } | null;
 }
 
@@ -71,10 +70,18 @@ export default function Inventory() {
           .select('quantity')
           .eq('product_id', product.id);
 
-        const total_stock = inventoryData?.reduce((sum, inv) => sum + inv.quantity, 0) || 0;
+        const total_stock = inventoryData?.reduce((sum, inv) => sum + (inv.quantity || 0), 0) || 0;
 
         return {
-          ...product,
+          id: product.id,
+          name: product.name,
+          sku: product.sku,
+          description: product.description,
+          purchase_price: product.purchase_price || 0,
+          selling_price: product.selling_price || 0,
+          min_stock_level: product.min_stock_level || 0,
+          category_id: product.category_id,
+          categories: product.categories,
           total_stock,
         };
       })
@@ -101,11 +108,10 @@ export default function Inventory() {
       name: formData.get('name') as string,
       sku: formData.get('sku') as string,
       description: formData.get('description') as string,
-      cost_price: parseFloat(formData.get('cost_price') as string),
-      selling_price: parseFloat(formData.get('selling_price') as string),
-      reorder_level: parseInt(formData.get('reorder_level') as string),
+      purchase_price: parseFloat(formData.get('purchase_price') as string) || 0,
+      selling_price: parseFloat(formData.get('selling_price') as string) || 0,
+      min_stock_level: parseInt(formData.get('min_stock_level') as string) || 0,
       category_id: formData.get('category_id') as string || null,
-      unit: formData.get('unit') as string || 'piece',
     };
 
     if (editingProduct) {
@@ -159,7 +165,7 @@ export default function Inventory() {
   const filteredProducts = products.filter(product => {
     const matchesSearch = 
       product.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      product.sku.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      (product.sku?.toLowerCase().includes(searchTerm.toLowerCase()) ?? false) ||
       (product.description?.toLowerCase().includes(searchTerm.toLowerCase()) ?? false);
     
     const matchesCategory = selectedCategory === "all" || product.category_id === selectedCategory;
@@ -196,7 +202,7 @@ export default function Inventory() {
                 </div>
                 <div className="space-y-2">
                   <Label htmlFor="sku">SKU</Label>
-                  <Input id="sku" name="sku" required defaultValue={editingProduct?.sku} />
+                  <Input id="sku" name="sku" defaultValue={editingProduct?.sku || ''} />
                 </div>
               </div>
               <div className="space-y-2">
@@ -205,51 +211,32 @@ export default function Inventory() {
               </div>
               <div className="grid grid-cols-3 gap-4">
                 <div className="space-y-2">
-                  <Label htmlFor="cost_price">Cost Price</Label>
-                  <Input id="cost_price" name="cost_price" type="number" step="0.01" min="0" required defaultValue={editingProduct?.cost_price} />
+                  <Label htmlFor="purchase_price">Purchase Price</Label>
+                  <Input id="purchase_price" name="purchase_price" type="number" step="0.01" min="0" required defaultValue={editingProduct?.purchase_price} />
                 </div>
                 <div className="space-y-2">
                   <Label htmlFor="selling_price">Selling Price</Label>
                   <Input id="selling_price" name="selling_price" type="number" step="0.01" min="0" required defaultValue={editingProduct?.selling_price} />
                 </div>
                 <div className="space-y-2">
-                  <Label htmlFor="unit">Unit</Label>
-                  <Select name="unit" defaultValue={editingProduct?.unit || 'piece'}>
-                    <SelectTrigger>
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="piece">Piece</SelectItem>
-                      <SelectItem value="box">Box</SelectItem>
-                      <SelectItem value="set">Set</SelectItem>
-                      <SelectItem value="pair">Pair</SelectItem>
-                      <SelectItem value="kg">Kilogram</SelectItem>
-                      <SelectItem value="liter">Liter</SelectItem>
-                      <SelectItem value="meter">Meter</SelectItem>
-                    </SelectContent>
-                  </Select>
+                  <Label htmlFor="min_stock_level">Min Stock Level</Label>
+                  <Input id="min_stock_level" name="min_stock_level" type="number" min="0" required defaultValue={editingProduct?.min_stock_level || 10} />
                 </div>
               </div>
-              <div className="grid grid-cols-2 gap-4">
-                <div className="space-y-2">
-                  <Label htmlFor="category_id">Category</Label>
-                  <Select name="category_id" defaultValue={editingProduct?.category_id || undefined}>
-                    <SelectTrigger>
-                      <SelectValue placeholder="Select category" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {categories.map((category) => (
-                        <SelectItem key={category.id} value={category.id}>
-                          {category.name}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-                <div className="space-y-2">
-                  <Label htmlFor="reorder_level">Reorder Level</Label>
-                  <Input id="reorder_level" name="reorder_level" type="number" min="0" required defaultValue={editingProduct?.reorder_level || 10} />
-                </div>
+              <div className="space-y-2">
+                <Label htmlFor="category_id">Category</Label>
+                <Select name="category_id" defaultValue={editingProduct?.category_id || undefined}>
+                  <SelectTrigger>
+                    <SelectValue placeholder="Select category" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {categories.map((category) => (
+                      <SelectItem key={category.id} value={category.id}>
+                        {category.name}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
               </div>
               <Button type="submit" className="w-full" disabled={isLoading}>
                 {isLoading ? 'Saving...' : editingProduct ? 'Update Product' : 'Create Product'}
@@ -295,7 +282,7 @@ export default function Inventory() {
                   <th className="py-3 px-4 text-left text-sm font-medium text-muted-foreground">Product Name</th>
                   <th className="py-3 px-4 text-left text-sm font-medium text-muted-foreground">Category</th>
                   <th className="py-3 px-4 text-left text-sm font-medium text-muted-foreground">Stock</th>
-                  <th className="py-3 px-4 text-left text-sm font-medium text-muted-foreground">Cost Price</th>
+                  <th className="py-3 px-4 text-left text-sm font-medium text-muted-foreground">Purchase Price</th>
                   <th className="py-3 px-4 text-left text-sm font-medium text-muted-foreground">Selling Price</th>
                   <th className="py-3 px-4 text-left text-sm font-medium text-muted-foreground">Actions</th>
                 </tr>
@@ -303,7 +290,7 @@ export default function Inventory() {
               <tbody>
                 {filteredProducts.map((product) => (
                   <tr key={product.id} className="border-b transition-colors hover:bg-muted/50">
-                    <td className="py-3 px-4 font-mono text-sm">{product.sku}</td>
+                    <td className="py-3 px-4 font-mono text-sm">{product.sku || 'N/A'}</td>
                     <td className="py-3 px-4 font-medium">{product.name}</td>
                     <td className="py-3 px-4">
                       {product.categories ? (
@@ -313,11 +300,11 @@ export default function Inventory() {
                       )}
                     </td>
                     <td className="py-3 px-4">
-                      <span className={product.total_stock < product.reorder_level ? "font-medium text-red-600" : "text-green-600"}>
+                      <span className={product.total_stock < product.min_stock_level ? "font-medium text-red-600" : "text-green-600"}>
                         {product.total_stock}
                       </span>
                     </td>
-                    <td className="py-3 px-4">{formatAmount(product.cost_price)}</td>
+                    <td className="py-3 px-4">{formatAmount(product.purchase_price)}</td>
                     <td className="py-3 px-4 font-medium">{formatAmount(product.selling_price)}</td>
                     <td className="py-3 px-4">
                       <div className="flex gap-2">

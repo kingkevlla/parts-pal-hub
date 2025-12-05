@@ -2,7 +2,6 @@ import { useState, useEffect } from "react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Plus, Mail, Phone, Edit, Trash2 } from "lucide-react";
-import { Badge } from "@/components/ui/badge";
 import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
 import AddEditSupplierDialog from "@/components/suppliers/AddEditSupplierDialog";
@@ -11,11 +10,10 @@ import DeleteSupplierDialog from "@/components/suppliers/DeleteSupplierDialog";
 interface Supplier {
   id: string;
   name: string;
-  contact_person: string;
-  email: string;
-  phone: string;
-  address: string;
-  status: string;
+  contact_person: string | null;
+  email: string | null;
+  phone: string | null;
+  address: string | null;
 }
 
 export default function Suppliers() {
@@ -31,7 +29,7 @@ export default function Suppliers() {
     try {
       const { data, error } = await supabase
         .from("suppliers")
-        .select("*")
+        .select("id, name, contact_person, email, phone, address")
         .order("created_at", { ascending: false });
 
       if (error) throw error;
@@ -87,12 +85,7 @@ export default function Suppliers() {
           {suppliers.map((supplier) => (
             <Card key={supplier.id} className="transition-all hover:shadow-lg">
               <CardHeader>
-                <div className="flex items-start justify-between">
-                  <CardTitle className="text-lg">{supplier.name}</CardTitle>
-                  <Badge variant={supplier.status === "active" ? "default" : "secondary"}>
-                    {supplier.status}
-                  </Badge>
-                </div>
+                <CardTitle className="text-lg">{supplier.name}</CardTitle>
               </CardHeader>
               <CardContent className="space-y-3">
                 <div>
@@ -133,7 +126,7 @@ export default function Suppliers() {
       <AddEditSupplierDialog
         open={editDialogOpen}
         onOpenChange={setEditDialogOpen}
-        supplier={selectedSupplier}
+        supplier={selectedSupplier as any}
         onSuccess={fetchSuppliers}
       />
 

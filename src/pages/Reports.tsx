@@ -8,7 +8,7 @@ import { useCurrency } from "@/hooks/useCurrency";
 import { useSystemSettings } from "@/hooks/useSystemSettings";
 
 interface ReportData {
-  totalSales: number;
+  totalTransactions: number;
   totalProducts: number;
   totalCustomers: number;
   totalSuppliers: number;
@@ -19,7 +19,7 @@ interface ReportData {
 
 export default function Reports() {
   const [reportData, setReportData] = useState<ReportData>({
-    totalSales: 0,
+    totalTransactions: 0,
     totalProducts: 0,
     totalCustomers: 0,
     totalSuppliers: 0,
@@ -38,9 +38,9 @@ export default function Reports() {
 
   const fetchReportData = async () => {
     try {
-      // Fetch sales count
-      const { count: salesCount } = await supabase
-        .from("sales")
+      // Fetch transactions count
+      const { count: transactionsCount } = await supabase
+        .from("transactions")
         .select("*", { count: "exact", head: true });
 
       // Fetch products count
@@ -58,19 +58,17 @@ export default function Reports() {
         .from("suppliers")
         .select("*", { count: "exact", head: true });
 
-      // Fetch transactions for income/expenses
-      const { data: transactions } = await supabase.from("transactions").select("type, amount");
+      // Fetch transactions for income calculation
+      const { data: transactions } = await supabase
+        .from("transactions")
+        .select("total_amount, status");
 
       const income = transactions
-        ?.filter((t) => t.type === "income" || t.type === "sale")
-        .reduce((sum, t) => sum + Number(t.amount), 0) || 0;
-
-      const expenses = transactions
-        ?.filter((t) => t.type === "expense")
-        .reduce((sum, t) => sum + Number(t.amount), 0) || 0;
+        ?.filter((t) => t.status === "completed")
+        .reduce((sum, t) => sum + Number(t.total_amount || 0), 0) || 0;
 
       // Fetch low stock items
-      const { data: products } = await supabase.from("products").select("id, reorder_level");
+      const { data: products } = await supabase.from("products").select("id, min_stock_level");
 
       let lowStockCount = 0;
       if (products) {
@@ -80,20 +78,20 @@ export default function Reports() {
             .select("quantity")
             .eq("product_id", product.id);
 
-          const totalQuantity = inventory?.reduce((sum, inv) => sum + inv.quantity, 0) || 0;
-          if (totalQuantity <= (product.reorder_level || settings.low_stock_threshold)) {
+          const totalQuantity = inventory?.reduce((sum, inv) => sum + (inv.quantity || 0), 0) || 0;
+          if (totalQuantity <= (product.min_stock_level || settings.low_stock_threshold)) {
             lowStockCount++;
           }
         }
       }
 
       setReportData({
-        totalSales: salesCount || 0,
+        totalTransactions: transactionsCount || 0,
         totalProducts: productsCount || 0,
         totalCustomers: customersCount || 0,
         totalSuppliers: suppliersCount || 0,
         totalIncome: income,
-        totalExpenses: expenses,
+        totalExpenses: 0,
         lowStockItems: lowStockCount,
       });
     } catch (error: any) {
@@ -122,8 +120,8 @@ export default function Reports() {
         <>
           <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
             <StatCard
-              title="Total Sales"
-              value={reportData.totalSales}
+              title="Total Transactions"
+              value={reportData.totalTransactions}
               icon={DollarSign}
             />
             <StatCard
@@ -146,7 +144,7 @@ export default function Reports() {
           <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
             <Card>
               <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                <CardTitle className="text-sm font-medium">Total Income</CardTitle>
+                <CardTitle className="text-sm font-medium">Total Revenue</CardTitle>
                 <TrendingUp className="h-4 w-4 text-green-500" />
               </CardHeader>
               <CardContent>

@@ -17,30 +17,26 @@ import { Package, TrendingUp, TrendingDown, Warehouse } from "lucide-react";
 interface Product {
   id: string;
   name: string;
-  sku: string;
-  cost_price: number;
+  sku: string | null;
+  purchase_price: number;
   selling_price: number;
-  description?: string;
+  description?: string | null;
 }
 
 interface StockMovement {
   id: string;
-  type: string;
+  movement_type: string;
   quantity: number;
-  reference: string;
-  notes?: string;
-  created_at: string;
-  warehouses: {
-    name: string;
-  };
+  reference_number: string | null;
+  notes?: string | null;
+  created_at: string | null;
+  warehouse_name: string;
 }
 
 interface InventoryItem {
   quantity: number;
-  warehouses: {
-    name: string;
-    location?: string;
-  };
+  warehouse_name: string;
+  warehouse_location?: string | null;
 }
 
 interface ProductDetailsDialogProps {
@@ -70,23 +66,41 @@ export function ProductDetailsDialog({ productId, open, onOpenChange }: ProductD
       // Fetch product info
       const { data: productData, error: productError } = await supabase
         .from('products')
-        .select('*')
+        .select('id, name, sku, purchase_price, selling_price, description')
         .eq('id', productId)
         .single();
 
       if (productError) throw productError;
-      setProduct(productData);
+      
+      setProduct({
+        id: productData.id,
+        name: productData.name,
+        sku: productData.sku,
+        purchase_price: productData.purchase_price || 0,
+        selling_price: productData.selling_price || 0,
+        description: productData.description
+      });
 
       // Fetch stock movements
       const { data: movementsData, error: movementsError } = await supabase
         .from('stock_movements')
-        .select('*, warehouses(name)')
+        .select('id, movement_type, quantity, reference_number, notes, created_at, warehouses(name)')
         .eq('product_id', productId)
         .order('created_at', { ascending: false })
         .limit(20);
 
       if (movementsError) throw movementsError;
-      setStockMovements(movementsData || []);
+      
+      const movements: StockMovement[] = (movementsData || []).map(m => ({
+        id: m.id,
+        movement_type: m.movement_type,
+        quantity: m.quantity,
+        reference_number: m.reference_number,
+        notes: m.notes,
+        created_at: m.created_at,
+        warehouse_name: (m.warehouses as any)?.name || 'Unknown'
+      }));
+      setStockMovements(movements);
 
       // Fetch inventory
       const { data: inventoryData, error: inventoryError } = await supabase
@@ -95,7 +109,13 @@ export function ProductDetailsDialog({ productId, open, onOpenChange }: ProductD
         .eq('product_id', productId);
 
       if (inventoryError) throw inventoryError;
-      setInventory(inventoryData || []);
+      
+      const inv: InventoryItem[] = (inventoryData || []).map(i => ({
+        quantity: i.quantity || 0,
+        warehouse_name: (i.warehouses as any)?.name || 'Unknown',
+        warehouse_location: (i.warehouses as any)?.location
+      }));
+      setInventory(inv);
 
     } catch (error) {
       console.error('Error fetching product details:', error);
@@ -110,13 +130,13 @@ export function ProductDetailsDialog({ productId, open, onOpenChange }: ProductD
 
   const getTotalStockIn = () => {
     return stockMovements
-      .filter(m => m.type === 'in')
+      .filter(m => m.movement_type === 'in')
       .reduce((sum, m) => sum + m.quantity, 0);
   };
 
   const getTotalStockOut = () => {
     return stockMovements
-      .filter(m => m.type === 'out' || m.type === 'sale')
+      .filter(m => m.movement_type === 'out' || m.movement_type === 'sale')
       .reduce((sum, m) => sum + m.quantity, 0);
   };
 
@@ -146,7 +166,7 @@ export function ProductDetailsDialog({ productId, open, onOpenChange }: ProductD
                   <div className="grid grid-cols-2 gap-4">
                     <div>
                       <h3 className="font-semibold text-lg">{product.name}</h3>
-                      <p className="text-sm text-muted-foreground">SKU: {product.sku}</p>
+                      <p className="text-sm text-muted-foreground">SKU: {product.sku || 'N/A'}</p>
                       {product.description && (
                         <p className="text-sm text-muted-foreground mt-2">{product.description}</p>
                       )}
@@ -154,19 +174,21 @@ export function ProductDetailsDialog({ productId, open, onOpenChange }: ProductD
                     <div className="space-y-2">
                       <div className="flex justify-between">
                         <span className="text-sm text-muted-foreground">Purchase Price:</span>
-                        <span className="font-semibold text-destructive">{formatAmount(Number(product.cost_price))}</span>
+                        <span className="font-semibold text-destructive">{formatAmount(product.purchase_price)}</span>
                       </div>
                       <div className="flex justify-between">
                         <span className="text-sm text-muted-foreground">Selling Price:</span>
-                        <span className="font-semibold text-success">{formatAmount(Number(product.selling_price))}</span>
+                        <span className="font-semibold text-success">{formatAmount(product.selling_price)}</span>
                       </div>
                       <div className="flex justify-between border-t pt-2">
                         <span className="text-sm text-muted-foreground">Profit Margin:</span>
                         <span className="font-semibold">
-                          {formatAmount(Number(product.selling_price) - Number(product.cost_price))}
-                          <span className="text-xs ml-1">
-                            ({((Number(product.selling_price) - Number(product.cost_price)) / Number(product.cost_price) * 100).toFixed(1)}%)
-                          </span>
+                          {formatAmount(product.selling_price - product.purchase_price)}
+                          {product.purchase_price > 0 && (
+                            <span className="text-xs ml-1">
+                              ({((product.selling_price - product.purchase_price) / product.purchase_price * 100).toFixed(1)}%)
+                            </span>
+                          )}
                         </span>
                       </div>
                     </div>
@@ -227,9 +249,9 @@ export function ProductDetailsDialog({ productId, open, onOpenChange }: ProductD
                       {inventory.map((item, idx) => (
                         <div key={idx} className="flex justify-between items-center p-2 rounded bg-muted/50">
                           <div>
-                            <p className="font-medium">{item.warehouses.name}</p>
-                            {item.warehouses.location && (
-                              <p className="text-xs text-muted-foreground">{item.warehouses.location}</p>
+                            <p className="font-medium">{item.warehouse_name}</p>
+                            {item.warehouse_location && (
+                              <p className="text-xs text-muted-foreground">{item.warehouse_location}</p>
                             )}
                           </div>
                           <Badge variant={item.quantity < 10 ? "destructive" : "default"}>
@@ -264,28 +286,28 @@ export function ProductDetailsDialog({ productId, open, onOpenChange }: ProductD
                         {stockMovements.map((movement) => (
                           <TableRow key={movement.id}>
                             <TableCell className="text-sm">
-                              {new Date(movement.created_at).toLocaleDateString()}
+                              {movement.created_at ? new Date(movement.created_at).toLocaleDateString() : 'N/A'}
                             </TableCell>
                             <TableCell>
                               <Badge
-                                variant={movement.type === 'in' ? 'default' : 'secondary'}
+                                variant={movement.movement_type === 'in' ? 'default' : 'secondary'}
                                 className={
-                                  movement.type === 'in'
+                                  movement.movement_type === 'in'
                                     ? 'bg-success text-success-foreground'
                                     : 'bg-destructive text-destructive-foreground'
                                 }
                               >
-                                {movement.type === 'in' ? (
+                                {movement.movement_type === 'in' ? (
                                   <TrendingUp className="h-3 w-3 mr-1" />
                                 ) : (
                                   <TrendingDown className="h-3 w-3 mr-1" />
                                 )}
-                                {movement.type.toUpperCase()}
+                                {movement.movement_type.toUpperCase()}
                               </Badge>
                             </TableCell>
-                            <TableCell className="text-sm">{movement.warehouses.name}</TableCell>
+                            <TableCell className="text-sm">{movement.warehouse_name}</TableCell>
                             <TableCell className="font-medium">{movement.quantity}</TableCell>
-                            <TableCell className="text-sm">{movement.reference || '-'}</TableCell>
+                            <TableCell className="text-sm">{movement.reference_number || '-'}</TableCell>
                             <TableCell className="text-sm text-muted-foreground">
                               {movement.notes || '-'}
                             </TableCell>
