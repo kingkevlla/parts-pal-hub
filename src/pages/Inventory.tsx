@@ -1,7 +1,7 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Plus, Pencil, Trash2, AlertTriangle } from "lucide-react";
+import { Plus, Pencil, Trash2, AlertTriangle, Upload, X, RefreshCw } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { Label } from "@/components/ui/label";
@@ -32,6 +32,7 @@ interface Product {
   category_id: string | null;
   categories: { name: string } | null;
   expiry_date: string | null;
+  image_url: string | null;
 }
 
 interface ProductWithStock extends Product {
@@ -43,6 +44,16 @@ interface Category {
   name: string;
 }
 
+// Generate random SKU with 6 alphanumeric characters
+const generateSKU = () => {
+  const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
+  let sku = '';
+  for (let i = 0; i < 6; i++) {
+    sku += chars.charAt(Math.floor(Math.random() * chars.length));
+  }
+  return sku;
+};
+
 export default function Inventory() {
   const [products, setProducts] = useState<ProductWithStock[]>([]);
   const [categories, setCategories] = useState<Category[]>([]);
@@ -52,6 +63,11 @@ export default function Inventory() {
   const [isLoading, setIsLoading] = useState(false);
   const [editingProduct, setEditingProduct] = useState<ProductWithStock | null>(null);
   const [deleteProduct, setDeleteProduct] = useState<ProductWithStock | null>(null);
+  const [formSku, setFormSku] = useState('');
+  const [imageFile, setImageFile] = useState<File | null>(null);
+  const [imagePreview, setImagePreview] = useState<string | null>(null);
+  const [isUploadingImage, setIsUploadingImage] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
   const { toast } = useToast();
   const { formatAmount } = useCurrency();
 
@@ -117,6 +133,7 @@ export default function Inventory() {
           category_id: product.category_id,
           categories: product.categories,
           expiry_date: product.expiry_date,
+          image_url: product.image_url,
           total_stock,
         };
       })
@@ -134,54 +151,121 @@ export default function Inventory() {
     if (!error) setCategories(data || []);
   };
 
+  const handleImageChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) {
+      if (file.size > 5 * 1024 * 1024) {
+        toast({ title: 'Error', description: 'Image must be less than 5MB', variant: 'destructive' });
+        return;
+      }
+      setImageFile(file);
+      setImagePreview(URL.createObjectURL(file));
+    }
+  };
+
+  const clearImage = () => {
+    setImageFile(null);
+    setImagePreview(null);
+    if (fileInputRef.current) fileInputRef.current.value = '';
+  };
+
+  const uploadImage = async (file: File): Promise<string | null> => {
+    const fileExt = file.name.split('.').pop();
+    const fileName = `${Date.now()}-${Math.random().toString(36).substring(7)}.${fileExt}`;
+    const filePath = `products/${fileName}`;
+
+    const { error } = await supabase.storage
+      .from('product-images')
+      .upload(filePath, file);
+
+    if (error) {
+      console.error('Upload error:', error);
+      return null;
+    }
+
+    const { data: { publicUrl } } = supabase.storage
+      .from('product-images')
+      .getPublicUrl(filePath);
+
+    return publicUrl;
+  };
+
   const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
     setIsLoading(true);
 
-    const formData = new FormData(e.currentTarget);
-    const productData = {
-      name: formData.get('name') as string,
-      sku: formData.get('sku') as string || null,
-      barcode: formData.get('barcode') as string || null,
-      description: formData.get('description') as string || null,
-      purchase_price: parseFloat(formData.get('purchase_price') as string) || 0,
-      selling_price: parseFloat(formData.get('selling_price') as string) || 0,
-      min_stock_level: parseInt(formData.get('min_stock_level') as string) || 0,
-      category_id: formData.get('category_id') as string || null,
-      expiry_date: formData.get('expiry_date') as string || null,
-    };
+    try {
+      const formData = new FormData(e.currentTarget);
+      let imageUrl = editingProduct?.image_url || null;
 
-    if (editingProduct) {
-      const { error } = await supabase
-        .from('products')
-        .update(productData)
-        .eq('id', editingProduct.id);
-
-      if (error) {
-        toast({ title: 'Error', description: error.message, variant: 'destructive' });
-      } else {
-        toast({ title: 'Success', description: 'Product updated successfully' });
-        setIsOpen(false);
-        setEditingProduct(null);
-        fetchProducts();
+      // Upload image if selected
+      if (imageFile) {
+        setIsUploadingImage(true);
+        const uploadedUrl = await uploadImage(imageFile);
+        if (uploadedUrl) {
+          imageUrl = uploadedUrl;
+        }
+        setIsUploadingImage(false);
       }
-    } else {
-      const { error } = await supabase.from('products').insert(productData);
 
-      if (error) {
-        toast({ title: 'Error', description: error.message, variant: 'destructive' });
+      const productData = {
+        name: formData.get('name') as string,
+        sku: formSku || null,
+        barcode: formData.get('barcode') as string || null,
+        description: formData.get('description') as string || null,
+        purchase_price: parseFloat(formData.get('purchase_price') as string) || 0,
+        selling_price: parseFloat(formData.get('selling_price') as string) || 0,
+        min_stock_level: parseInt(formData.get('min_stock_level') as string) || 0,
+        category_id: formData.get('category_id') as string || null,
+        expiry_date: formData.get('expiry_date') as string || null,
+        image_url: imageUrl,
+      };
+
+      if (editingProduct) {
+        const { error } = await supabase
+          .from('products')
+          .update(productData)
+          .eq('id', editingProduct.id);
+
+        if (error) {
+          toast({ title: 'Error', description: error.message, variant: 'destructive' });
+        } else {
+          toast({ title: 'Success', description: 'Product updated successfully' });
+          setIsOpen(false);
+          setEditingProduct(null);
+          resetForm();
+          fetchProducts();
+        }
       } else {
-        toast({ title: 'Success', description: 'Product created successfully' });
-        setIsOpen(false);
-        fetchProducts();
+        const { error } = await supabase.from('products').insert(productData);
+
+        if (error) {
+          toast({ title: 'Error', description: error.message, variant: 'destructive' });
+        } else {
+          toast({ title: 'Success', description: 'Product created successfully' });
+          setIsOpen(false);
+          resetForm();
+          fetchProducts();
+        }
       }
+    } catch (error: any) {
+      toast({ title: 'Error', description: error.message, variant: 'destructive' });
     }
 
     setIsLoading(false);
   };
 
+  const resetForm = () => {
+    setFormSku('');
+    setImageFile(null);
+    setImagePreview(null);
+    if (fileInputRef.current) fileInputRef.current.value = '';
+  };
+
   const handleEdit = (product: ProductWithStock) => {
     setEditingProduct(product);
+    setFormSku(product.sku || '');
+    setImagePreview(product.image_url);
     setIsOpen(true);
   };
 
@@ -218,8 +302,11 @@ export default function Inventory() {
       purchase_price: product.purchase_price || 0,
       selling_price: product.selling_price || 0,
       min_stock_level: product.min_stock_level || 0,
+      image_url: product.image_url || null,
       total_stock: 0,
     });
+    setFormSku(product.sku || '');
+    setImagePreview(product.image_url || null);
     setIsOpen(true);
   };
 
@@ -247,7 +334,13 @@ export default function Inventory() {
           <ExportImportDialog onImportComplete={fetchProducts} categories={categories} />
           <Dialog open={isOpen} onOpenChange={(open) => {
             setIsOpen(open);
-            if (!open) setEditingProduct(null);
+            if (!open) {
+              setEditingProduct(null);
+              resetForm();
+            } else if (!editingProduct) {
+              // Auto-generate SKU for new products
+              setFormSku(generateSKU());
+            }
           }}>
             <DialogTrigger asChild>
               <Button className="gap-2">
@@ -266,10 +359,75 @@ export default function Inventory() {
                     <Input id="name" name="name" required defaultValue={editingProduct?.name} />
                   </div>
                   <div className="space-y-2">
-                    <Label htmlFor="sku">SKU</Label>
-                    <Input id="sku" name="sku" defaultValue={editingProduct?.sku || ''} placeholder="Optional" />
+                    <Label htmlFor="sku">SKU (Auto-generated)</Label>
+                    <div className="flex gap-2">
+                      <Input 
+                        id="sku" 
+                        value={formSku} 
+                        onChange={(e) => setFormSku(e.target.value)}
+                        placeholder="Auto-generated" 
+                        className="flex-1"
+                      />
+                      <Button 
+                        type="button" 
+                        variant="outline" 
+                        size="icon"
+                        onClick={() => setFormSku(generateSKU())}
+                        title="Generate new SKU"
+                      >
+                        <RefreshCw className="h-4 w-4" />
+                      </Button>
+                    </div>
                   </div>
                 </div>
+
+                {/* Image Upload */}
+                <div className="space-y-2">
+                  <Label>Product Image (Optional)</Label>
+                  <div className="flex items-start gap-4">
+                    <div className="flex-1">
+                      <input
+                        ref={fileInputRef}
+                        type="file"
+                        accept="image/*"
+                        onChange={handleImageChange}
+                        className="hidden"
+                        id="product-image"
+                      />
+                      <Button
+                        type="button"
+                        variant="outline"
+                        className="w-full gap-2"
+                        onClick={() => fileInputRef.current?.click()}
+                      >
+                        <Upload className="h-4 w-4" />
+                        {imageFile ? 'Change Image' : 'Upload Image'}
+                      </Button>
+                      {imageFile && (
+                        <p className="text-xs text-muted-foreground mt-1 truncate">{imageFile.name}</p>
+                      )}
+                    </div>
+                    {(imagePreview || editingProduct?.image_url) && (
+                      <div className="relative">
+                        <img 
+                          src={imagePreview || editingProduct?.image_url || ''} 
+                          alt="Preview" 
+                          className="h-20 w-20 object-cover rounded-lg border"
+                        />
+                        <Button
+                          type="button"
+                          variant="destructive"
+                          size="icon"
+                          className="absolute -top-2 -right-2 h-6 w-6"
+                          onClick={clearImage}
+                        >
+                          <X className="h-3 w-3" />
+                        </Button>
+                      </div>
+                    )}
+                  </div>
+                </div>
+
                 <div className="grid grid-cols-2 gap-4">
                   <div className="space-y-2">
                     <Label htmlFor="barcode">Barcode (Optional)</Label>
@@ -313,8 +471,8 @@ export default function Inventory() {
                     </SelectContent>
                   </Select>
                 </div>
-                <Button type="submit" className="w-full" disabled={isLoading}>
-                  {isLoading ? 'Saving...' : editingProduct ? 'Update Product' : 'Create Product'}
+                <Button type="submit" className="w-full" disabled={isLoading || isUploadingImage}>
+                  {isLoading ? (isUploadingImage ? 'Uploading Image...' : 'Saving...') : editingProduct ? 'Update Product' : 'Create Product'}
                 </Button>
               </form>
             </DialogContent>
