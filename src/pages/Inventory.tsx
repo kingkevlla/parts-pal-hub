@@ -1,17 +1,20 @@
 import { useState, useEffect } from "react";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Plus, Search, Pencil, Trash2 } from "lucide-react";
+import { Plus, Pencil, Trash2 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { Label } from "@/components/ui/label";
+import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
+import { Checkbox } from "@/components/ui/checkbox";
 import { useToast } from "@/hooks/use-toast";
 import { supabase } from "@/integrations/supabase/client";
 import { useCurrency } from "@/hooks/useCurrency";
+import { useDataTable } from "@/hooks/useDataTable";
+import { DataTableSearch, DataTablePagination, DataTableBulkActions, SelectAllCheckbox } from "@/components/ui/data-table-controls";
 
 interface Product {
   id: string;
@@ -37,7 +40,6 @@ interface Category {
 export default function Inventory() {
   const [products, setProducts] = useState<ProductWithStock[]>([]);
   const [categories, setCategories] = useState<Category[]>([]);
-  const [searchTerm, setSearchTerm] = useState("");
   const [selectedCategory, setSelectedCategory] = useState<string>("all");
   const [isOpen, setIsOpen] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
@@ -45,6 +47,16 @@ export default function Inventory() {
   const [deleteProduct, setDeleteProduct] = useState<ProductWithStock | null>(null);
   const { toast } = useToast();
   const { formatAmount } = useCurrency();
+
+  const categoryFilteredProducts = selectedCategory === "all" 
+    ? products 
+    : products.filter(p => p.category_id === selectedCategory);
+
+  const table = useDataTable({
+    data: categoryFilteredProducts,
+    searchFields: ['name', 'sku', 'description'] as (keyof ProductWithStock)[],
+    defaultPageSize: 100,
+  });
 
   useEffect(() => {
     fetchProducts();
@@ -62,7 +74,6 @@ export default function Inventory() {
       return;
     }
 
-    // Fetch inventory for each product
     const productsWithStock = await Promise.all(
       (productsData || []).map(async (product) => {
         const { data: inventoryData } = await supabase
@@ -162,16 +173,18 @@ export default function Inventory() {
     setDeleteProduct(null);
   };
 
-  const filteredProducts = products.filter(product => {
-    const matchesSearch = 
-      product.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      (product.sku?.toLowerCase().includes(searchTerm.toLowerCase()) ?? false) ||
-      (product.description?.toLowerCase().includes(searchTerm.toLowerCase()) ?? false);
-    
-    const matchesCategory = selectedCategory === "all" || product.category_id === selectedCategory;
-    
-    return matchesSearch && matchesCategory;
-  });
+  const handleBulkDelete = async () => {
+    const ids = Array.from(table.selectedIds);
+    const { error } = await supabase.from('products').delete().in('id', ids);
+
+    if (error) {
+      toast({ title: 'Error', description: error.message, variant: 'destructive' });
+    } else {
+      toast({ title: 'Success', description: `${ids.length} products deleted successfully` });
+      table.clearSelection();
+      fetchProducts();
+    }
+  };
 
   return (
     <div className="space-y-6 p-6">
@@ -248,16 +261,12 @@ export default function Inventory() {
 
       <Card>
         <CardHeader>
-          <div className="flex items-center gap-4">
-            <div className="relative flex-1">
-              <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-              <Input
-                placeholder="Search by name, SKU, or description..."
-                value={searchTerm}
-                onChange={(e) => setSearchTerm(e.target.value)}
-                className="pl-10"
-              />
-            </div>
+          <div className="flex flex-col gap-4 sm:flex-row sm:items-center">
+            <DataTableSearch
+              value={table.searchTerm}
+              onChange={table.setSearchTerm}
+              placeholder="Search by name, SKU, or description..."
+            />
             <Select value={selectedCategory} onValueChange={setSelectedCategory}>
               <SelectTrigger className="w-[200px]">
                 <SelectValue placeholder="Filter by category" />
@@ -272,12 +281,24 @@ export default function Inventory() {
               </SelectContent>
             </Select>
           </div>
+          <DataTableBulkActions
+            selectedCount={table.selectedIds.size}
+            onDelete={handleBulkDelete}
+            itemName="products"
+          />
         </CardHeader>
         <CardContent>
           <div className="overflow-x-auto">
             <table className="w-full">
               <thead>
                 <tr className="border-b">
+                  <th className="py-3 px-4 text-left">
+                    <SelectAllCheckbox
+                      isAllSelected={table.isAllSelected}
+                      isSomeSelected={table.isSomeSelected}
+                      onToggle={table.selectAll}
+                    />
+                  </th>
                   <th className="py-3 px-4 text-left text-sm font-medium text-muted-foreground">SKU</th>
                   <th className="py-3 px-4 text-left text-sm font-medium text-muted-foreground">Product Name</th>
                   <th className="py-3 px-4 text-left text-sm font-medium text-muted-foreground">Category</th>
@@ -288,8 +309,14 @@ export default function Inventory() {
                 </tr>
               </thead>
               <tbody>
-                {filteredProducts.map((product) => (
+                {table.paginatedData.map((product) => (
                   <tr key={product.id} className="border-b transition-colors hover:bg-muted/50">
+                    <td className="py-3 px-4">
+                      <Checkbox
+                        checked={table.selectedIds.has(product.id)}
+                        onCheckedChange={() => table.toggleSelect(product.id)}
+                      />
+                    </td>
                     <td className="py-3 px-4 font-mono text-sm">{product.sku || 'N/A'}</td>
                     <td className="py-3 px-4 font-medium">{product.name}</td>
                     <td className="py-3 px-4">
@@ -321,6 +348,14 @@ export default function Inventory() {
               </tbody>
             </table>
           </div>
+          <DataTablePagination
+            currentPage={table.currentPage}
+            totalPages={table.totalPages}
+            pageSize={table.pageSize}
+            totalItems={table.totalItems}
+            onPageChange={table.goToPage}
+            onPageSizeChange={table.changePageSize}
+          />
         </CardContent>
       </Card>
 
