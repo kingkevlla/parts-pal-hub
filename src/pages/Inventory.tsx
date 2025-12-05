@@ -1,7 +1,7 @@
 import { useState, useEffect } from "react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Plus, Pencil, Trash2 } from "lucide-react";
+import { Plus, Pencil, Trash2, AlertTriangle } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { Label } from "@/components/ui/label";
@@ -10,22 +10,28 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Textarea } from "@/components/ui/textarea";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
 import { Checkbox } from "@/components/ui/checkbox";
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { useToast } from "@/hooks/use-toast";
 import { supabase } from "@/integrations/supabase/client";
 import { useCurrency } from "@/hooks/useCurrency";
 import { useDataTable } from "@/hooks/useDataTable";
 import { DataTableSearch, DataTablePagination, DataTableBulkActions, SelectAllCheckbox } from "@/components/ui/data-table-controls";
+import { ExportImportDialog } from "@/components/inventory/ExportImportDialog";
+import { BarcodeScanner } from "@/components/inventory/BarcodeScanner";
+import { ExpiryAlert, getExpiryStatus } from "@/components/inventory/ExpiryAlert";
 
 interface Product {
   id: string;
   name: string;
   sku: string | null;
+  barcode: string | null;
   description: string | null;
   purchase_price: number;
   selling_price: number;
   min_stock_level: number;
   category_id: string | null;
   categories: { name: string } | null;
+  expiry_date: string | null;
 }
 
 interface ProductWithStock extends Product {
@@ -41,6 +47,7 @@ export default function Inventory() {
   const [products, setProducts] = useState<ProductWithStock[]>([]);
   const [categories, setCategories] = useState<Category[]>([]);
   const [selectedCategory, setSelectedCategory] = useState<string>("all");
+  const [expiryFilter, setExpiryFilter] = useState<string>("all");
   const [isOpen, setIsOpen] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [editingProduct, setEditingProduct] = useState<ProductWithStock | null>(null);
@@ -48,15 +55,30 @@ export default function Inventory() {
   const { toast } = useToast();
   const { formatAmount } = useCurrency();
 
-  const categoryFilteredProducts = selectedCategory === "all" 
+  // Filter products
+  const filteredByCategory = selectedCategory === "all" 
     ? products 
     : products.filter(p => p.category_id === selectedCategory);
 
+  const filteredByExpiry = expiryFilter === "all"
+    ? filteredByCategory
+    : filteredByCategory.filter(p => {
+        const status = getExpiryStatus(p.expiry_date);
+        if (expiryFilter === "expired") return status === 'expired';
+        if (expiryFilter === "expiring") return status === 'warning';
+        if (expiryFilter === "has_expiry") return p.expiry_date !== null;
+        return true;
+      });
+
   const table = useDataTable({
-    data: categoryFilteredProducts,
-    searchFields: ['name', 'sku', 'description'] as (keyof ProductWithStock)[],
+    data: filteredByExpiry,
+    searchFields: ['name', 'sku', 'barcode', 'description'] as (keyof ProductWithStock)[],
     defaultPageSize: 100,
   });
+
+  // Expiry alerts count
+  const expiredCount = products.filter(p => getExpiryStatus(p.expiry_date) === 'expired').length;
+  const expiringCount = products.filter(p => getExpiryStatus(p.expiry_date) === 'warning').length;
 
   useEffect(() => {
     fetchProducts();
@@ -87,12 +109,14 @@ export default function Inventory() {
           id: product.id,
           name: product.name,
           sku: product.sku,
+          barcode: product.barcode,
           description: product.description,
           purchase_price: product.purchase_price || 0,
           selling_price: product.selling_price || 0,
           min_stock_level: product.min_stock_level || 0,
           category_id: product.category_id,
           categories: product.categories,
+          expiry_date: product.expiry_date,
           total_stock,
         };
       })
@@ -117,12 +141,14 @@ export default function Inventory() {
     const formData = new FormData(e.currentTarget);
     const productData = {
       name: formData.get('name') as string,
-      sku: formData.get('sku') as string,
-      description: formData.get('description') as string,
+      sku: formData.get('sku') as string || null,
+      barcode: formData.get('barcode') as string || null,
+      description: formData.get('description') as string || null,
       purchase_price: parseFloat(formData.get('purchase_price') as string) || 0,
       selling_price: parseFloat(formData.get('selling_price') as string) || 0,
       min_stock_level: parseInt(formData.get('min_stock_level') as string) || 0,
       category_id: formData.get('category_id') as string || null,
+      expiry_date: formData.get('expiry_date') as string || null,
     };
 
     if (editingProduct) {
@@ -186,77 +212,114 @@ export default function Inventory() {
     }
   };
 
+  const handleBarcodeFound = (product: any) => {
+    setEditingProduct({
+      ...product,
+      purchase_price: product.purchase_price || 0,
+      selling_price: product.selling_price || 0,
+      min_stock_level: product.min_stock_level || 0,
+      total_stock: 0,
+    });
+    setIsOpen(true);
+  };
+
   return (
     <div className="space-y-6 p-6">
-      <div className="flex items-center justify-between">
+      {/* Expiry Alerts */}
+      {(expiredCount > 0 || expiringCount > 0) && (
+        <Alert variant={expiredCount > 0 ? "destructive" : "default"} className="border-orange-500">
+          <AlertTriangle className="h-4 w-4" />
+          <AlertTitle>Expiry Alerts</AlertTitle>
+          <AlertDescription>
+            {expiredCount > 0 && <span className="font-medium text-red-600">{expiredCount} product(s) expired. </span>}
+            {expiringCount > 0 && <span className="font-medium text-orange-600">{expiringCount} product(s) expiring soon.</span>}
+          </AlertDescription>
+        </Alert>
+      )}
+
+      <div className="flex items-center justify-between flex-wrap gap-4">
         <div>
           <h1 className="text-3xl font-bold">Inventory</h1>
           <p className="text-muted-foreground">Manage all products in stock</p>
         </div>
-        <Dialog open={isOpen} onOpenChange={(open) => {
-          setIsOpen(open);
-          if (!open) setEditingProduct(null);
-        }}>
-          <DialogTrigger asChild>
-            <Button className="gap-2">
-              <Plus className="h-4 w-4" />
-              Add New Product
-            </Button>
-          </DialogTrigger>
-          <DialogContent className="max-w-2xl">
-            <DialogHeader>
-              <DialogTitle>{editingProduct ? 'Edit Product' : 'Add New Product'}</DialogTitle>
-            </DialogHeader>
-            <form onSubmit={handleSubmit} className="space-y-4">
-              <div className="grid grid-cols-2 gap-4">
-                <div className="space-y-2">
-                  <Label htmlFor="name">Product Name</Label>
-                  <Input id="name" name="name" required defaultValue={editingProduct?.name} />
-                </div>
-                <div className="space-y-2">
-                  <Label htmlFor="sku">SKU</Label>
-                  <Input id="sku" name="sku" defaultValue={editingProduct?.sku || ''} />
-                </div>
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="description">Description</Label>
-                <Textarea id="description" name="description" defaultValue={editingProduct?.description || ''} />
-              </div>
-              <div className="grid grid-cols-3 gap-4">
-                <div className="space-y-2">
-                  <Label htmlFor="purchase_price">Purchase Price</Label>
-                  <Input id="purchase_price" name="purchase_price" type="number" step="0.01" min="0" required defaultValue={editingProduct?.purchase_price} />
-                </div>
-                <div className="space-y-2">
-                  <Label htmlFor="selling_price">Selling Price</Label>
-                  <Input id="selling_price" name="selling_price" type="number" step="0.01" min="0" required defaultValue={editingProduct?.selling_price} />
-                </div>
-                <div className="space-y-2">
-                  <Label htmlFor="min_stock_level">Min Stock Level</Label>
-                  <Input id="min_stock_level" name="min_stock_level" type="number" min="0" required defaultValue={editingProduct?.min_stock_level || 10} />
-                </div>
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="category_id">Category</Label>
-                <Select name="category_id" defaultValue={editingProduct?.category_id || undefined}>
-                  <SelectTrigger>
-                    <SelectValue placeholder="Select category" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {categories.map((category) => (
-                      <SelectItem key={category.id} value={category.id}>
-                        {category.name}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-              <Button type="submit" className="w-full" disabled={isLoading}>
-                {isLoading ? 'Saving...' : editingProduct ? 'Update Product' : 'Create Product'}
+        <div className="flex gap-2 flex-wrap">
+          <BarcodeScanner onProductFound={handleBarcodeFound} />
+          <ExportImportDialog onImportComplete={fetchProducts} categories={categories} />
+          <Dialog open={isOpen} onOpenChange={(open) => {
+            setIsOpen(open);
+            if (!open) setEditingProduct(null);
+          }}>
+            <DialogTrigger asChild>
+              <Button className="gap-2">
+                <Plus className="h-4 w-4" />
+                Add Product
               </Button>
-            </form>
-          </DialogContent>
-        </Dialog>
+            </DialogTrigger>
+            <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
+              <DialogHeader>
+                <DialogTitle>{editingProduct ? 'Edit Product' : 'Add New Product'}</DialogTitle>
+              </DialogHeader>
+              <form onSubmit={handleSubmit} className="space-y-4">
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="space-y-2">
+                    <Label htmlFor="name">Product Name *</Label>
+                    <Input id="name" name="name" required defaultValue={editingProduct?.name} />
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="sku">SKU</Label>
+                    <Input id="sku" name="sku" defaultValue={editingProduct?.sku || ''} placeholder="Optional" />
+                  </div>
+                </div>
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="space-y-2">
+                    <Label htmlFor="barcode">Barcode (Optional)</Label>
+                    <Input id="barcode" name="barcode" defaultValue={editingProduct?.barcode || ''} placeholder="Scan or enter barcode" />
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="expiry_date">Expiry Date (Optional)</Label>
+                    <Input id="expiry_date" name="expiry_date" type="date" defaultValue={editingProduct?.expiry_date || ''} />
+                  </div>
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="description">Description</Label>
+                  <Textarea id="description" name="description" defaultValue={editingProduct?.description || ''} />
+                </div>
+                <div className="grid grid-cols-3 gap-4">
+                  <div className="space-y-2">
+                    <Label htmlFor="purchase_price">Purchase Price</Label>
+                    <Input id="purchase_price" name="purchase_price" type="number" step="0.01" min="0" required defaultValue={editingProduct?.purchase_price} />
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="selling_price">Selling Price</Label>
+                    <Input id="selling_price" name="selling_price" type="number" step="0.01" min="0" required defaultValue={editingProduct?.selling_price} />
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="min_stock_level">Min Stock</Label>
+                    <Input id="min_stock_level" name="min_stock_level" type="number" min="0" required defaultValue={editingProduct?.min_stock_level || 10} />
+                  </div>
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="category_id">Category</Label>
+                  <Select name="category_id" defaultValue={editingProduct?.category_id || undefined}>
+                    <SelectTrigger>
+                      <SelectValue placeholder="Select category" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {categories.map((category) => (
+                        <SelectItem key={category.id} value={category.id}>
+                          {category.name}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+                <Button type="submit" className="w-full" disabled={isLoading}>
+                  {isLoading ? 'Saving...' : editingProduct ? 'Update Product' : 'Create Product'}
+                </Button>
+              </form>
+            </DialogContent>
+          </Dialog>
+        </div>
       </div>
 
       <Card>
@@ -265,11 +328,11 @@ export default function Inventory() {
             <DataTableSearch
               value={table.searchTerm}
               onChange={table.setSearchTerm}
-              placeholder="Search by name, SKU, or description..."
+              placeholder="Search by name, SKU, barcode..."
             />
             <Select value={selectedCategory} onValueChange={setSelectedCategory}>
-              <SelectTrigger className="w-[200px]">
-                <SelectValue placeholder="Filter by category" />
+              <SelectTrigger className="w-[180px]">
+                <SelectValue placeholder="Category" />
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value="all">All Categories</SelectItem>
@@ -278,6 +341,17 @@ export default function Inventory() {
                     {category.name}
                   </SelectItem>
                 ))}
+              </SelectContent>
+            </Select>
+            <Select value={expiryFilter} onValueChange={setExpiryFilter}>
+              <SelectTrigger className="w-[180px]">
+                <SelectValue placeholder="Expiry Status" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All Products</SelectItem>
+                <SelectItem value="expired">Expired Only</SelectItem>
+                <SelectItem value="expiring">Expiring Soon</SelectItem>
+                <SelectItem value="has_expiry">Has Expiry Date</SelectItem>
               </SelectContent>
             </Select>
           </div>
@@ -292,49 +366,56 @@ export default function Inventory() {
             <table className="w-full">
               <thead>
                 <tr className="border-b">
-                  <th className="py-3 px-4 text-left">
+                  <th className="py-3 px-2 text-left">
                     <SelectAllCheckbox
                       isAllSelected={table.isAllSelected}
                       isSomeSelected={table.isSomeSelected}
                       onToggle={table.selectAll}
                     />
                   </th>
-                  <th className="py-3 px-4 text-left text-sm font-medium text-muted-foreground">SKU</th>
-                  <th className="py-3 px-4 text-left text-sm font-medium text-muted-foreground">Product Name</th>
-                  <th className="py-3 px-4 text-left text-sm font-medium text-muted-foreground">Category</th>
-                  <th className="py-3 px-4 text-left text-sm font-medium text-muted-foreground">Stock</th>
-                  <th className="py-3 px-4 text-left text-sm font-medium text-muted-foreground">Purchase Price</th>
-                  <th className="py-3 px-4 text-left text-sm font-medium text-muted-foreground">Selling Price</th>
-                  <th className="py-3 px-4 text-left text-sm font-medium text-muted-foreground">Actions</th>
+                  <th className="py-3 px-2 text-left text-sm font-medium text-muted-foreground">SKU</th>
+                  <th className="py-3 px-2 text-left text-sm font-medium text-muted-foreground">Product</th>
+                  <th className="py-3 px-2 text-left text-sm font-medium text-muted-foreground">Category</th>
+                  <th className="py-3 px-2 text-left text-sm font-medium text-muted-foreground">Stock</th>
+                  <th className="py-3 px-2 text-left text-sm font-medium text-muted-foreground">Price</th>
+                  <th className="py-3 px-2 text-left text-sm font-medium text-muted-foreground">Expiry</th>
+                  <th className="py-3 px-2 text-left text-sm font-medium text-muted-foreground">Actions</th>
                 </tr>
               </thead>
               <tbody>
                 {table.paginatedData.map((product) => (
                   <tr key={product.id} className="border-b transition-colors hover:bg-muted/50">
-                    <td className="py-3 px-4">
+                    <td className="py-3 px-2">
                       <Checkbox
                         checked={table.selectedIds.has(product.id)}
                         onCheckedChange={() => table.toggleSelect(product.id)}
                       />
                     </td>
-                    <td className="py-3 px-4 font-mono text-sm">{product.sku || 'N/A'}</td>
-                    <td className="py-3 px-4 font-medium">{product.name}</td>
-                    <td className="py-3 px-4">
+                    <td className="py-3 px-2 font-mono text-sm">{product.sku || '-'}</td>
+                    <td className="py-3 px-2">
+                      <div>
+                        <span className="font-medium">{product.name}</span>
+                        {product.barcode && (
+                          <span className="block text-xs text-muted-foreground">#{product.barcode}</span>
+                        )}
+                      </div>
+                    </td>
+                    <td className="py-3 px-2">
                       {product.categories ? (
                         <Badge variant="secondary">{product.categories.name}</Badge>
-                      ) : (
-                        <span className="text-sm text-muted-foreground">N/A</span>
-                      )}
+                      ) : '-'}
                     </td>
-                    <td className="py-3 px-4">
+                    <td className="py-3 px-2">
                       <span className={product.total_stock < product.min_stock_level ? "font-medium text-red-600" : "text-green-600"}>
                         {product.total_stock}
                       </span>
                     </td>
-                    <td className="py-3 px-4">{formatAmount(product.purchase_price)}</td>
-                    <td className="py-3 px-4 font-medium">{formatAmount(product.selling_price)}</td>
-                    <td className="py-3 px-4">
-                      <div className="flex gap-2">
+                    <td className="py-3 px-2 font-medium">{formatAmount(product.selling_price)}</td>
+                    <td className="py-3 px-2">
+                      <ExpiryAlert expiryDate={product.expiry_date} />
+                    </td>
+                    <td className="py-3 px-2">
+                      <div className="flex gap-1">
                         <Button variant="ghost" size="sm" onClick={() => handleEdit(product)}>
                           <Pencil className="h-4 w-4" />
                         </Button>
