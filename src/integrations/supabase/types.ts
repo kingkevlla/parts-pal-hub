@@ -14,6 +14,47 @@ export type Database = {
   }
   public: {
     Tables: {
+      budgets: {
+        Row: {
+          amount: number
+          category_id: string | null
+          created_at: string | null
+          id: string
+          name: string
+          notes: string | null
+          period_end: string
+          period_start: string
+        }
+        Insert: {
+          amount?: number
+          category_id?: string | null
+          created_at?: string | null
+          id?: string
+          name: string
+          notes?: string | null
+          period_end: string
+          period_start: string
+        }
+        Update: {
+          amount?: number
+          category_id?: string | null
+          created_at?: string | null
+          id?: string
+          name?: string
+          notes?: string | null
+          period_end?: string
+          period_start?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "budgets_category_id_fkey"
+            columns: ["category_id"]
+            isOneToOne: false
+            referencedRelation: "expense_categories"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       categories: {
         Row: {
           created_at: string | null
@@ -67,6 +108,403 @@ export type Database = {
           updated_at?: string | null
         }
         Relationships: []
+      }
+      employee_attendance: {
+        Row: {
+          check_in: string | null
+          check_out: string | null
+          created_at: string | null
+          date: string
+          employee_id: string
+          id: string
+          notes: string | null
+          status: string | null
+        }
+        Insert: {
+          check_in?: string | null
+          check_out?: string | null
+          created_at?: string | null
+          date: string
+          employee_id: string
+          id?: string
+          notes?: string | null
+          status?: string | null
+        }
+        Update: {
+          check_in?: string | null
+          check_out?: string | null
+          created_at?: string | null
+          date?: string
+          employee_id?: string
+          id?: string
+          notes?: string | null
+          status?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "employee_attendance_employee_id_fkey"
+            columns: ["employee_id"]
+            isOneToOne: false
+            referencedRelation: "employees"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      employee_leave: {
+        Row: {
+          approved_at: string | null
+          approved_by: string | null
+          created_at: string | null
+          employee_id: string
+          end_date: string
+          id: string
+          leave_type: string
+          reason: string | null
+          start_date: string
+          status: string | null
+        }
+        Insert: {
+          approved_at?: string | null
+          approved_by?: string | null
+          created_at?: string | null
+          employee_id: string
+          end_date: string
+          id?: string
+          leave_type: string
+          reason?: string | null
+          start_date: string
+          status?: string | null
+        }
+        Update: {
+          approved_at?: string | null
+          approved_by?: string | null
+          created_at?: string | null
+          employee_id?: string
+          end_date?: string
+          id?: string
+          leave_type?: string
+          reason?: string | null
+          start_date?: string
+          status?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "employee_leave_employee_id_fkey"
+            columns: ["employee_id"]
+            isOneToOne: false
+            referencedRelation: "employees"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      employee_payroll: {
+        Row: {
+          base_salary: number
+          bonuses: number | null
+          created_at: string | null
+          created_by: string | null
+          deductions: number | null
+          employee_id: string
+          id: string
+          net_pay: number
+          notes: string | null
+          pay_period_end: string
+          pay_period_start: string
+          payment_date: string | null
+          payment_method: string | null
+          status: string | null
+        }
+        Insert: {
+          base_salary?: number
+          bonuses?: number | null
+          created_at?: string | null
+          created_by?: string | null
+          deductions?: number | null
+          employee_id: string
+          id?: string
+          net_pay?: number
+          notes?: string | null
+          pay_period_end: string
+          pay_period_start: string
+          payment_date?: string | null
+          payment_method?: string | null
+          status?: string | null
+        }
+        Update: {
+          base_salary?: number
+          bonuses?: number | null
+          created_at?: string | null
+          created_by?: string | null
+          deductions?: number | null
+          employee_id?: string
+          id?: string
+          net_pay?: number
+          notes?: string | null
+          pay_period_end?: string
+          pay_period_start?: string
+          payment_date?: string | null
+          payment_method?: string | null
+          status?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "employee_payroll_employee_id_fkey"
+            columns: ["employee_id"]
+            isOneToOne: false
+            referencedRelation: "employees"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      employee_reviews: {
+        Row: {
+          created_at: string | null
+          employee_id: string
+          goals: string | null
+          id: string
+          improvements: string | null
+          notes: string | null
+          rating: number | null
+          review_date: string
+          reviewer_id: string | null
+          strengths: string | null
+        }
+        Insert: {
+          created_at?: string | null
+          employee_id: string
+          goals?: string | null
+          id?: string
+          improvements?: string | null
+          notes?: string | null
+          rating?: number | null
+          review_date?: string
+          reviewer_id?: string | null
+          strengths?: string | null
+        }
+        Update: {
+          created_at?: string | null
+          employee_id?: string
+          goals?: string | null
+          id?: string
+          improvements?: string | null
+          notes?: string | null
+          rating?: number | null
+          review_date?: string
+          reviewer_id?: string | null
+          strengths?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "employee_reviews_employee_id_fkey"
+            columns: ["employee_id"]
+            isOneToOne: false
+            referencedRelation: "employees"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      employees: {
+        Row: {
+          address: string | null
+          avatar_url: string | null
+          created_at: string | null
+          department: string | null
+          email: string | null
+          emergency_contact: string | null
+          emergency_phone: string | null
+          employment_type: string | null
+          first_name: string
+          hire_date: string
+          id: string
+          last_name: string
+          notes: string | null
+          phone: string | null
+          position: string | null
+          salary: number | null
+          salary_type: string | null
+          status: string | null
+          termination_date: string | null
+          updated_at: string | null
+          user_id: string | null
+        }
+        Insert: {
+          address?: string | null
+          avatar_url?: string | null
+          created_at?: string | null
+          department?: string | null
+          email?: string | null
+          emergency_contact?: string | null
+          emergency_phone?: string | null
+          employment_type?: string | null
+          first_name: string
+          hire_date?: string
+          id?: string
+          last_name: string
+          notes?: string | null
+          phone?: string | null
+          position?: string | null
+          salary?: number | null
+          salary_type?: string | null
+          status?: string | null
+          termination_date?: string | null
+          updated_at?: string | null
+          user_id?: string | null
+        }
+        Update: {
+          address?: string | null
+          avatar_url?: string | null
+          created_at?: string | null
+          department?: string | null
+          email?: string | null
+          emergency_contact?: string | null
+          emergency_phone?: string | null
+          employment_type?: string | null
+          first_name?: string
+          hire_date?: string
+          id?: string
+          last_name?: string
+          notes?: string | null
+          phone?: string | null
+          position?: string | null
+          salary?: number | null
+          salary_type?: string | null
+          status?: string | null
+          termination_date?: string | null
+          updated_at?: string | null
+          user_id?: string | null
+        }
+        Relationships: []
+      }
+      expense_categories: {
+        Row: {
+          budget: number | null
+          created_at: string | null
+          description: string | null
+          id: string
+          name: string
+        }
+        Insert: {
+          budget?: number | null
+          created_at?: string | null
+          description?: string | null
+          id?: string
+          name: string
+        }
+        Update: {
+          budget?: number | null
+          created_at?: string | null
+          description?: string | null
+          id?: string
+          name?: string
+        }
+        Relationships: []
+      }
+      expense_reports: {
+        Row: {
+          created_at: string | null
+          created_by: string | null
+          id: string
+          notes: string | null
+          period_end: string
+          period_start: string
+          status: string | null
+          title: string
+          total_amount: number | null
+        }
+        Insert: {
+          created_at?: string | null
+          created_by?: string | null
+          id?: string
+          notes?: string | null
+          period_end: string
+          period_start: string
+          status?: string | null
+          title: string
+          total_amount?: number | null
+        }
+        Update: {
+          created_at?: string | null
+          created_by?: string | null
+          id?: string
+          notes?: string | null
+          period_end?: string
+          period_start?: string
+          status?: string | null
+          title?: string
+          total_amount?: number | null
+        }
+        Relationships: []
+      }
+      expenses: {
+        Row: {
+          amount: number
+          approved_at: string | null
+          approved_by: string | null
+          category_id: string | null
+          created_at: string | null
+          created_by: string | null
+          description: string
+          expense_date: string
+          id: string
+          is_recurring: boolean | null
+          next_occurrence: string | null
+          notes: string | null
+          payment_method: string | null
+          receipt_url: string | null
+          recurring_frequency: string | null
+          status: string | null
+          updated_at: string | null
+          vendor: string | null
+        }
+        Insert: {
+          amount: number
+          approved_at?: string | null
+          approved_by?: string | null
+          category_id?: string | null
+          created_at?: string | null
+          created_by?: string | null
+          description: string
+          expense_date?: string
+          id?: string
+          is_recurring?: boolean | null
+          next_occurrence?: string | null
+          notes?: string | null
+          payment_method?: string | null
+          receipt_url?: string | null
+          recurring_frequency?: string | null
+          status?: string | null
+          updated_at?: string | null
+          vendor?: string | null
+        }
+        Update: {
+          amount?: number
+          approved_at?: string | null
+          approved_by?: string | null
+          category_id?: string | null
+          created_at?: string | null
+          created_by?: string | null
+          description?: string
+          expense_date?: string
+          id?: string
+          is_recurring?: boolean | null
+          next_occurrence?: string | null
+          notes?: string | null
+          payment_method?: string | null
+          receipt_url?: string | null
+          recurring_frequency?: string | null
+          status?: string | null
+          updated_at?: string | null
+          vendor?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "expenses_category_id_fkey"
+            columns: ["category_id"]
+            isOneToOne: false
+            referencedRelation: "expense_categories"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       inventory: {
         Row: {
@@ -290,6 +728,57 @@ export type Database = {
           updated_at?: string | null
         }
         Relationships: []
+      }
+      reimbursements: {
+        Row: {
+          amount: number
+          created_at: string | null
+          employee_id: string | null
+          expense_id: string | null
+          id: string
+          notes: string | null
+          payment_date: string | null
+          payment_method: string | null
+          status: string | null
+        }
+        Insert: {
+          amount: number
+          created_at?: string | null
+          employee_id?: string | null
+          expense_id?: string | null
+          id?: string
+          notes?: string | null
+          payment_date?: string | null
+          payment_method?: string | null
+          status?: string | null
+        }
+        Update: {
+          amount?: number
+          created_at?: string | null
+          employee_id?: string | null
+          expense_id?: string | null
+          id?: string
+          notes?: string | null
+          payment_date?: string | null
+          payment_method?: string | null
+          status?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "reimbursements_employee_id_fkey"
+            columns: ["employee_id"]
+            isOneToOne: false
+            referencedRelation: "employees"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "reimbursements_expense_id_fkey"
+            columns: ["expense_id"]
+            isOneToOne: false
+            referencedRelation: "expenses"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       roles: {
         Row: {

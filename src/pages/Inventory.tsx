@@ -1,7 +1,8 @@
 import { useState, useEffect, useRef } from "react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Plus, Pencil, Trash2, AlertTriangle, Upload, X, RefreshCw } from "lucide-react";
+import { Plus, Pencil, Trash2, AlertTriangle, Upload, X, RefreshCw, Image, Wand2 } from "lucide-react";
+import { compressImage, generateSKU } from "@/lib/imageCompression";
 import { Badge } from "@/components/ui/badge";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { Label } from "@/components/ui/label";
@@ -44,14 +45,25 @@ interface Category {
   name: string;
 }
 
-// Generate random SKU with 6 alphanumeric characters
-const generateSKU = () => {
-  const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
-  let sku = '';
-  for (let i = 0; i < 6; i++) {
-    sku += chars.charAt(Math.floor(Math.random() * chars.length));
+// Bulk SKU regeneration for products without SKU
+const handleBulkGenerateSKUs = async (products: ProductWithStock[], toast: any, fetchProducts: () => void) => {
+  const productsWithoutSKU = products.filter(p => !p.sku);
+  if (productsWithoutSKU.length === 0) {
+    toast({ title: 'Info', description: 'All products already have SKUs' });
+    return;
   }
-  return sku;
+
+  const updates = productsWithoutSKU.map(p => ({
+    id: p.id,
+    sku: generateSKU(),
+  }));
+
+  for (const update of updates) {
+    await supabase.from('products').update({ sku: update.sku }).eq('id', update.id);
+  }
+
+  toast({ title: 'Success', description: `Generated SKUs for ${updates.length} products` });
+  fetchProducts();
 };
 
 export default function Inventory() {
@@ -151,15 +163,23 @@ export default function Inventory() {
     if (!error) setCategories(data || []);
   };
 
-  const handleImageChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleImageChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (file) {
-      if (file.size > 5 * 1024 * 1024) {
-        toast({ title: 'Error', description: 'Image must be less than 5MB', variant: 'destructive' });
+      if (file.size > 10 * 1024 * 1024) {
+        toast({ title: 'Error', description: 'Image must be less than 10MB', variant: 'destructive' });
         return;
       }
-      setImageFile(file);
-      setImagePreview(URL.createObjectURL(file));
+      try {
+        // Compress image before setting
+        const compressed = await compressImage(file);
+        setImageFile(compressed);
+        setImagePreview(URL.createObjectURL(compressed));
+        toast({ title: 'Image compressed', description: `Reduced from ${(file.size/1024).toFixed(0)}KB to ${(compressed.size/1024).toFixed(0)}KB` });
+      } catch {
+        setImageFile(file);
+        setImagePreview(URL.createObjectURL(file));
+      }
     }
   };
 
@@ -332,6 +352,10 @@ export default function Inventory() {
         <div className="flex gap-2 flex-wrap">
           <BarcodeScanner onProductFound={handleBarcodeFound} />
           <ExportImportDialog onImportComplete={fetchProducts} categories={categories} />
+          <Button variant="outline" onClick={() => handleBulkGenerateSKUs(products, toast, fetchProducts)} className="gap-2">
+            <Wand2 className="h-4 w-4" />
+            Bulk Generate SKUs
+          </Button>
           <Dialog open={isOpen} onOpenChange={(open) => {
             setIsOpen(open);
             if (!open) {
@@ -551,11 +575,20 @@ export default function Inventory() {
                     </td>
                     <td className="py-3 px-2 font-mono text-sm">{product.sku || '-'}</td>
                     <td className="py-3 px-2">
-                      <div>
-                        <span className="font-medium">{product.name}</span>
-                        {product.barcode && (
-                          <span className="block text-xs text-muted-foreground">#{product.barcode}</span>
+                      <div className="flex items-center gap-3">
+                        {product.image_url ? (
+                          <img src={product.image_url} alt={product.name} className="h-10 w-10 rounded object-cover" />
+                        ) : (
+                          <div className="h-10 w-10 rounded bg-muted flex items-center justify-center">
+                            <Image className="h-5 w-5 text-muted-foreground" />
+                          </div>
                         )}
+                        <div>
+                          <span className="font-medium">{product.name}</span>
+                          {product.barcode && (
+                            <span className="block text-xs text-muted-foreground">#{product.barcode}</span>
+                          )}
+                        </div>
                       </div>
                     </td>
                     <td className="py-3 px-2">
