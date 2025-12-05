@@ -6,7 +6,7 @@ import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { useToast } from '@/hooks/use-toast';
-import { Trash2, AlertTriangle, Minus, Plus, Package, CreditCard, Banknote, Smartphone, Building2, X, Split, Wallet, Calendar, CheckCircle } from 'lucide-react';
+import { Trash2, AlertTriangle, Minus, Plus, Package, CreditCard, Banknote, Smartphone, Building2, X, Split, Wallet, Calendar, CheckCircle, UserPlus, Percent } from 'lucide-react';
 import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from '@/contexts/AuthContext';
 import { useCurrency } from '@/hooks/useCurrency';
@@ -18,7 +18,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/u
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { BarcodeScanner } from '@/components/inventory/BarcodeScanner';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { format } from 'date-fns';
+import { format, addDays } from 'date-fns';
 
 interface CartItem {
   productId: string;
@@ -61,6 +61,12 @@ interface Loan {
   customers: { name: string; phone: string | null } | null;
 }
 
+interface Customer {
+  id: string;
+  name: string;
+  phone: string | null;
+}
+
 // Fuzzy search function
 const fuzzySearch = (text: string, query: string): boolean => {
   const textLower = text.toLowerCase();
@@ -101,6 +107,13 @@ export default function POS() {
   const [selectedLoan, setSelectedLoan] = useState<Loan | null>(null);
   const [loanPaymentAmount, setLoanPaymentAmount] = useState('');
   const [loanPaymentMethod, setLoanPaymentMethod] = useState('cash');
+  // Credit sale state
+  const [showCreditDialog, setShowCreditDialog] = useState(false);
+  const [customers, setCustomers] = useState<Customer[]>([]);
+  const [selectedCustomerId, setSelectedCustomerId] = useState('');
+  const [creditDueDays, setCreditDueDays] = useState('30');
+  const [creditInterestRate, setCreditInterestRate] = useState('0');
+  const [customerSearchQuery, setCustomerSearchQuery] = useState('');
   const { toast } = useToast();
   const { user } = useAuth();
   const { formatAmount } = useCurrency();
@@ -111,11 +124,13 @@ export default function POS() {
     { value: 'card', label: 'Card', icon: CreditCard },
     { value: 'mobile_money', label: 'Mobile Money', icon: Smartphone },
     { value: 'bank_transfer', label: 'Bank Transfer', icon: Building2 },
+    { value: 'credit', label: 'Credit', icon: Wallet },
   ];
 
   useEffect(() => {
     fetchWarehouses();
     fetchLoans();
+    fetchCustomers();
   }, []);
 
   useEffect(() => {
@@ -163,6 +178,14 @@ export default function POS() {
       .in('status', ['pending', 'partial'])
       .order('due_date', { ascending: true });
     if (!error) setLoans(data || []);
+  };
+
+  const fetchCustomers = async () => {
+    const { data, error } = await supabase
+      .from('customers')
+      .select('id, name, phone')
+      .order('name');
+    if (!error) setCustomers(data || []);
   };
 
   const handleBarcodeProduct = (product: any) => {
@@ -420,7 +443,139 @@ export default function POS() {
     }
   };
 
-  const filteredProducts = products.filter(p => 
+  const processCreditSale = async () => {
+    if (cart.length === 0) {
+      toast({ title: 'Error', description: 'Cart is empty', variant: 'destructive' });
+      return;
+    }
+
+    if (!selectedCustomerId) {
+      toast({ title: 'Error', description: 'Please select a customer for credit sale', variant: 'destructive' });
+      return;
+    }
+
+    if (!selectedWarehouse) {
+      toast({ title: 'Error', description: 'Please select a warehouse', variant: 'destructive' });
+      return;
+    }
+
+    setIsProcessing(true);
+
+    try {
+      const transactionNumber = `TXN-${Date.now()}`;
+      const baseAmount = getTotalAmount();
+      const interestRate = parseFloat(creditInterestRate) || 0;
+      const dueDays = parseInt(creditDueDays) || 30;
+      const interestAmount = baseAmount * (interestRate / 100);
+      const totalLoanAmount = baseAmount + interestAmount;
+      const dueDate = addDays(new Date(), dueDays);
+      const selectedCustomer = customers.find(c => c.id === selectedCustomerId);
+
+      // Create transaction
+      const { data: transaction, error: transactionError } = await supabase
+        .from('transactions')
+        .insert({
+          transaction_number: transactionNumber,
+          total_amount: baseAmount,
+          payment_method: 'credit',
+          status: 'completed',
+          customer_id: selectedCustomerId,
+          notes: `Credit Sale - Loan Amount: ${formatAmount(totalLoanAmount)} (includes ${interestRate}% interest)`,
+          created_by: user?.id,
+        })
+        .select()
+        .single();
+
+      if (transactionError) throw transactionError;
+
+      // Create transaction items
+      const transactionItems = cart.map(item => ({
+        transaction_id: transaction.id,
+        product_id: item.productId,
+        quantity: item.quantity,
+        unit_price: item.price,
+        total_price: item.subtotal,
+      }));
+
+      const { error: itemsError } = await supabase.from('transaction_items').insert(transactionItems);
+      if (itemsError) throw itemsError;
+
+      // Create stock movements
+      const stockMovements = cart.map(item => ({
+        product_id: item.productId,
+        warehouse_id: selectedWarehouse,
+        quantity: item.quantity,
+        movement_type: 'out',
+        reference_number: transactionNumber,
+        notes: `Credit Sale to ${selectedCustomer?.name || 'Customer'}`,
+        created_by: user?.id,
+      }));
+
+      const { error: movementError } = await supabase.from('stock_movements').insert(stockMovements);
+      if (movementError) throw movementError;
+
+      // Create loan record
+      const { error: loanError } = await supabase.from('loans').insert({
+        customer_id: selectedCustomerId,
+        amount: totalLoanAmount,
+        paid_amount: 0,
+        due_date: format(dueDate, 'yyyy-MM-dd'),
+        status: 'pending',
+        notes: `Credit sale - TXN: ${transactionNumber}\nBase: ${formatAmount(baseAmount)}, Interest: ${interestRate}%`,
+        created_by: user?.id,
+      });
+
+      if (loanError) throw loanError;
+
+      setLastSaleData({
+        id: transaction.id,
+        items: cart.map(item => ({
+          name: item.name,
+          quantity: item.quantity,
+          unit_price: item.price,
+          subtotal: item.subtotal,
+        })),
+        total_amount: baseAmount,
+        payment_method: `Credit (Due: ${format(dueDate, 'PP')})`,
+        customer_name: selectedCustomer?.name,
+        customer_phone: selectedCustomer?.phone,
+        sale_date: new Date().toISOString(),
+      });
+
+      setShowReceipt(true);
+      setShowCreditDialog(false);
+      toast({ 
+        title: 'Credit Sale Completed', 
+        description: `Loan of ${formatAmount(totalLoanAmount)} created for ${selectedCustomer?.name}` 
+      });
+
+      // Reset state
+      setCart([]);
+      setCustomerName('');
+      setCustomerPhone('');
+      setPaymentMethod('cash');
+      setSelectedCustomerId('');
+      setCreditDueDays('30');
+      setCreditInterestRate('0');
+      fetchProductsWithStock();
+      fetchLoans();
+
+    } catch (error: any) {
+      toast({ title: 'Error', description: error.message, variant: 'destructive' });
+    } finally {
+      setIsProcessing(false);
+    }
+  };
+
+  const handlePayNow = () => {
+    if (paymentMethod === 'credit') {
+      setShowCreditDialog(true);
+    } else {
+      processSale(false);
+    }
+  };
+
+  const filteredProducts = products.filter(p =>
     fuzzySearch(p.name, searchQuery) ||
     (p.sku && fuzzySearch(p.sku, searchQuery)) ||
     (p.barcode && fuzzySearch(p.barcode, searchQuery))
@@ -611,7 +766,7 @@ export default function POS() {
 
                 <div className="space-y-2">
                   <Label className="text-xs">Payment Method</Label>
-                  <div className="grid grid-cols-4 gap-1">
+                  <div className="grid grid-cols-5 gap-1">
                     {paymentMethods.map(pm => (
                       <Button
                         key={pm.value}
@@ -638,10 +793,10 @@ export default function POS() {
                     Split Pay
                   </Button>
                   <Button 
-                    onClick={() => processSale(false)} 
+                    onClick={handlePayNow} 
                     disabled={isProcessing || cart.length === 0}
                   >
-                    {isProcessing ? 'Processing...' : 'Pay Now'}
+                    {isProcessing ? 'Processing...' : paymentMethod === 'credit' ? 'Credit Sale' : 'Pay Now'}
                   </Button>
                 </div>
               </div>
@@ -752,7 +907,7 @@ export default function POS() {
                     <div className="space-y-2">
                       <Label>Payment Method</Label>
                       <div className="grid grid-cols-4 gap-2">
-                        {paymentMethods.map(pm => (
+                        {paymentMethods.filter(pm => pm.value !== 'credit').map(pm => (
                           <Button
                             key={pm.value}
                             variant={loanPaymentMethod === pm.value ? 'default' : 'outline'}
@@ -861,6 +1016,149 @@ export default function POS() {
               disabled={isProcessing || getRemainingAmount() > 0.01}
             >
               {isProcessing ? 'Processing...' : 'Complete Split Payment'}
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Credit Sale Dialog */}
+      <Dialog open={showCreditDialog} onOpenChange={setShowCreditDialog}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Wallet className="h-5 w-5" />
+              Credit Sale
+            </DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4">
+            <div className="flex justify-between text-lg font-semibold p-3 bg-muted rounded-lg">
+              <span>Cart Total:</span>
+              <span>{formatAmount(getTotalAmount())}</span>
+            </div>
+
+            <div className="space-y-2">
+              <Label>Select Customer *</Label>
+              <Input
+                placeholder="Search customers..."
+                value={customerSearchQuery}
+                onChange={(e) => setCustomerSearchQuery(e.target.value)}
+                className="mb-2"
+              />
+              <ScrollArea className="h-40 border rounded-lg">
+                <div className="p-2 space-y-1">
+                  {customers
+                    .filter(c => 
+                      fuzzySearch(c.name, customerSearchQuery) || 
+                      (c.phone && fuzzySearch(c.phone, customerSearchQuery))
+                    )
+                    .map(customer => (
+                      <button
+                        key={customer.id}
+                        type="button"
+                        className={`w-full text-left p-2 rounded transition-all ${
+                          selectedCustomerId === customer.id 
+                            ? 'bg-primary text-primary-foreground' 
+                            : 'hover:bg-muted'
+                        }`}
+                        onClick={() => setSelectedCustomerId(customer.id)}
+                      >
+                        <div className="font-medium">{customer.name}</div>
+                        {customer.phone && (
+                          <div className="text-xs opacity-80">{customer.phone}</div>
+                        )}
+                      </button>
+                    ))
+                  }
+                  {customers.filter(c => 
+                    fuzzySearch(c.name, customerSearchQuery) || 
+                    (c.phone && fuzzySearch(c.phone, customerSearchQuery))
+                  ).length === 0 && (
+                    <p className="text-center text-muted-foreground text-sm py-4">
+                      No customers found
+                    </p>
+                  )}
+                </div>
+              </ScrollArea>
+            </div>
+
+            <div className="grid grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <Label className="flex items-center gap-1">
+                  <Calendar className="h-4 w-4" />
+                  Due in (days)
+                </Label>
+                <Select value={creditDueDays} onValueChange={setCreditDueDays}>
+                  <SelectTrigger>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="7">7 days</SelectItem>
+                    <SelectItem value="14">14 days</SelectItem>
+                    <SelectItem value="30">30 days</SelectItem>
+                    <SelectItem value="60">60 days</SelectItem>
+                    <SelectItem value="90">90 days</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="space-y-2">
+                <Label className="flex items-center gap-1">
+                  <Percent className="h-4 w-4" />
+                  Interest Rate (%)
+                </Label>
+                <Input
+                  type="number"
+                  min="0"
+                  max="100"
+                  step="0.5"
+                  value={creditInterestRate}
+                  onChange={(e) => setCreditInterestRate(e.target.value)}
+                  placeholder="0"
+                />
+              </div>
+            </div>
+
+            {parseFloat(creditInterestRate) > 0 && (
+              <div className="p-3 bg-primary/10 rounded-lg space-y-1">
+                <div className="flex justify-between text-sm">
+                  <span>Base Amount:</span>
+                  <span>{formatAmount(getTotalAmount())}</span>
+                </div>
+                <div className="flex justify-between text-sm">
+                  <span>Interest ({creditInterestRate}%):</span>
+                  <span>{formatAmount(getTotalAmount() * (parseFloat(creditInterestRate) / 100))}</span>
+                </div>
+                <div className="flex justify-between font-semibold border-t pt-1 mt-1">
+                  <span>Total Loan:</span>
+                  <span>{formatAmount(getTotalAmount() * (1 + parseFloat(creditInterestRate) / 100))}</span>
+                </div>
+              </div>
+            )}
+
+            <div className="flex justify-between text-sm text-muted-foreground">
+              <span>Due Date:</span>
+              <span>{format(addDays(new Date(), parseInt(creditDueDays) || 30), 'PPP')}</span>
+            </div>
+
+            <Button 
+              className="w-full gap-2" 
+              size="lg"
+              onClick={processCreditSale}
+              disabled={isProcessing || !selectedCustomerId}
+            >
+              <Wallet className="h-5 w-5" />
+              {isProcessing ? 'Processing...' : 'Complete Credit Sale'}
+            </Button>
+
+            <Button 
+              variant="outline" 
+              className="w-full"
+              onClick={() => {
+                setShowCreditDialog(false);
+                setSelectedCustomerId('');
+                setCustomerSearchQuery('');
+              }}
+            >
+              Cancel
             </Button>
           </div>
         </DialogContent>
