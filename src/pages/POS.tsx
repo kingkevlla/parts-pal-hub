@@ -688,7 +688,7 @@ export default function POS() {
           </TabsList>
 
           <TabsContent value="sales" className="flex-1 overflow-hidden mt-0">
-            <div className="grid gap-4 lg:grid-cols-3 h-full max-w-[1600px] mx-auto">
+            <div className="grid gap-4 lg:grid-cols-3 h-full">
               {/* Products Grid */}
               <Card className="lg:col-span-2 flex flex-col overflow-hidden">
                 <CardContent className="p-4 flex flex-col flex-1 overflow-hidden">
@@ -882,7 +882,7 @@ export default function POS() {
 
         {/* Loan Payments Tab */}
         <TabsContent value="loans" className="flex-1 overflow-hidden mt-0">
-          <div className="grid gap-4 lg:grid-cols-2 h-full max-w-[1400px] mx-auto">
+          <div className="grid gap-4 lg:grid-cols-2 h-full">
             {/* Loans List */}
             <Card className="flex flex-col overflow-hidden">
               <CardContent className="p-4 flex flex-col flex-1 overflow-hidden">
