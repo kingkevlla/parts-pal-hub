@@ -6,17 +6,21 @@ export interface SystemSettings {
   company_name: string;
   company_email: string;
   company_phone: string;
+  company_address: string;
   tax_rate: number;
   low_stock_threshold: number;
+  expiry_alert_days: number;
 }
 
 const DEFAULT_SETTINGS: SystemSettings = {
   currency: "USD",
-  company_name: "",
+  company_name: "My Business",
   company_email: "",
   company_phone: "",
+  company_address: "",
   tax_rate: 0,
   low_stock_threshold: 10,
+  expiry_alert_days: 30,
 };
 
 export function useSystemSettings() {
@@ -55,7 +59,7 @@ export function useSystemSettings() {
       data?.forEach((setting) => {
         const value = setting.value;
         // Parse the value based on the key
-        if (setting.key === 'tax_rate' || setting.key === 'low_stock_threshold') {
+        if (setting.key === 'tax_rate' || setting.key === 'low_stock_threshold' || setting.key === 'expiry_alert_days') {
           settingsMap[setting.key] = typeof value === 'number' ? value : parseFloat(String(value)) || 0;
         } else if (setting.key === 'currency') {
           settingsMap[setting.key] = String(value || 'USD');
