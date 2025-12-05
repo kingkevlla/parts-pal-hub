@@ -61,6 +61,15 @@ interface Loan {
   customers: { name: string; phone: string | null } | null;
 }
 
+interface LoanPayment {
+  id: string;
+  loan_id: string;
+  amount: number;
+  payment_method: string;
+  notes: string | null;
+  created_at: string;
+}
+
 interface Customer {
   id: string;
   name: string;
@@ -107,6 +116,7 @@ export default function POS() {
   const [selectedLoan, setSelectedLoan] = useState<Loan | null>(null);
   const [loanPaymentAmount, setLoanPaymentAmount] = useState('');
   const [loanPaymentMethod, setLoanPaymentMethod] = useState('cash');
+  const [loanPayments, setLoanPayments] = useState<LoanPayment[]>([]);
   // Credit sale state
   const [showCreditDialog, setShowCreditDialog] = useState(false);
   const [customers, setCustomers] = useState<Customer[]>([]);
@@ -114,6 +124,10 @@ export default function POS() {
   const [creditDueDays, setCreditDueDays] = useState('30');
   const [creditInterestRate, setCreditInterestRate] = useState('0');
   const [customerSearchQuery, setCustomerSearchQuery] = useState('');
+  // Quick customer creation
+  const [showNewCustomerForm, setShowNewCustomerForm] = useState(false);
+  const [newCustomerName, setNewCustomerName] = useState('');
+  const [newCustomerPhone, setNewCustomerPhone] = useState('');
   const { toast } = useToast();
   const { user } = useAuth();
   const { formatAmount } = useCurrency();
@@ -188,6 +202,44 @@ export default function POS() {
     if (!error) setCustomers(data || []);
   };
 
+  const fetchLoanPayments = async (loanId: string) => {
+    const { data, error } = await supabase
+      .from('loan_payments')
+      .select('*')
+      .eq('loan_id', loanId)
+      .order('created_at', { ascending: false });
+    if (!error) setLoanPayments(data || []);
+  };
+
+  const createQuickCustomer = async () => {
+    if (!newCustomerName.trim()) {
+      toast({ title: 'Error', description: 'Customer name is required', variant: 'destructive' });
+      return;
+    }
+
+    try {
+      const { data, error } = await supabase
+        .from('customers')
+        .insert({
+          name: newCustomerName.trim(),
+          phone: newCustomerPhone.trim() || null,
+        })
+        .select()
+        .single();
+
+      if (error) throw error;
+
+      setCustomers(prev => [...prev, data].sort((a, b) => a.name.localeCompare(b.name)));
+      setSelectedCustomerId(data.id);
+      setShowNewCustomerForm(false);
+      setNewCustomerName('');
+      setNewCustomerPhone('');
+      toast({ title: 'Success', description: `Customer "${data.name}" created` });
+    } catch (error: any) {
+      toast({ title: 'Error', description: error.message, variant: 'destructive' });
+    }
+  };
+
   const handleBarcodeProduct = (product: any) => {
     const productWithStock = products.find(p => p.id === product.id);
     if (productWithStock) {
@@ -222,12 +274,25 @@ export default function POS() {
       const newPaidAmount = (selectedLoan.paid_amount || 0) + amount;
       const newStatus = newPaidAmount >= selectedLoan.amount ? 'paid' : 'partial';
 
+      // Create loan payment record
+      const { error: paymentError } = await supabase
+        .from('loan_payments')
+        .insert({
+          loan_id: selectedLoan.id,
+          amount,
+          payment_method: loanPaymentMethod,
+          notes: `Payment via POS`,
+          created_by: user?.id,
+        });
+
+      if (paymentError) throw paymentError;
+
+      // Update loan
       const { error } = await supabase
         .from('loans')
         .update({ 
           paid_amount: newPaidAmount, 
           status: newStatus,
-          notes: `${selectedLoan.notes || ''}\nPayment of ${formatAmount(amount)} via ${loanPaymentMethod} on ${format(new Date(), 'PPp')}`
         })
         .eq('id', selectedLoan.id);
 
@@ -238,14 +303,24 @@ export default function POS() {
         description: newStatus === 'paid' ? 'Loan fully paid!' : `${formatAmount(amount)} paid. Remaining: ${formatAmount(selectedLoan.amount - newPaidAmount)}`
       });
 
-      setSelectedLoan(null);
+      // Refresh payment history
+      fetchLoanPayments(selectedLoan.id);
       setLoanPaymentAmount('');
       fetchLoans();
+      
+      // Update selected loan state
+      setSelectedLoan(prev => prev ? { ...prev, paid_amount: newPaidAmount, status: newStatus } : null);
     } catch (error: any) {
       toast({ title: 'Error', description: error.message, variant: 'destructive' });
     } finally {
       setIsProcessing(false);
     }
+  };
+
+  const handleSelectLoan = (loan: Loan) => {
+    setSelectedLoan(loan);
+    setLoanPaymentAmount((loan.amount - (loan.paid_amount || 0)).toString());
+    fetchLoanPayments(loan.id);
   };
 
   const getStockStatus = (product: ProductWithStock) => {
@@ -836,10 +911,7 @@ export default function POS() {
                             className={`w-full text-left p-3 rounded-lg border transition-all ${
                               selectedLoan?.id === loan.id ? 'border-primary bg-primary/5' : 'hover:border-primary/50'
                             }`}
-                            onClick={() => {
-                              setSelectedLoan(loan);
-                              setLoanPaymentAmount(remaining.toString());
-                            }}
+                            onClick={() => handleSelectLoan(loan)}
                           >
                             <div className="flex justify-between items-start mb-1">
                               <span className="font-medium">{loan.customers?.name || 'Unknown'}</span>
@@ -922,7 +994,33 @@ export default function POS() {
                       </div>
                     </div>
 
-                    <Button 
+                    {/* Payment History */}
+                    {loanPayments.length > 0 && (
+                      <div className="space-y-2">
+                        <Label className="text-sm">Payment History</Label>
+                        <ScrollArea className="h-32 border rounded-lg">
+                          <div className="p-2 space-y-2">
+                            {loanPayments.map(payment => (
+                              <div key={payment.id} className="flex justify-between items-center text-sm p-2 bg-muted/50 rounded">
+                                <div>
+                                  <p className="font-medium text-green-600">+{formatAmount(payment.amount)}</p>
+                                  <p className="text-xs text-muted-foreground capitalize">
+                                    {payment.payment_method.replace('_', ' ')}
+                                  </p>
+                                </div>
+                                <div className="text-right text-xs text-muted-foreground">
+                                  {format(new Date(payment.created_at), 'PP')}
+                                  <br />
+                                  {format(new Date(payment.created_at), 'p')}
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        </ScrollArea>
+                      </div>
+                    )}
+
+                    <Button
                       className="w-full gap-2" 
                       size="lg"
                       onClick={processLoanPayment}
@@ -1037,48 +1135,86 @@ export default function POS() {
             </div>
 
             <div className="space-y-2">
-              <Label>Select Customer *</Label>
-              <Input
-                placeholder="Search customers..."
-                value={customerSearchQuery}
-                onChange={(e) => setCustomerSearchQuery(e.target.value)}
-                className="mb-2"
-              />
-              <ScrollArea className="h-40 border rounded-lg">
-                <div className="p-2 space-y-1">
-                  {customers
-                    .filter(c => 
-                      fuzzySearch(c.name, customerSearchQuery) || 
-                      (c.phone && fuzzySearch(c.phone, customerSearchQuery))
-                    )
-                    .map(customer => (
-                      <button
-                        key={customer.id}
-                        type="button"
-                        className={`w-full text-left p-2 rounded transition-all ${
-                          selectedCustomerId === customer.id 
-                            ? 'bg-primary text-primary-foreground' 
-                            : 'hover:bg-muted'
-                        }`}
-                        onClick={() => setSelectedCustomerId(customer.id)}
-                      >
-                        <div className="font-medium">{customer.name}</div>
-                        {customer.phone && (
-                          <div className="text-xs opacity-80">{customer.phone}</div>
-                        )}
-                      </button>
-                    ))
-                  }
-                  {customers.filter(c => 
-                    fuzzySearch(c.name, customerSearchQuery) || 
-                    (c.phone && fuzzySearch(c.phone, customerSearchQuery))
-                  ).length === 0 && (
-                    <p className="text-center text-muted-foreground text-sm py-4">
-                      No customers found
-                    </p>
-                  )}
+              <div className="flex items-center justify-between">
+                <Label>Select Customer *</Label>
+                <Button 
+                  variant="ghost" 
+                  size="sm" 
+                  className="h-7 text-xs gap-1"
+                  onClick={() => setShowNewCustomerForm(!showNewCustomerForm)}
+                >
+                  <UserPlus className="h-3 w-3" />
+                  {showNewCustomerForm ? 'Cancel' : 'New Customer'}
+                </Button>
+              </div>
+
+              {showNewCustomerForm ? (
+                <div className="p-3 border rounded-lg space-y-3 bg-muted/30">
+                  <Input
+                    placeholder="Customer name *"
+                    value={newCustomerName}
+                    onChange={(e) => setNewCustomerName(e.target.value)}
+                  />
+                  <Input
+                    placeholder="Phone number (optional)"
+                    value={newCustomerPhone}
+                    onChange={(e) => setNewCustomerPhone(e.target.value)}
+                  />
+                  <Button 
+                    className="w-full" 
+                    size="sm"
+                    onClick={createQuickCustomer}
+                    disabled={!newCustomerName.trim()}
+                  >
+                    <UserPlus className="h-4 w-4 mr-1" />
+                    Create & Select
+                  </Button>
                 </div>
-              </ScrollArea>
+              ) : (
+                <>
+                  <Input
+                    placeholder="Search customers..."
+                    value={customerSearchQuery}
+                    onChange={(e) => setCustomerSearchQuery(e.target.value)}
+                    className="mb-2"
+                  />
+                  <ScrollArea className="h-40 border rounded-lg">
+                    <div className="p-2 space-y-1">
+                      {customers
+                        .filter(c => 
+                          fuzzySearch(c.name, customerSearchQuery) || 
+                          (c.phone && fuzzySearch(c.phone, customerSearchQuery))
+                        )
+                        .map(customer => (
+                          <button
+                            key={customer.id}
+                            type="button"
+                            className={`w-full text-left p-2 rounded transition-all ${
+                              selectedCustomerId === customer.id 
+                                ? 'bg-primary text-primary-foreground' 
+                                : 'hover:bg-muted'
+                            }`}
+                            onClick={() => setSelectedCustomerId(customer.id)}
+                          >
+                            <div className="font-medium">{customer.name}</div>
+                            {customer.phone && (
+                              <div className="text-xs opacity-80">{customer.phone}</div>
+                            )}
+                          </button>
+                        ))
+                      }
+                      {customers.filter(c => 
+                        fuzzySearch(c.name, customerSearchQuery) || 
+                        (c.phone && fuzzySearch(c.phone, customerSearchQuery))
+                      ).length === 0 && (
+                        <p className="text-center text-muted-foreground text-sm py-4">
+                          No customers found
+                        </p>
+                      )}
+                    </div>
+                  </ScrollArea>
+                </>
+              )}
             </div>
 
             <div className="grid grid-cols-2 gap-4">
