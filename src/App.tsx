@@ -24,6 +24,9 @@ import Support from "./pages/Support";
 import Transactions from "./pages/Transactions";
 import UserManagement from "./pages/UserManagement";
 import OwnerDashboard from "./pages/OwnerDashboard";
+import Expenses from "./pages/Expenses";
+import Employees from "./pages/Employees";
+import SalesHistory from "./pages/SalesHistory";
 import NotFound from "./pages/NotFound";
 
 const queryClient = new QueryClient();
@@ -82,7 +85,10 @@ const App = () => (
             <Route path="/customers" element={<ProtectedRoute><Layout><Customers /></Layout></ProtectedRoute>} />
             <Route path="/pos" element={<ProtectedRoute><POSLayout><POS /></POSLayout></ProtectedRoute>} />
             <Route path="/transactions" element={<ProtectedRoute><Layout><Transactions /></Layout></ProtectedRoute>} />
+            <Route path="/sales-history" element={<ProtectedRoute><Layout><SalesHistory /></Layout></ProtectedRoute>} />
             <Route path="/loans" element={<ProtectedRoute><Layout><Loans /></Layout></ProtectedRoute>} />
+            <Route path="/expenses" element={<ProtectedRoute><Layout><Expenses /></Layout></ProtectedRoute>} />
+            <Route path="/employees" element={<ProtectedRoute><Layout><Employees /></Layout></ProtectedRoute>} />
             <Route path="/warehouses" element={<ProtectedRoute><Layout><Warehouses /></Layout></ProtectedRoute>} />
             <Route path="/support" element={<ProtectedRoute><Layout><Support /></Layout></ProtectedRoute>} />
             <Route path="/reports" element={<ProtectedRoute><Layout><Reports /></Layout></ProtectedRoute>} />
