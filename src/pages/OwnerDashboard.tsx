@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
 import { useCurrency } from "@/hooks/useCurrency";
+import { usePermissions } from "@/hooks/usePermissions";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -37,7 +38,7 @@ interface Stats {
   activeLoans: number;
 }
 
-interface Activity {
+interface ActivityItem {
   id: string;
   type: string;
   description: string;
@@ -54,10 +55,10 @@ interface UserProfile {
 
 interface DueLoan {
   id: string;
-  borrower_name: string;
-  borrower_phone: string;
+  customer_name: string;
+  customer_phone: string;
   amount: number;
-  amount_paid: number;
+  paid_amount: number;
   due_date: string;
   status: string;
 }
@@ -66,7 +67,7 @@ interface Product {
   id: string;
   name: string;
   sku: string;
-  cost_price: number;
+  purchase_price: number;
   selling_price: number;
 }
 
@@ -74,7 +75,7 @@ export default function OwnerDashboard() {
   const { user } = useAuth();
   const { toast } = useToast();
   const { formatAmount } = useCurrency();
-  const [isOwner, setIsOwner] = useState(false);
+  const { isOwner, isAdmin, loading: permissionsLoading } = usePermissions();
   const [loading, setLoading] = useState(true);
   const [stats, setStats] = useState<Stats>({
     totalSales: 0,
@@ -84,7 +85,7 @@ export default function OwnerDashboard() {
     lowStockCount: 0,
     activeLoans: 0
   });
-  const [activities, setActivities] = useState<Activity[]>([]);
+  const [activities, setActivities] = useState<ActivityItem[]>([]);
   const [users, setUsers] = useState<UserProfile[]>([]);
   const [showShutdownDialog, setShowShutdownDialog] = useState(false);
   const [userToDelete, setUserToDelete] = useState<string | null>(null);
@@ -97,12 +98,16 @@ export default function OwnerDashboard() {
   const [selectedProductId, setSelectedProductId] = useState<string | null>(null);
   const [showProductDetails, setShowProductDetails] = useState(false);
 
-  useEffect(() => {
-    checkOwnerStatus();
-  }, [user]);
+  const canAccess = isOwner || isAdmin;
 
   useEffect(() => {
-    if (isOwner) {
+    if (!permissionsLoading) {
+      setLoading(false);
+    }
+  }, [permissionsLoading]);
+
+  useEffect(() => {
+    if (canAccess && !permissionsLoading) {
       fetchStats();
       fetchActivities();
       fetchUsers();
@@ -110,44 +115,25 @@ export default function OwnerDashboard() {
       fetchProducts();
       subscribeToRealtime();
       
-      // Check for due loans every minute
       const interval = setInterval(fetchDueLoans, 60000);
       return () => clearInterval(interval);
     }
-  }, [isOwner]);
-
-  const checkOwnerStatus = async () => {
-    if (!user) return;
-    
-    try {
-      const { data, error } = await supabase.rpc('has_role', {
-        _user_id: user.id,
-        _role_name: 'owner'
-      });
-
-      if (error) throw error;
-      setIsOwner(data);
-    } catch (error) {
-      console.error('Error checking owner status:', error);
-    } finally {
-      setLoading(false);
-    }
-  };
+  }, [canAccess, permissionsLoading]);
 
   const fetchStats = async () => {
     try {
-      const [salesData, productsData, usersData, loansData, inventoryData] = await Promise.all([
-        supabase.from('sales').select('total_amount', { count: 'exact' }),
+      const [transactionsData, productsData, usersData, loansData, inventoryData] = await Promise.all([
+        supabase.from('transactions').select('total_amount', { count: 'exact' }),
         supabase.from('products').select('*', { count: 'exact' }),
         supabase.from('profiles').select('*', { count: 'exact' }),
-        supabase.from('loans').select('*').eq('status', 'active'),
-        supabase.from('inventory').select('*, products!inner(reorder_level)').filter('quantity', 'lt', 10)
+        supabase.from('loans').select('*').in('status', ['active', 'pending']),
+        supabase.from('inventory').select('quantity').lt('quantity', 10)
       ]);
 
-      const totalRevenue = salesData.data?.reduce((sum, sale) => sum + Number(sale.total_amount), 0) || 0;
+      const totalRevenue = transactionsData.data?.reduce((sum, t) => sum + Number(t.total_amount || 0), 0) || 0;
 
       setStats({
-        totalSales: salesData.count || 0,
+        totalSales: transactionsData.count || 0,
         totalRevenue,
         totalUsers: usersData.count || 0,
         totalProducts: productsData.count || 0,
@@ -161,35 +147,35 @@ export default function OwnerDashboard() {
 
   const fetchActivities = async () => {
     try {
-      const [sales, stockMovements] = await Promise.all([
-        supabase.from('sales').select('*').order('created_at', { ascending: false }).limit(5),
+      const [transactions, stockMovements] = await Promise.all([
+        supabase.from('transactions').select('*').order('created_at', { ascending: false }).limit(5),
         supabase.from('stock_movements').select('*').order('created_at', { ascending: false }).limit(5)
       ]);
 
-      const activities: Activity[] = [];
+      const activityItems: ActivityItem[] = [];
 
-      sales.data?.forEach(sale => {
-        activities.push({
-          id: sale.id,
+      transactions.data?.forEach(transaction => {
+        activityItems.push({
+          id: transaction.id,
           type: 'sale',
-          description: `Sale of ${formatAmount(Number(sale.total_amount))} ${sale.customer_name ? `to ${sale.customer_name}` : ''}`,
-          timestamp: new Date(sale.created_at),
+          description: `Sale of ${formatAmount(Number(transaction.total_amount || 0))}`,
+          timestamp: new Date(transaction.created_at || ''),
           user: 'User'
         });
       });
 
       stockMovements.data?.forEach(movement => {
-        activities.push({
+        activityItems.push({
           id: movement.id,
           type: 'stock',
-          description: `${movement.type === 'in' ? 'Added' : 'Removed'} ${movement.quantity} items`,
-          timestamp: new Date(movement.created_at),
+          description: `${movement.movement_type === 'in' ? 'Added' : 'Removed'} ${movement.quantity} items`,
+          timestamp: new Date(movement.created_at || ''),
           user: 'User'
         });
       });
 
-      activities.sort((a, b) => b.timestamp.getTime() - a.timestamp.getTime());
-      setActivities(activities.slice(0, 10));
+      activityItems.sort((a, b) => b.timestamp.getTime() - a.timestamp.getTime());
+      setActivities(activityItems.slice(0, 10));
     } catch (error) {
       console.error('Error fetching activities:', error);
     }
@@ -205,18 +191,17 @@ export default function OwnerDashboard() {
 
       const { data: userRoles, error: rolesError } = await supabase
         .from('user_roles')
-        .select('user_id, roles(name)');
+        .select('user_id, role');
 
       if (rolesError) throw rolesError;
 
-      const formattedUsers = profiles?.map(user => ({
-        id: user.id,
-        full_name: user.full_name || 'Unknown',
-        phone: user.phone || 'N/A',
+      const formattedUsers = profiles?.map(profile => ({
+        id: profile.id,
+        full_name: profile.full_name || 'Unknown',
+        phone: profile.phone || 'N/A',
         roles: userRoles
-          ?.filter((ur: any) => ur.user_id === user.id)
-          .map((ur: any) => ur.roles?.name)
-          .filter(Boolean) || []
+          ?.filter(ur => ur.user_id === profile.id)
+          .map(ur => ur.role) || []
       })) || [];
 
       setUsers(formattedUsers);
@@ -233,21 +218,29 @@ export default function OwnerDashboard() {
 
       const { data, error } = await supabase
         .from('loans')
-        .select('*')
-        .eq('status', 'active')
+        .select('*, customers(name, phone)')
+        .in('status', ['active', 'pending'])
         .lte('due_date', nextWeek.toISOString().split('T')[0])
         .order('due_date', { ascending: true });
 
       if (error) throw error;
 
-      setDueLoans(data || []);
+      const formattedLoans: DueLoan[] = (data || []).map(loan => ({
+        id: loan.id,
+        customer_name: (loan.customers as any)?.name || 'Unknown',
+        customer_phone: (loan.customers as any)?.phone || 'N/A',
+        amount: loan.amount,
+        paid_amount: loan.paid_amount || 0,
+        due_date: loan.due_date || '',
+        status: loan.status || 'pending'
+      }));
+
+      setDueLoans(formattedLoans);
       
-      // Calculate total loan amount
-      const total = data?.reduce((sum, loan) => sum + (Number(loan.amount) - Number(loan.amount_paid || 0)), 0) || 0;
+      const total = formattedLoans.reduce((sum, loan) => sum + (loan.amount - loan.paid_amount), 0);
       setTotalLoanAmount(total);
 
-      // Play voice notification if there are due loans
-      if (data && data.length > 0 && !audioPlaying) {
+      if (formattedLoans.length > 0 && !audioPlaying) {
         playLoanReminder();
       }
     } catch (error) {
@@ -259,11 +252,20 @@ export default function OwnerDashboard() {
     try {
       const { data, error } = await supabase
         .from('products')
-        .select('id, name, sku, cost_price, selling_price')
+        .select('id, name, sku, purchase_price, selling_price')
         .order('name');
 
       if (error) throw error;
-      setProducts(data || []);
+      
+      const formattedProducts: Product[] = (data || []).map(p => ({
+        id: p.id,
+        name: p.name,
+        sku: p.sku || '',
+        purchase_price: p.purchase_price || 0,
+        selling_price: p.selling_price || 0
+      }));
+      
+      setProducts(formattedProducts);
     } catch (error) {
       console.error('Error fetching products:', error);
     }
@@ -292,7 +294,6 @@ export default function OwnerDashboard() {
     
     window.speechSynthesis.speak(utterance);
     
-    // Auto-stop after 30 seconds
     const timer = setTimeout(() => {
       stopLoanReminder();
     }, 30000);
@@ -310,9 +311,9 @@ export default function OwnerDashboard() {
   };
 
   const subscribeToRealtime = () => {
-    const salesChannel = supabase
-      .channel('owner-sales-changes')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'sales' }, () => {
+    const transactionsChannel = supabase
+      .channel('owner-transactions-changes')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'transactions' }, () => {
         fetchStats();
         fetchActivities();
       })
@@ -343,7 +344,7 @@ export default function OwnerDashboard() {
       .subscribe();
 
     return () => {
-      supabase.removeChannel(salesChannel);
+      supabase.removeChannel(transactionsChannel);
       supabase.removeChannel(stockChannel);
       supabase.removeChannel(usersChannel);
       supabase.removeChannel(loansChannel);
@@ -352,7 +353,6 @@ export default function OwnerDashboard() {
 
   const handleDeleteUser = async (userId: string) => {
     try {
-      // Delete user roles first
       const { error: rolesError } = await supabase
         .from('user_roles')
         .delete()
@@ -360,7 +360,6 @@ export default function OwnerDashboard() {
 
       if (rolesError) throw rolesError;
 
-      // Delete profile (which cascades to auth.users)
       const { error: profileError } = await supabase
         .from('profiles')
         .delete()
@@ -395,7 +394,7 @@ export default function OwnerDashboard() {
     }, 2000);
   };
 
-  if (loading) {
+  if (loading || permissionsLoading) {
     return (
       <div className="flex items-center justify-center min-h-screen">
         <div className="text-center">
@@ -406,7 +405,7 @@ export default function OwnerDashboard() {
     );
   }
 
-  if (!isOwner) {
+  if (!canAccess) {
     return (
       <div className="flex items-center justify-center min-h-screen">
         <Card className="max-w-md">
@@ -589,18 +588,18 @@ export default function OwnerDashboard() {
                 </TableHeader>
                 <TableBody>
                   {products.map((product) => {
-                    const profit = Number(product.selling_price) - Number(product.cost_price);
-                    const profitMargin = (profit / Number(product.cost_price)) * 100;
+                    const profit = product.selling_price - product.purchase_price;
+                    const profitMargin = product.purchase_price > 0 ? (profit / product.purchase_price) * 100 : 0;
                     
                     return (
                       <TableRow key={product.id}>
                         <TableCell className="font-medium">{product.name}</TableCell>
                         <TableCell className="text-sm text-muted-foreground">{product.sku}</TableCell>
                         <TableCell className="text-destructive font-medium">
-                          {formatAmount(Number(product.cost_price))}
+                          {formatAmount(product.purchase_price)}
                         </TableCell>
                         <TableCell className="text-success font-medium">
-                          {formatAmount(Number(product.selling_price))}
+                          {formatAmount(product.selling_price)}
                         </TableCell>
                         <TableCell>
                           <div>
@@ -687,14 +686,14 @@ export default function OwnerDashboard() {
                 <p className="text-sm text-muted-foreground text-center py-8">No users found</p>
               ) : (
                 <div className="space-y-3">
-                  {users.map((user) => (
-                    <div key={user.id} className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 p-3 rounded-lg bg-muted/50 hover:bg-muted transition-colors">
+                  {users.map((userItem) => (
+                    <div key={userItem.id} className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 p-3 rounded-lg bg-muted/50 hover:bg-muted transition-colors">
                       <div className="flex-1 min-w-0">
-                        <p className="font-medium text-sm break-words">{user.full_name}</p>
-                        <p className="text-xs text-muted-foreground break-all">{user.phone}</p>
+                        <p className="font-medium text-sm break-words">{userItem.full_name}</p>
+                        <p className="text-xs text-muted-foreground break-all">{userItem.phone}</p>
                         <div className="flex flex-wrap gap-1 mt-1">
-                          {user.roles.map((role, idx) => (
-                            <Badge key={idx} variant="secondary" className="text-xs">
+                          {userItem.roles.map((role, idx) => (
+                            <Badge key={idx} variant="secondary" className="text-xs capitalize">
                               {role}
                             </Badge>
                           ))}
@@ -703,8 +702,9 @@ export default function OwnerDashboard() {
                       <Button
                         variant="ghost"
                         size="sm"
-                        onClick={() => setUserToDelete(user.id)}
+                        onClick={() => setUserToDelete(userItem.id)}
                         className="text-destructive hover:text-destructive hover:bg-destructive/10 w-full sm:w-auto"
+                        disabled={userItem.id === user?.id}
                       >
                         <UserX className="h-4 w-4" />
                         <span className="sm:hidden ml-2">Remove User</span>
@@ -787,7 +787,7 @@ export default function OwnerDashboard() {
                 const daysUntilDue = Math.ceil(
                   (new Date(loan.due_date).getTime() - new Date().getTime()) / (1000 * 60 * 60 * 24)
                 );
-                const remainingAmount = Number(loan.amount) - Number(loan.amount_paid || 0);
+                const remainingAmount = loan.amount - loan.paid_amount;
                 const isOverdue = daysUntilDue < 0;
 
                 return (
@@ -795,16 +795,16 @@ export default function OwnerDashboard() {
                     <CardContent className="p-4">
                       <div className="flex justify-between items-start gap-4">
                         <div className="flex-1">
-                          <h4 className="font-semibold">{loan.borrower_name}</h4>
-                          <p className="text-sm text-muted-foreground">{loan.borrower_phone}</p>
+                          <h4 className="font-semibold">{loan.customer_name}</h4>
+                          <p className="text-sm text-muted-foreground">{loan.customer_phone}</p>
                           <div className="mt-2 space-y-1">
                             <div className="flex justify-between text-sm">
                               <span className="text-muted-foreground">Total Amount:</span>
-                              <span className="font-medium">{formatAmount(Number(loan.amount))}</span>
+                              <span className="font-medium">{formatAmount(loan.amount)}</span>
                             </div>
                             <div className="flex justify-between text-sm">
                               <span className="text-muted-foreground">Paid:</span>
-                              <span className="font-medium text-success">{formatAmount(Number(loan.amount_paid || 0))}</span>
+                              <span className="font-medium text-success">{formatAmount(loan.paid_amount)}</span>
                             </div>
                             <div className="flex justify-between text-sm border-t pt-1">
                               <span className="text-muted-foreground">Remaining:</span>

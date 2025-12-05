@@ -1,10 +1,9 @@
 import { useState, useEffect } from "react";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
-import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { supabase } from "@/integrations/supabase/client";
-import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/contexts/AuthContext";
+import { usePermissions } from "@/hooks/usePermissions";
 import {
   Table,
   TableBody,
@@ -21,115 +20,81 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Shield, User } from "lucide-react";
+import { useToast } from "@/hooks/use-toast";
+import type { Database } from "@/integrations/supabase/types";
+
+type AppRole = Database["public"]["Enums"]["app_role"];
 
 interface UserProfile {
   id: string;
   full_name: string;
   phone: string;
-  roles: string[];
+  role: AppRole;
 }
+
+const AVAILABLE_ROLES: { value: AppRole; label: string }[] = [
+  { value: "admin", label: "Admin" },
+  { value: "owner", label: "Owner" },
+  { value: "manager", label: "Manager" },
+  { value: "cashier", label: "Cashier" },
+  { value: "user", label: "User" },
+];
 
 export default function UserManagementSettings() {
   const { user } = useAuth();
+  const { isAdmin, isOwner, loading: permissionsLoading } = usePermissions();
   const { toast } = useToast();
   const [users, setUsers] = useState<UserProfile[]>([]);
-  const [roles, setRoles] = useState<{ id: string; name: string }[]>([]);
-  const [isAdmin, setIsAdmin] = useState(false);
   const [loading, setLoading] = useState(true);
 
+  const canManageUsers = isAdmin || isOwner;
+
   useEffect(() => {
-    checkAdminStatus();
-  }, [user]);
+    if (!permissionsLoading && canManageUsers) {
+      fetchUsers();
+    } else if (!permissionsLoading) {
+      setLoading(false);
+    }
+  }, [permissionsLoading, canManageUsers]);
 
-  const checkAdminStatus = async () => {
-    if (!user) return;
-
+  const fetchUsers = async () => {
     try {
-      const { data, error } = await supabase.rpc("has_role", {
-        _user_id: user.id,
-        _role_name: "admin"
+      const { data: profiles, error: profilesError } = await supabase
+        .from("profiles")
+        .select("id, full_name, phone");
+
+      if (profilesError) throw profilesError;
+
+      const { data: userRoles, error: rolesError } = await supabase
+        .from("user_roles")
+        .select("user_id, role");
+
+      if (rolesError) throw rolesError;
+
+      const rolesMap: Record<string, AppRole> = {};
+      userRoles?.forEach((ur) => {
+        rolesMap[ur.user_id] = ur.role;
       });
 
-      if (error) throw error;
-      setIsAdmin(data);
+      const usersWithRoles: UserProfile[] = (profiles || []).map((profile) => ({
+        ...profile,
+        role: rolesMap[profile.id] || "user"
+      }));
 
-      if (data) {
-        fetchUsers();
-        fetchRoles();
-      }
+      setUsers(usersWithRoles);
     } catch (error: any) {
-      console.error("Error checking admin status:", error);
+      console.error("Error fetching users:", error);
     } finally {
       setLoading(false);
     }
   };
 
-  const fetchUsers = async () => {
+  const handleRoleChange = async (userId: string, newRole: AppRole) => {
     try {
-      const { data: profiles, error } = await supabase
-        .from("profiles")
-        .select(`
-          id,
-          full_name,
-          phone
-        `);
-
-      if (error) throw error;
-
-      const usersWithRoles = await Promise.all(
-        profiles?.map(async (profile) => {
-          const { data: userRoles } = await supabase
-            .from("user_roles")
-            .select(`
-              role_id,
-              roles (name)
-            `)
-            .eq("user_id", profile.id);
-
-          return {
-            ...profile,
-            roles: userRoles?.map((ur: any) => ur.roles.name) || []
-          };
-        }) || []
-      );
-
-      setUsers(usersWithRoles);
-    } catch (error: any) {
-      console.error("Error fetching users:", error);
-    }
-  };
-
-  const fetchRoles = async () => {
-    try {
-      const { data, error } = await supabase
-        .from("roles")
-        .select("id, name");
-
-      if (error) throw error;
-      setRoles(data || []);
-    } catch (error: any) {
-      console.error("Error fetching roles:", error);
-    }
-  };
-
-  const handleRoleChange = async (userId: string, roleName: string) => {
-    try {
-      const role = roles.find(r => r.name === roleName);
-      if (!role) return;
-
-      // Remove existing roles
-      await supabase
-        .from("user_roles")
-        .delete()
-        .eq("user_id", userId);
-
-      // Add new role
       const { error } = await supabase
         .from("user_roles")
-        .insert({
-          user_id: userId,
-          role_id: role.id
-        });
+        .update({ role: newRole })
+        .eq("user_id", userId);
 
       if (error) throw error;
 
@@ -140,16 +105,16 @@ export default function UserManagementSettings() {
     }
   };
 
-  if (loading) {
-    return <div>Loading...</div>;
+  if (permissionsLoading || loading) {
+    return <div className="py-4">Loading...</div>;
   }
 
-  if (!isAdmin) {
+  if (!canManageUsers) {
     return (
       <Card>
         <CardHeader>
           <CardTitle>Access Denied</CardTitle>
-          <CardDescription>You need administrator privileges to access this section</CardDescription>
+          <CardDescription>You need administrator or owner privileges to access this section</CardDescription>
         </CardHeader>
       </Card>
     );
@@ -168,7 +133,7 @@ export default function UserManagementSettings() {
               <TableHead>Name</TableHead>
               <TableHead>Phone</TableHead>
               <TableHead>Current Role</TableHead>
-              <TableHead>Actions</TableHead>
+              <TableHead>Change Role</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
@@ -182,25 +147,24 @@ export default function UserManagementSettings() {
                 </TableCell>
                 <TableCell>{userProfile.phone || "N/A"}</TableCell>
                 <TableCell>
-                  {userProfile.roles.map((role) => (
-                    <Badge key={role} variant="outline" className="mr-1">
-                      <Shield className="h-3 w-3 mr-1" />
-                      {role}
-                    </Badge>
-                  ))}
+                  <Badge variant="outline" className="capitalize">
+                    <Shield className="h-3 w-3 mr-1" />
+                    {userProfile.role}
+                  </Badge>
                 </TableCell>
                 <TableCell>
                   <Select
-                    defaultValue={userProfile.roles[0]}
-                    onValueChange={(value) => handleRoleChange(userProfile.id, value)}
+                    value={userProfile.role}
+                    onValueChange={(value: AppRole) => handleRoleChange(userProfile.id, value)}
+                    disabled={userProfile.id === user?.id}
                   >
                     <SelectTrigger className="w-32">
                       <SelectValue placeholder="Select role" />
                     </SelectTrigger>
                     <SelectContent>
-                      {roles.map((role) => (
-                        <SelectItem key={role.id} value={role.name}>
-                          {role.name}
+                      {AVAILABLE_ROLES.map((role) => (
+                        <SelectItem key={role.value} value={role.value}>
+                          {role.label}
                         </SelectItem>
                       ))}
                     </SelectContent>

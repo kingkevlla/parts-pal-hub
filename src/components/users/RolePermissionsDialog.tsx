@@ -8,13 +8,23 @@ import { supabase } from "@/integrations/supabase/client";
 import { Loader2, Shield } from "lucide-react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 
-interface Permission {
-  id: string;
-  name: string;
-  description: string;
-  resource: string;
-  action: string;
-}
+const ALL_PERMISSIONS = [
+  { id: "dashboard", name: "Dashboard", description: "Access to main dashboard", category: "General" },
+  { id: "pos", name: "Point of Sale", description: "Access to POS system", category: "Sales" },
+  { id: "inventory", name: "Inventory", description: "View inventory", category: "Inventory" },
+  { id: "stock_in", name: "Stock In", description: "Add stock to inventory", category: "Inventory" },
+  { id: "stock_out", name: "Stock Out", description: "Remove stock from inventory", category: "Inventory" },
+  { id: "products", name: "Products", description: "Manage products", category: "Inventory" },
+  { id: "categories", name: "Categories", description: "Manage categories", category: "Inventory" },
+  { id: "suppliers", name: "Suppliers", description: "Manage suppliers", category: "Contacts" },
+  { id: "customers", name: "Customers", description: "Manage customers", category: "Contacts" },
+  { id: "transactions", name: "Transactions", description: "View transactions", category: "Sales" },
+  { id: "reports", name: "Reports", description: "Access reports", category: "Analytics" },
+  { id: "loans", name: "Loans", description: "Manage loans", category: "Finance" },
+  { id: "warehouses", name: "Warehouses", description: "Manage warehouses", category: "Inventory" },
+  { id: "settings", name: "Settings", description: "Access system settings", category: "Administration" },
+  { id: "users", name: "Users", description: "Manage users", category: "Administration" },
+];
 
 interface RolePermissionsDialogProps {
   open: boolean;
@@ -31,37 +41,27 @@ export default function RolePermissionsDialog({
 }: RolePermissionsDialogProps) {
   const { toast } = useToast();
   const [loading, setLoading] = useState(false);
-  const [permissions, setPermissions] = useState<Permission[]>([]);
   const [selectedPermissions, setSelectedPermissions] = useState<Set<string>>(new Set());
 
   useEffect(() => {
     if (open && roleId) {
-      fetchPermissions();
+      fetchRolePermissions();
     }
   }, [open, roleId]);
 
-  const fetchPermissions = async () => {
+  const fetchRolePermissions = async () => {
     setLoading(true);
     try {
-      // Fetch all permissions
-      const { data: allPerms, error: permsError } = await supabase
-        .from("permissions")
-        .select("*")
-        .order("resource", { ascending: true })
-        .order("action", { ascending: true });
+      const { data, error } = await supabase
+        .from("roles")
+        .select("permissions")
+        .eq("id", roleId)
+        .single();
 
-      if (permsError) throw permsError;
+      if (error) throw error;
 
-      // Fetch current role permissions
-      const { data: rolePerms, error: rolePermsError } = await supabase
-        .from("role_permissions")
-        .select("permission_id")
-        .eq("role_id", roleId);
-
-      if (rolePermsError) throw rolePermsError;
-
-      setPermissions(allPerms || []);
-      setSelectedPermissions(new Set(rolePerms?.map(rp => rp.permission_id) || []));
+      const perms = Array.isArray(data?.permissions) ? data.permissions as string[] : [];
+      setSelectedPermissions(new Set(perms));
     } catch (error: any) {
       toast({
         title: "Error loading permissions",
@@ -76,19 +76,12 @@ export default function RolePermissionsDialog({
   const handleSave = async () => {
     setLoading(true);
     try {
-      // Delete existing role permissions
-      await supabase.from("role_permissions").delete().eq("role_id", roleId);
+      const { error } = await supabase
+        .from("roles")
+        .update({ permissions: Array.from(selectedPermissions) })
+        .eq("id", roleId);
 
-      // Insert new role permissions
-      const inserts = Array.from(selectedPermissions).map(permId => ({
-        role_id: roleId,
-        permission_id: permId
-      }));
-
-      if (inserts.length > 0) {
-        const { error } = await supabase.from("role_permissions").insert(inserts);
-        if (error) throw error;
-      }
+      if (error) throw error;
 
       toast({ title: "Permissions updated successfully" });
       onOpenChange(false);
@@ -113,14 +106,22 @@ export default function RolePermissionsDialog({
     setSelectedPermissions(newSelected);
   };
 
-  // Group permissions by resource
-  const groupedPermissions = permissions.reduce((acc, perm) => {
-    if (!acc[perm.resource]) {
-      acc[perm.resource] = [];
+  const selectAll = () => {
+    setSelectedPermissions(new Set(ALL_PERMISSIONS.map(p => p.id)));
+  };
+
+  const clearAll = () => {
+    setSelectedPermissions(new Set());
+  };
+
+  // Group permissions by category
+  const groupedPermissions = ALL_PERMISSIONS.reduce((acc, perm) => {
+    if (!acc[perm.category]) {
+      acc[perm.category] = [];
     }
-    acc[perm.resource].push(perm);
+    acc[perm.category].push(perm);
     return acc;
-  }, {} as Record<string, Permission[]>);
+  }, {} as Record<string, typeof ALL_PERMISSIONS>);
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -132,21 +133,27 @@ export default function RolePermissionsDialog({
           </DialogTitle>
         </DialogHeader>
 
-        {loading && !permissions.length ? (
+        {loading ? (
           <div className="flex justify-center py-8">
             <Loader2 className="h-8 w-8 animate-spin" />
           </div>
         ) : (
           <div className="space-y-4">
-            {Object.entries(groupedPermissions).map(([resource, perms]) => (
-              <Card key={resource}>
-                <CardHeader>
-                  <CardTitle className="text-lg capitalize">{resource}</CardTitle>
-                  <CardDescription>
-                    Manage {resource} permissions
-                  </CardDescription>
+            <div className="flex gap-2">
+              <Button variant="outline" size="sm" onClick={selectAll}>
+                Select All
+              </Button>
+              <Button variant="outline" size="sm" onClick={clearAll}>
+                Clear All
+              </Button>
+            </div>
+
+            {Object.entries(groupedPermissions).map(([category, perms]) => (
+              <Card key={category}>
+                <CardHeader className="py-3">
+                  <CardTitle className="text-base">{category}</CardTitle>
                 </CardHeader>
-                <CardContent className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <CardContent className="grid grid-cols-1 md:grid-cols-2 gap-3 pt-0">
                   {perms.map((perm) => (
                     <div key={perm.id} className="flex items-start space-x-3">
                       <Checkbox
@@ -154,14 +161,14 @@ export default function RolePermissionsDialog({
                         checked={selectedPermissions.has(perm.id)}
                         onCheckedChange={() => togglePermission(perm.id)}
                       />
-                      <div className="grid gap-1.5 leading-none">
+                      <div className="grid gap-1 leading-none">
                         <Label
                           htmlFor={perm.id}
-                          className="text-sm font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70 cursor-pointer"
+                          className="text-sm font-medium cursor-pointer"
                         >
-                          {perm.name.replace(/_/g, " ").replace(/\b\w/g, l => l.toUpperCase())}
+                          {perm.name}
                         </Label>
-                        <p className="text-sm text-muted-foreground">
+                        <p className="text-xs text-muted-foreground">
                           {perm.description}
                         </p>
                       </div>
