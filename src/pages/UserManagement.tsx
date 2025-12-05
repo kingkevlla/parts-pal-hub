@@ -4,16 +4,16 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { useToast } from '@/hooks/use-toast';
-import { Users, Plus, Pencil, Trash2, Shield, UserCog } from 'lucide-react';
+import { Users, Plus, Pencil, Trash2, Shield, Crown, UserCog, ShieldCheck } from 'lucide-react';
 import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from '@/contexts/AuthContext';
+import { usePermissions } from '@/hooks/usePermissions';
 import AddEditUserDialog from '@/components/users/AddEditUserDialog';
 import DeleteUserDialog from '@/components/users/DeleteUserDialog';
 import RolePermissionsDialog from '@/components/users/RolePermissionsDialog';
+import type { Database } from '@/integrations/supabase/types';
 
-interface UserRole {
-  role: string;
-}
+type AppRole = Database["public"]["Enums"]["app_role"];
 
 interface UserProfile {
   id: string;
@@ -24,45 +24,49 @@ interface UserProfile {
   roles: string[];
 }
 
+const ROLE_COLORS: Record<string, string> = {
+  admin: 'bg-red-500 hover:bg-red-600',
+  owner: 'bg-purple-500 hover:bg-purple-600',
+  manager: 'bg-blue-500 hover:bg-blue-600',
+  cashier: 'bg-green-500 hover:bg-green-600',
+  user: 'bg-gray-500 hover:bg-gray-600',
+};
+
+const ROLE_ICONS: Record<string, React.ReactNode> = {
+  admin: <ShieldCheck className="h-3 w-3 mr-1" />,
+  owner: <Crown className="h-3 w-3 mr-1" />,
+  manager: <UserCog className="h-3 w-3 mr-1" />,
+  cashier: <Users className="h-3 w-3 mr-1" />,
+  user: <Users className="h-3 w-3 mr-1" />,
+};
+
 export default function UserManagement() {
   const { user } = useAuth();
+  const { isAdmin, isOwner, hasPermission, loading: permissionsLoading } = usePermissions();
   const [users, setUsers] = useState<UserProfile[]>([]);
-  const [userRoles, setUserRoles] = useState<Record<string, UserRole[]>>({});
-  const [roles, setRoles] = useState<{ id: string; name: string }[]>([]);
-  const [isAdmin, setIsAdmin] = useState(false);
+  const [roles, setRoles] = useState<{ id: string; name: string; description: string; permissions: string[] }[]>([]);
   const [addEditDialogOpen, setAddEditDialogOpen] = useState(false);
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [permissionsDialogOpen, setPermissionsDialogOpen] = useState(false);
   const [selectedUser, setSelectedUser] = useState<UserProfile | null>(null);
   const [selectedRole, setSelectedRole] = useState<{ id: string; name: string } | null>(null);
+  const [loading, setLoading] = useState(true);
   const { toast } = useToast();
 
+  const canManageUsers = isAdmin || isOwner;
+
   useEffect(() => {
-    checkAdminStatus();
-  }, [user]);
-
-  const checkAdminStatus = async () => {
-    if (!user) return;
-
-    try {
-      const { data, error } = await supabase.rpc("has_role", {
-        _user_id: user.id,
-        _role_name: "admin"
-      });
-
-      if (error) throw error;
-      setIsAdmin(data);
-
-      if (data) {
-        fetchUsers();
-        fetchRoles();
-      }
-    } catch (error: any) {
-      console.error("Error checking admin status:", error);
+    if (!permissionsLoading && canManageUsers) {
+      fetchUsers();
+      fetchRoles();
+    } else if (!permissionsLoading) {
+      setLoading(false);
     }
-  };
+  }, [permissionsLoading, canManageUsers]);
 
   const fetchUsers = async () => {
+    setLoading(true);
+    
     // Fetch profiles
     const { data: profiles, error: profilesError } = await supabase
       .from('profiles')
@@ -75,16 +79,14 @@ export default function UserManagement() {
         description: profilesError.message,
         variant: 'destructive',
       });
+      setLoading(false);
       return;
     }
 
-    // Fetch user roles separately with role names
+    // Fetch user roles
     const { data: roleData, error: rolesError } = await supabase
       .from('user_roles')
-      .select(`
-        user_id,
-        roles (name)
-      `);
+      .select('user_id, role');
 
     if (rolesError) {
       toast({
@@ -92,32 +94,33 @@ export default function UserManagement() {
         description: rolesError.message,
         variant: 'destructive',
       });
+      setLoading(false);
       return;
     }
 
     // Group roles by user_id
-    const rolesMap: Record<string, UserRole[]> = {};
-    roleData?.forEach((userRole: any) => {
+    const rolesMap: Record<string, string[]> = {};
+    roleData?.forEach((userRole) => {
       if (!rolesMap[userRole.user_id]) {
         rolesMap[userRole.user_id] = [];
       }
-      rolesMap[userRole.user_id].push({ role: userRole.roles.name });
+      rolesMap[userRole.user_id].push(userRole.role);
     });
 
     // Map profiles to UserProfile with roles
     const usersWithRoles: UserProfile[] = (profiles || []).map(profile => ({
       ...profile,
-      roles: rolesMap[profile.id]?.map(r => r.role) || []
+      roles: rolesMap[profile.id] || ['user']
     }));
 
     setUsers(usersWithRoles);
-    setUserRoles(rolesMap);
+    setLoading(false);
   };
 
   const fetchRoles = async () => {
     const { data, error } = await supabase
       .from('roles')
-      .select('id, name')
+      .select('id, name, description, permissions')
       .order('name', { ascending: true });
 
     if (error) {
@@ -129,7 +132,10 @@ export default function UserManagement() {
       return;
     }
 
-    setRoles(data || []);
+    setRoles(data?.map(r => ({
+      ...r,
+      permissions: Array.isArray(r.permissions) ? r.permissions as string[] : []
+    })) || []);
   };
 
   const handleAddUser = () => {
@@ -153,15 +159,27 @@ export default function UserManagement() {
   };
 
   const getRoleBadge = (role: string) => {
-    const colors = {
-      admin: 'bg-red-500',
-      manager: 'bg-blue-500',
-      staff: 'bg-green-500',
-    };
-    return <Badge className={colors[role as keyof typeof colors]}>{role}</Badge>;
+    return (
+      <Badge className={`${ROLE_COLORS[role] || ROLE_COLORS.user} text-white flex items-center`}>
+        {ROLE_ICONS[role]}
+        {role.charAt(0).toUpperCase() + role.slice(1)}
+      </Badge>
+    );
   };
 
-  if (!isAdmin) {
+  const getRoleCount = (roleName: string) => {
+    return users.filter(u => u.roles.includes(roleName)).length;
+  };
+
+  if (permissionsLoading || loading) {
+    return (
+      <div className="flex items-center justify-center h-64">
+        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
+      </div>
+    );
+  }
+
+  if (!canManageUsers) {
     return (
       <div className="space-y-6">
         <Card>
@@ -170,7 +188,7 @@ export default function UserManagement() {
           </CardHeader>
           <CardContent>
             <p className="text-muted-foreground">
-              You need administrator privileges to access user management.
+              You need administrator or owner privileges to access user management.
             </p>
           </CardContent>
         </Card>
@@ -191,7 +209,7 @@ export default function UserManagement() {
         </Button>
       </div>
 
-      <div className="grid gap-4 md:grid-cols-3">
+      <div className="grid gap-4 md:grid-cols-5">
         <Card>
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
             <CardTitle className="text-sm font-medium">Total Users</CardTitle>
@@ -203,35 +221,45 @@ export default function UserManagement() {
         </Card>
         <Card>
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Admins</CardTitle>
-            <Users className="h-4 w-4 text-muted-foreground" />
+            <CardTitle className="text-sm font-medium">Owners</CardTitle>
+            <Crown className="h-4 w-4 text-purple-500" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold">
-              {users.filter(u => userRoles[u.id]?.some(r => r.role === 'admin')).length}
-            </div>
+            <div className="text-2xl font-bold">{getRoleCount('owner')}</div>
           </CardContent>
         </Card>
         <Card>
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Staff</CardTitle>
-            <Users className="h-4 w-4 text-muted-foreground" />
+            <CardTitle className="text-sm font-medium">Managers</CardTitle>
+            <UserCog className="h-4 w-4 text-blue-500" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold">
-              {users.filter(u => userRoles[u.id]?.some(r => r.role === 'staff')).length}
-            </div>
+            <div className="text-2xl font-bold">{getRoleCount('manager')}</div>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+            <CardTitle className="text-sm font-medium">Cashiers</CardTitle>
+            <Users className="h-4 w-4 text-green-500" />
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold">{getRoleCount('cashier')}</div>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+            <CardTitle className="text-sm font-medium">Admins</CardTitle>
+            <ShieldCheck className="h-4 w-4 text-red-500" />
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold">{getRoleCount('admin')}</div>
           </CardContent>
         </Card>
       </div>
 
       <Card>
-        <CardHeader className="flex flex-row items-center justify-between">
+        <CardHeader>
           <CardTitle>All Users</CardTitle>
-          <Button variant="outline" onClick={() => roles.length > 0 && handleManagePermissions(roles[0])}>
-            <UserCog className="h-4 w-4 mr-2" />
-            Manage Role Permissions
-          </Button>
         </CardHeader>
         <CardContent>
           <Table>
@@ -239,45 +267,53 @@ export default function UserManagement() {
               <TableRow>
                 <TableHead>Name</TableHead>
                 <TableHead>Phone</TableHead>
-                <TableHead>Roles</TableHead>
+                <TableHead>Role</TableHead>
                 <TableHead>Joined</TableHead>
                 <TableHead className="text-right">Actions</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
-              {users.map((userProfile) => (
-                <TableRow key={userProfile.id}>
-                  <TableCell className="font-medium">{userProfile.full_name || 'N/A'}</TableCell>
-                  <TableCell>{userProfile.phone || 'N/A'}</TableCell>
-                  <TableCell>
-                    <div className="flex gap-2">
-                      {(userRoles[userProfile.id] || []).map((role, idx) => (
-                        <span key={idx}>{getRoleBadge(role.role)}</span>
-                      ))}
-                    </div>
-                  </TableCell>
-                  <TableCell>{new Date(userProfile.created_at).toLocaleDateString()}</TableCell>
-                  <TableCell className="text-right">
-                    <div className="flex justify-end gap-2">
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        onClick={() => handleEditUser(userProfile)}
-                      >
-                        <Pencil className="h-4 w-4" />
-                      </Button>
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        onClick={() => handleDeleteUser(userProfile)}
-                        disabled={userProfile.id === user?.id}
-                      >
-                        <Trash2 className="h-4 w-4" />
-                      </Button>
-                    </div>
+              {users.length === 0 ? (
+                <TableRow>
+                  <TableCell colSpan={5} className="text-center text-muted-foreground">
+                    No users found
                   </TableCell>
                 </TableRow>
-              ))}
+              ) : (
+                users.map((userProfile) => (
+                  <TableRow key={userProfile.id}>
+                    <TableCell className="font-medium">{userProfile.full_name || 'N/A'}</TableCell>
+                    <TableCell>{userProfile.phone || 'N/A'}</TableCell>
+                    <TableCell>
+                      <div className="flex gap-2">
+                        {userProfile.roles.map((role, idx) => (
+                          <span key={idx}>{getRoleBadge(role)}</span>
+                        ))}
+                      </div>
+                    </TableCell>
+                    <TableCell>{new Date(userProfile.created_at).toLocaleDateString()}</TableCell>
+                    <TableCell className="text-right">
+                      <div className="flex justify-end gap-2">
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          onClick={() => handleEditUser(userProfile)}
+                        >
+                          <Pencil className="h-4 w-4" />
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          onClick={() => handleDeleteUser(userProfile)}
+                          disabled={userProfile.id === user?.id}
+                        >
+                          <Trash2 className="h-4 w-4" />
+                        </Button>
+                      </div>
+                    </TableCell>
+                  </TableRow>
+                ))
+              )}
             </TableBody>
           </Table>
         </CardContent>
@@ -291,18 +327,21 @@ export default function UserManagement() {
           </CardTitle>
         </CardHeader>
         <CardContent>
-          <div className="space-y-4">
+          <div className="grid gap-4 md:grid-cols-2">
             {roles.map((role) => (
               <div key={role.id} className="flex items-center justify-between p-4 border rounded-lg">
-                <div>
-                  <h3 className="font-semibold capitalize">{role.name}</h3>
-                  <p className="text-sm text-muted-foreground">
-                    {users.filter(u => userRoles[u.id]?.some(r => r.role === role.name)).length} users
-                  </p>
+                <div className="space-y-1">
+                  <div className="flex items-center gap-2">
+                    {getRoleBadge(role.name)}
+                    <span className="text-sm text-muted-foreground">
+                      ({getRoleCount(role.name)} users)
+                    </span>
+                  </div>
+                  <p className="text-sm text-muted-foreground">{role.description}</p>
                 </div>
-                <Button variant="outline" onClick={() => handleManagePermissions(role)}>
+                <Button variant="outline" size="sm" onClick={() => handleManagePermissions(role)}>
                   <Shield className="h-4 w-4 mr-2" />
-                  Manage Permissions
+                  Permissions
                 </Button>
               </div>
             ))}

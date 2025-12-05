@@ -28,7 +28,7 @@ interface LowStockProduct {
   sku: string;
   name: string;
   total_stock: number;
-  reorder_level: number;
+  min_stock_level: number;
   category: string | null;
 }
 
@@ -58,16 +58,16 @@ export default function Dashboard() {
       })
       .subscribe();
 
-    const salesChannel = supabase
-      .channel('dashboard-sales-changes')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'sales' }, () => {
+    const transactionsChannel = supabase
+      .channel('dashboard-transactions-changes')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'transactions' }, () => {
         fetchDashboardData();
       })
       .subscribe();
 
     return () => {
       supabase.removeChannel(stockChannel);
-      supabase.removeChannel(salesChannel);
+      supabase.removeChannel(transactionsChannel);
     };
   }, [settings.low_stock_threshold]);
 
@@ -82,19 +82,19 @@ export default function Dashboard() {
       const startOfMonth = new Date(new Date().getFullYear(), new Date().getMonth(), 1).toISOString();
       const { data: stockMovements } = await supabase
         .from('stock_movements')
-        .select('type, quantity')
+        .select('movement_type, quantity')
         .gte('created_at', startOfMonth);
 
-      const stockInMonth = stockMovements?.filter(m => m.type === 'in').reduce((sum, m) => sum + m.quantity, 0) || 0;
-      const stockOutMonth = stockMovements?.filter(m => m.type === 'out' || m.type === 'sale').reduce((sum, m) => sum + m.quantity, 0) || 0;
+      const stockInMonth = stockMovements?.filter(m => m.movement_type === 'in').reduce((sum, m) => sum + (m.quantity || 0), 0) || 0;
+      const stockOutMonth = stockMovements?.filter(m => m.movement_type === 'out' || m.movement_type === 'sale').reduce((sum, m) => sum + (m.quantity || 0), 0) || 0;
 
-      // Fetch monthly revenue
-      const { data: monthlySales } = await supabase
-        .from('sales')
+      // Fetch monthly revenue from transactions
+      const { data: monthlyTransactions } = await supabase
+        .from('transactions')
         .select('total_amount')
         .gte('created_at', startOfMonth);
 
-      const monthlyRevenue = monthlySales?.reduce((sum, s) => sum + Number(s.total_amount), 0) || 0;
+      const monthlyRevenue = monthlyTransactions?.reduce((sum, t) => sum + Number(t.total_amount || 0), 0) || 0;
 
       // Fetch active customers count
       const { count: customersCount } = await supabase
@@ -104,22 +104,22 @@ export default function Dashboard() {
       // Fetch recent activity
       const { data: recentMovements } = await supabase
         .from('stock_movements')
-        .select('id, type, quantity, created_at, products(name)')
+        .select('id, movement_type, quantity, created_at, products(name)')
         .order('created_at', { ascending: false })
         .limit(5);
 
       const activities: Activity[] = recentMovements?.map(m => ({
         id: m.id,
-        type: m.type === 'in' ? 'Stock In' : 'Stock Out',
+        type: m.movement_type === 'in' ? 'Stock In' : 'Stock Out',
         product_name: (m.products as any)?.name || 'Unknown Product',
         quantity: m.quantity,
-        created_at: m.created_at
+        created_at: m.created_at || ''
       })) || [];
 
       // Fetch low stock items
       const { data: products } = await supabase
         .from('products')
-        .select('id, sku, name, reorder_level, categories(name)');
+        .select('id, sku, name, min_stock_level, categories(name)');
 
       const lowStock: LowStockProduct[] = [];
       if (products) {
@@ -129,16 +129,16 @@ export default function Dashboard() {
             .select('quantity')
             .eq('product_id', product.id);
 
-          const totalStock = inventory?.reduce((sum, inv) => sum + inv.quantity, 0) || 0;
-          const threshold = product.reorder_level || settings.low_stock_threshold;
+          const totalStock = inventory?.reduce((sum, inv) => sum + (inv.quantity || 0), 0) || 0;
+          const threshold = product.min_stock_level || settings.low_stock_threshold;
           
           if (totalStock <= threshold) {
             lowStock.push({
               id: product.id,
-              sku: product.sku,
+              sku: product.sku || '',
               name: product.name,
               total_stock: totalStock,
-              reorder_level: threshold,
+              min_stock_level: threshold,
               category: (product.categories as any)?.name || null
             });
           }
@@ -278,7 +278,7 @@ export default function Dashboard() {
                     </div>
                     <div className="flex items-center gap-2 text-sm">
                       <span className="text-destructive font-medium">{item.total_stock} units</span>
-                      <span className="text-muted-foreground">/ Min: {item.reorder_level}</span>
+                      <span className="text-muted-foreground">/ Min: {item.min_stock_level}</span>
                     </div>
                   </div>
                 ))}
