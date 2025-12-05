@@ -6,7 +6,7 @@ import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { useToast } from '@/hooks/use-toast';
-import { Trash2, AlertTriangle, Minus, Plus, Package, CreditCard, Banknote, Smartphone, Building2, X, Split } from 'lucide-react';
+import { Trash2, AlertTriangle, Minus, Plus, Package, CreditCard, Banknote, Smartphone, Building2, X, Split, Wallet, Calendar, CheckCircle } from 'lucide-react';
 import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from '@/contexts/AuthContext';
 import { useCurrency } from '@/hooks/useCurrency';
@@ -16,6 +16,9 @@ import POSHeader from '@/components/pos/POSHeader';
 import { Badge } from '@/components/ui/badge';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { ScrollArea } from '@/components/ui/scroll-area';
+import { BarcodeScanner } from '@/components/inventory/BarcodeScanner';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { format } from 'date-fns';
 
 interface CartItem {
   productId: string;
@@ -35,6 +38,7 @@ interface ProductWithStock {
   id: string;
   name: string;
   sku: string | null;
+  barcode: string | null;
   selling_price: number;
   min_stock_level: number | null;
   image_url: string | null;
@@ -44,6 +48,17 @@ interface ProductWithStock {
 interface SplitPayment {
   method: string;
   amount: number;
+}
+
+interface Loan {
+  id: string;
+  amount: number;
+  paid_amount: number | null;
+  due_date: string | null;
+  status: string | null;
+  notes: string | null;
+  created_at: string | null;
+  customers: { name: string; phone: string | null } | null;
 }
 
 // Fuzzy search function
@@ -80,6 +95,12 @@ export default function POS() {
   const [splitPayments, setSplitPayments] = useState<SplitPayment[]>([]);
   const [newSplitMethod, setNewSplitMethod] = useState('cash');
   const [newSplitAmount, setNewSplitAmount] = useState('');
+  const [activeTab, setActiveTab] = useState('sales');
+  const [loans, setLoans] = useState<Loan[]>([]);
+  const [loanSearchQuery, setLoanSearchQuery] = useState('');
+  const [selectedLoan, setSelectedLoan] = useState<Loan | null>(null);
+  const [loanPaymentAmount, setLoanPaymentAmount] = useState('');
+  const [loanPaymentMethod, setLoanPaymentMethod] = useState('cash');
   const { toast } = useToast();
   const { user } = useAuth();
   const { formatAmount } = useCurrency();
@@ -94,6 +115,7 @@ export default function POS() {
 
   useEffect(() => {
     fetchWarehouses();
+    fetchLoans();
   }, []);
 
   useEffect(() => {
@@ -105,7 +127,7 @@ export default function POS() {
   const fetchProductsWithStock = async () => {
     const { data: productsData, error: productsError } = await supabase
       .from('products')
-      .select('id, name, sku, selling_price, min_stock_level, image_url')
+      .select('id, name, sku, barcode, selling_price, min_stock_level, image_url')
       .eq('is_active', true)
       .order('name');
     
@@ -131,6 +153,75 @@ export default function POS() {
     if (!error) {
       setWarehouses(data || []);
       if (data && data.length > 0) setSelectedWarehouse(data[0].id);
+    }
+  };
+
+  const fetchLoans = async () => {
+    const { data, error } = await supabase
+      .from('loans')
+      .select('*, customers(name, phone)')
+      .in('status', ['pending', 'partial'])
+      .order('due_date', { ascending: true });
+    if (!error) setLoans(data || []);
+  };
+
+  const handleBarcodeProduct = (product: any) => {
+    const productWithStock = products.find(p => p.id === product.id);
+    if (productWithStock) {
+      addToCart(productWithStock);
+    } else {
+      // Product not in current warehouse inventory
+      toast({ 
+        title: 'Product Found', 
+        description: `${product.name} - Not available in selected warehouse`,
+        variant: 'destructive'
+      });
+    }
+  };
+
+  const processLoanPayment = async () => {
+    if (!selectedLoan) return;
+    
+    const amount = parseFloat(loanPaymentAmount);
+    if (isNaN(amount) || amount <= 0) {
+      toast({ title: 'Error', description: 'Enter a valid payment amount', variant: 'destructive' });
+      return;
+    }
+
+    const remaining = selectedLoan.amount - (selectedLoan.paid_amount || 0);
+    if (amount > remaining) {
+      toast({ title: 'Error', description: `Maximum payable: ${formatAmount(remaining)}`, variant: 'destructive' });
+      return;
+    }
+
+    setIsProcessing(true);
+    try {
+      const newPaidAmount = (selectedLoan.paid_amount || 0) + amount;
+      const newStatus = newPaidAmount >= selectedLoan.amount ? 'paid' : 'partial';
+
+      const { error } = await supabase
+        .from('loans')
+        .update({ 
+          paid_amount: newPaidAmount, 
+          status: newStatus,
+          notes: `${selectedLoan.notes || ''}\nPayment of ${formatAmount(amount)} via ${loanPaymentMethod} on ${format(new Date(), 'PPp')}`
+        })
+        .eq('id', selectedLoan.id);
+
+      if (error) throw error;
+
+      toast({ 
+        title: 'Payment Successful', 
+        description: newStatus === 'paid' ? 'Loan fully paid!' : `${formatAmount(amount)} paid. Remaining: ${formatAmount(selectedLoan.amount - newPaidAmount)}`
+      });
+
+      setSelectedLoan(null);
+      setLoanPaymentAmount('');
+      fetchLoans();
+    } catch (error: any) {
+      toast({ title: 'Error', description: error.message, variant: 'destructive' });
+    } finally {
+      setIsProcessing(false);
     }
   };
 
@@ -331,13 +422,20 @@ export default function POS() {
 
   const filteredProducts = products.filter(p => 
     fuzzySearch(p.name, searchQuery) ||
-    (p.sku && fuzzySearch(p.sku, searchQuery))
+    (p.sku && fuzzySearch(p.sku, searchQuery)) ||
+    (p.barcode && fuzzySearch(p.barcode, searchQuery))
+  );
+
+  const filteredLoans = loans.filter(l => 
+    (l.customers?.name && fuzzySearch(l.customers.name, loanSearchQuery)) ||
+    (l.customers?.phone && fuzzySearch(l.customers.phone, loanSearchQuery))
   );
 
   const handleRefresh = () => {
     fetchProductsWithStock();
     fetchWarehouses();
-    toast({ title: 'Refreshed', description: 'Products and stock updated' });
+    fetchLoans();
+    toast({ title: 'Refreshed', description: 'Data updated' });
   };
 
   return (
@@ -349,29 +447,41 @@ export default function POS() {
       />
 
       <div className="flex-1 overflow-hidden p-4">
-        <div className="grid gap-4 lg:grid-cols-3 h-full max-w-[1600px] mx-auto">
-          {/* Products Grid */}
-          <Card className="lg:col-span-2 flex flex-col overflow-hidden">
-            <CardContent className="p-4 flex flex-col flex-1 overflow-hidden">
-              <div className="flex gap-3 mb-4">
-                <Select value={selectedWarehouse} onValueChange={setSelectedWarehouse}>
-                  <SelectTrigger className="w-48">
-                    <SelectValue placeholder="Select Warehouse" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {warehouses.map((w) => (
-                      <SelectItem key={w.id} value={w.id}>{w.name}</SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-                <Input
-                  placeholder="Search products..."
-                  value={searchQuery}
-                  onChange={(e) => setSearchQuery(e.target.value)}
-                  className="flex-1"
-                  autoFocus
-                />
-              </div>
+        <Tabs value={activeTab} onValueChange={setActiveTab} className="h-full flex flex-col">
+          <TabsList className="mb-4 w-fit">
+            <TabsTrigger value="sales" className="gap-2">
+              <Package className="h-4 w-4" /> Sales
+            </TabsTrigger>
+            <TabsTrigger value="loans" className="gap-2">
+              <Wallet className="h-4 w-4" /> Loan Payments
+            </TabsTrigger>
+          </TabsList>
+
+          <TabsContent value="sales" className="flex-1 overflow-hidden mt-0">
+            <div className="grid gap-4 lg:grid-cols-3 h-full max-w-[1600px] mx-auto">
+              {/* Products Grid */}
+              <Card className="lg:col-span-2 flex flex-col overflow-hidden">
+                <CardContent className="p-4 flex flex-col flex-1 overflow-hidden">
+                  <div className="flex gap-3 mb-4">
+                    <Select value={selectedWarehouse} onValueChange={setSelectedWarehouse}>
+                      <SelectTrigger className="w-48">
+                        <SelectValue placeholder="Select Warehouse" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {warehouses.map((w) => (
+                          <SelectItem key={w.id} value={w.id}>{w.name}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                    <Input
+                      placeholder="Search by name, SKU, or barcode..."
+                      value={searchQuery}
+                      onChange={(e) => setSearchQuery(e.target.value)}
+                      className="flex-1"
+                      autoFocus
+                    />
+                    <BarcodeScanner onProductFound={handleBarcodeProduct} />
+                  </div>
 
               <ScrollArea className="flex-1">
                 <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 xl:grid-cols-5 gap-3">
@@ -535,9 +645,157 @@ export default function POS() {
                   </Button>
                 </div>
               </div>
-            </CardContent>
-          </Card>
-        </div>
+              </CardContent>
+            </Card>
+          </div>
+        </TabsContent>
+
+        {/* Loan Payments Tab */}
+        <TabsContent value="loans" className="flex-1 overflow-hidden mt-0">
+          <div className="grid gap-4 lg:grid-cols-2 h-full max-w-[1400px] mx-auto">
+            {/* Loans List */}
+            <Card className="flex flex-col overflow-hidden">
+              <CardContent className="p-4 flex flex-col flex-1 overflow-hidden">
+                <div className="mb-4">
+                  <Input
+                    placeholder="Search by customer name or phone..."
+                    value={loanSearchQuery}
+                    onChange={(e) => setLoanSearchQuery(e.target.value)}
+                  />
+                </div>
+                <ScrollArea className="flex-1">
+                  {filteredLoans.length === 0 ? (
+                    <div className="flex flex-col items-center justify-center h-40 text-muted-foreground">
+                      <Wallet className="h-10 w-10 mb-2 opacity-50" />
+                      <p className="text-sm">No pending loans</p>
+                    </div>
+                  ) : (
+                    <div className="space-y-2">
+                      {filteredLoans.map((loan) => {
+                        const remaining = loan.amount - (loan.paid_amount || 0);
+                        const isOverdue = loan.due_date && new Date(loan.due_date) < new Date();
+                        return (
+                          <button
+                            key={loan.id}
+                            type="button"
+                            className={`w-full text-left p-3 rounded-lg border transition-all ${
+                              selectedLoan?.id === loan.id ? 'border-primary bg-primary/5' : 'hover:border-primary/50'
+                            }`}
+                            onClick={() => {
+                              setSelectedLoan(loan);
+                              setLoanPaymentAmount(remaining.toString());
+                            }}
+                          >
+                            <div className="flex justify-between items-start mb-1">
+                              <span className="font-medium">{loan.customers?.name || 'Unknown'}</span>
+                              <Badge variant={isOverdue ? 'destructive' : loan.status === 'partial' ? 'secondary' : 'outline'}>
+                                {isOverdue ? 'Overdue' : loan.status}
+                              </Badge>
+                            </div>
+                            {loan.customers?.phone && (
+                              <p className="text-xs text-muted-foreground">{loan.customers.phone}</p>
+                            )}
+                            <div className="flex justify-between mt-2 text-sm">
+                              <span>Remaining:</span>
+                              <span className="font-semibold text-destructive">{formatAmount(remaining)}</span>
+                            </div>
+                            {loan.due_date && (
+                              <div className="flex items-center gap-1 mt-1 text-xs text-muted-foreground">
+                                <Calendar className="h-3 w-3" />
+                                Due: {format(new Date(loan.due_date), 'PP')}
+                              </div>
+                            )}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  )}
+                </ScrollArea>
+              </CardContent>
+            </Card>
+
+            {/* Loan Payment Form */}
+            <Card className="flex flex-col">
+              <CardContent className="p-4 flex flex-col flex-1">
+                {selectedLoan ? (
+                  <div className="space-y-4">
+                    <div className="p-4 bg-muted rounded-lg">
+                      <h3 className="font-semibold text-lg mb-2">{selectedLoan.customers?.name}</h3>
+                      <div className="grid grid-cols-2 gap-2 text-sm">
+                        <div>
+                          <span className="text-muted-foreground">Total Loan:</span>
+                          <p className="font-medium">{formatAmount(selectedLoan.amount)}</p>
+                        </div>
+                        <div>
+                          <span className="text-muted-foreground">Paid:</span>
+                          <p className="font-medium text-green-600">{formatAmount(selectedLoan.paid_amount || 0)}</p>
+                        </div>
+                        <div className="col-span-2">
+                          <span className="text-muted-foreground">Remaining:</span>
+                          <p className="font-semibold text-lg text-destructive">
+                            {formatAmount(selectedLoan.amount - (selectedLoan.paid_amount || 0))}
+                          </p>
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="space-y-2">
+                      <Label>Payment Amount</Label>
+                      <Input
+                        type="number"
+                        placeholder="Enter amount"
+                        value={loanPaymentAmount}
+                        onChange={(e) => setLoanPaymentAmount(e.target.value)}
+                      />
+                    </div>
+
+                    <div className="space-y-2">
+                      <Label>Payment Method</Label>
+                      <div className="grid grid-cols-4 gap-2">
+                        {paymentMethods.map(pm => (
+                          <Button
+                            key={pm.value}
+                            variant={loanPaymentMethod === pm.value ? 'default' : 'outline'}
+                            size="sm"
+                            className="h-10 text-xs flex-col gap-0.5"
+                            onClick={() => setLoanPaymentMethod(pm.value)}
+                          >
+                            <pm.icon className="h-4 w-4" />
+                            <span>{pm.label}</span>
+                          </Button>
+                        ))}
+                      </div>
+                    </div>
+
+                    <Button 
+                      className="w-full gap-2" 
+                      size="lg"
+                      onClick={processLoanPayment}
+                      disabled={isProcessing}
+                    >
+                      <CheckCircle className="h-5 w-5" />
+                      {isProcessing ? 'Processing...' : 'Process Payment'}
+                    </Button>
+
+                    <Button 
+                      variant="outline" 
+                      className="w-full"
+                      onClick={() => setSelectedLoan(null)}
+                    >
+                      Cancel
+                    </Button>
+                  </div>
+                ) : (
+                  <div className="flex flex-col items-center justify-center h-full text-muted-foreground">
+                    <Wallet className="h-12 w-12 mb-3 opacity-50" />
+                    <p>Select a loan to process payment</p>
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+          </div>
+        </TabsContent>
+      </Tabs>
       </div>
 
       {/* Split Payment Dialog */}
