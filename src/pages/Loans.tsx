@@ -13,6 +13,9 @@ import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from '@/contexts/AuthContext';
 import { useCurrency } from '@/hooks/useCurrency';
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog';
+import { Checkbox } from '@/components/ui/checkbox';
+import { useDataTable } from '@/hooks/useDataTable';
+import { DataTableSearch, DataTablePagination, DataTableBulkActions, SelectAllCheckbox } from '@/components/ui/data-table-controls';
 
 interface Customer {
   id: string;
@@ -30,6 +33,7 @@ interface Loan {
   notes: string | null;
   created_at: string;
   customer?: Customer | null;
+  customer_name?: string;
 }
 
 export default function Loans() {
@@ -42,6 +46,12 @@ export default function Loans() {
   const { toast } = useToast();
   const { user } = useAuth();
   const { formatAmount } = useCurrency();
+
+  const table = useDataTable({
+    data: loans,
+    searchFields: ['customer_name', 'status', 'notes'] as (keyof Loan)[],
+    defaultPageSize: 100,
+  });
 
   useEffect(() => {
     fetchLoans();
@@ -70,7 +80,8 @@ export default function Loans() {
         due_date: loan.due_date,
         notes: loan.notes,
         created_at: loan.created_at || '',
-        customer: loan.customers as Customer | null
+        customer: loan.customers as Customer | null,
+        customer_name: (loan.customers as Customer | null)?.name || 'Unknown'
       }));
       setLoans(formattedLoans);
     }
@@ -134,6 +145,19 @@ export default function Loans() {
     setDeleteLoan(null);
   };
 
+  const handleBulkDelete = async () => {
+    const ids = Array.from(table.selectedIds);
+    const { error } = await supabase.from('loans').delete().in('id', ids);
+
+    if (error) {
+      toast({ title: 'Error', description: error.message, variant: 'destructive' });
+    } else {
+      toast({ title: 'Success', description: `${ids.length} loans deleted successfully` });
+      table.clearSelection();
+      fetchLoans();
+    }
+  };
+
   const getStatusBadge = (status: string) => {
     const colors: Record<string, string> = {
       active: 'bg-blue-500',
@@ -149,7 +173,7 @@ export default function Loans() {
   };
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-6 p-6">
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-3xl font-bold">Loan Management</h1>
@@ -237,11 +261,30 @@ export default function Loans() {
       <Card>
         <CardHeader>
           <CardTitle>Loans List</CardTitle>
+          <div className="flex flex-col gap-4 sm:flex-row sm:items-center mt-4">
+            <DataTableSearch
+              value={table.searchTerm}
+              onChange={table.setSearchTerm}
+              placeholder="Search by customer, status, or notes..."
+            />
+          </div>
+          <DataTableBulkActions
+            selectedCount={table.selectedIds.size}
+            onDelete={handleBulkDelete}
+            itemName="loans"
+          />
         </CardHeader>
         <CardContent>
           <Table>
             <TableHeader>
               <TableRow>
+                <TableHead className="w-12">
+                  <SelectAllCheckbox
+                    isAllSelected={table.isAllSelected}
+                    isSomeSelected={table.isSomeSelected}
+                    onToggle={table.selectAll}
+                  />
+                </TableHead>
                 <TableHead>Customer</TableHead>
                 <TableHead>Phone</TableHead>
                 <TableHead>Amount</TableHead>
@@ -253,15 +296,21 @@ export default function Loans() {
               </TableRow>
             </TableHeader>
             <TableBody>
-              {loans.length === 0 ? (
+              {table.paginatedData.length === 0 ? (
                 <TableRow>
-                  <TableCell colSpan={8} className="text-center text-muted-foreground">
+                  <TableCell colSpan={9} className="text-center text-muted-foreground">
                     No loans found
                   </TableCell>
                 </TableRow>
               ) : (
-                loans.map((loan) => (
+                table.paginatedData.map((loan) => (
                   <TableRow key={loan.id}>
+                    <TableCell>
+                      <Checkbox
+                        checked={table.selectedIds.has(loan.id)}
+                        onCheckedChange={() => table.toggleSelect(loan.id)}
+                      />
+                    </TableCell>
                     <TableCell className="font-medium">{loan.customer?.name || 'Unknown'}</TableCell>
                     <TableCell>{loan.customer?.phone || 'N/A'}</TableCell>
                     <TableCell>{formatAmount(loan.amount)}</TableCell>
@@ -280,6 +329,14 @@ export default function Loans() {
               )}
             </TableBody>
           </Table>
+          <DataTablePagination
+            currentPage={table.currentPage}
+            totalPages={table.totalPages}
+            pageSize={table.pageSize}
+            totalItems={table.totalItems}
+            onPageChange={table.goToPage}
+            onPageSizeChange={table.changePageSize}
+          />
         </CardContent>
       </Card>
 

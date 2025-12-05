@@ -10,6 +10,9 @@ import { Plus, Pencil, Trash2, FolderOpen } from 'lucide-react';
 import { supabase } from '@/integrations/supabase/client';
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog';
 import { Textarea } from '@/components/ui/textarea';
+import { Checkbox } from '@/components/ui/checkbox';
+import { useDataTable } from '@/hooks/useDataTable';
+import { DataTableSearch, DataTablePagination, DataTableBulkActions, SelectAllCheckbox } from '@/components/ui/data-table-controls';
 
 interface Category {
   id: string;
@@ -25,6 +28,12 @@ export default function Categories() {
   const [editingCategory, setEditingCategory] = useState<Category | null>(null);
   const [deleteCategory, setDeleteCategory] = useState<Category | null>(null);
   const { toast } = useToast();
+
+  const table = useDataTable({
+    data: categories,
+    searchFields: ['name', 'description'] as (keyof Category)[],
+    defaultPageSize: 100,
+  });
 
   useEffect(() => {
     fetchCategories();
@@ -97,6 +106,19 @@ export default function Categories() {
     setDeleteCategory(null);
   };
 
+  const handleBulkDelete = async () => {
+    const ids = Array.from(table.selectedIds);
+    const { error } = await supabase.from('categories').delete().in('id', ids);
+
+    if (error) {
+      toast({ title: 'Error', description: error.message, variant: 'destructive' });
+    } else {
+      toast({ title: 'Success', description: `${ids.length} categories deleted successfully` });
+      table.clearSelection();
+      fetchCategories();
+    }
+  };
+
   return (
     <div className="space-y-6 p-6">
       <div className="flex items-center justify-between">
@@ -161,11 +183,30 @@ export default function Categories() {
             <FolderOpen className="h-5 w-5" />
             All Categories
           </CardTitle>
+          <div className="flex flex-col gap-4 sm:flex-row sm:items-center mt-4">
+            <DataTableSearch
+              value={table.searchTerm}
+              onChange={table.setSearchTerm}
+              placeholder="Search categories..."
+            />
+          </div>
+          <DataTableBulkActions
+            selectedCount={table.selectedIds.size}
+            onDelete={handleBulkDelete}
+            itemName="categories"
+          />
         </CardHeader>
         <CardContent>
           <Table>
             <TableHeader>
               <TableRow>
+                <TableHead className="w-12">
+                  <SelectAllCheckbox
+                    isAllSelected={table.isAllSelected}
+                    isSomeSelected={table.isSomeSelected}
+                    onToggle={table.selectAll}
+                  />
+                </TableHead>
                 <TableHead>Name</TableHead>
                 <TableHead>Description</TableHead>
                 <TableHead>Created</TableHead>
@@ -173,8 +214,14 @@ export default function Categories() {
               </TableRow>
             </TableHeader>
             <TableBody>
-              {categories.map((category) => (
+              {table.paginatedData.map((category) => (
                 <TableRow key={category.id}>
+                  <TableCell>
+                    <Checkbox
+                      checked={table.selectedIds.has(category.id)}
+                      onCheckedChange={() => table.toggleSelect(category.id)}
+                    />
+                  </TableCell>
                   <TableCell className="font-medium">{category.name}</TableCell>
                   <TableCell className="text-muted-foreground">
                     {category.description || 'No description'}
@@ -207,6 +254,14 @@ export default function Categories() {
               ))}
             </TableBody>
           </Table>
+          <DataTablePagination
+            currentPage={table.currentPage}
+            totalPages={table.totalPages}
+            pageSize={table.pageSize}
+            totalItems={table.totalItems}
+            onPageChange={table.goToPage}
+            onPageSizeChange={table.changePageSize}
+          />
         </CardContent>
       </Card>
 

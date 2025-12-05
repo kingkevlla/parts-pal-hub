@@ -6,6 +6,9 @@ import { useToast } from '@/hooks/use-toast';
 import { TrendingUp, DollarSign, CreditCard } from 'lucide-react';
 import { supabase } from '@/integrations/supabase/client';
 import { useCurrency } from '@/hooks/useCurrency';
+import { Checkbox } from '@/components/ui/checkbox';
+import { useDataTable } from '@/hooks/useDataTable';
+import { DataTableSearch, DataTablePagination, SelectAllCheckbox } from '@/components/ui/data-table-controls';
 
 interface Transaction {
   id: string;
@@ -23,6 +26,12 @@ export default function Transactions() {
   const [transactions, setTransactions] = useState<Transaction[]>([]);
   const { toast } = useToast();
   const { formatAmount } = useCurrency();
+
+  const table = useDataTable({
+    data: transactions,
+    searchFields: ['transaction_number', 'payment_method', 'status'] as (keyof Transaction)[],
+    defaultPageSize: 100,
+  });
 
   useEffect(() => {
     fetchTransactions();
@@ -79,7 +88,7 @@ export default function Transactions() {
   };
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-6 p-6">
       <div>
         <h1 className="text-3xl font-bold">Transactions</h1>
         <p className="text-muted-foreground">View all sales transactions</p>
@@ -120,11 +129,25 @@ export default function Transactions() {
       <Card>
         <CardHeader>
           <CardTitle>Transaction History</CardTitle>
+          <div className="flex flex-col gap-4 sm:flex-row sm:items-center mt-4">
+            <DataTableSearch
+              value={table.searchTerm}
+              onChange={table.setSearchTerm}
+              placeholder="Search by transaction #, payment method, or status..."
+            />
+          </div>
         </CardHeader>
         <CardContent>
           <Table>
             <TableHeader>
               <TableRow>
+                <TableHead className="w-12">
+                  <SelectAllCheckbox
+                    isAllSelected={table.isAllSelected}
+                    isSomeSelected={table.isSomeSelected}
+                    onToggle={table.selectAll}
+                  />
+                </TableHead>
                 <TableHead>Date</TableHead>
                 <TableHead>Transaction #</TableHead>
                 <TableHead>Payment</TableHead>
@@ -133,8 +156,14 @@ export default function Transactions() {
               </TableRow>
             </TableHeader>
             <TableBody>
-              {transactions.map((transaction) => (
+              {table.paginatedData.map((transaction) => (
                 <TableRow key={transaction.id}>
+                  <TableCell>
+                    <Checkbox
+                      checked={table.selectedIds.has(transaction.id)}
+                      onCheckedChange={() => table.toggleSelect(transaction.id)}
+                    />
+                  </TableCell>
                   <TableCell>{new Date(transaction.created_at).toLocaleDateString()}</TableCell>
                   <TableCell className="font-medium">{transaction.transaction_number || '-'}</TableCell>
                   <TableCell>{getPaymentBadge(transaction.payment_method)}</TableCell>
@@ -146,6 +175,14 @@ export default function Transactions() {
               ))}
             </TableBody>
           </Table>
+          <DataTablePagination
+            currentPage={table.currentPage}
+            totalPages={table.totalPages}
+            pageSize={table.pageSize}
+            totalItems={table.totalItems}
+            onPageChange={table.goToPage}
+            onPageSizeChange={table.changePageSize}
+          />
         </CardContent>
       </Card>
     </div>

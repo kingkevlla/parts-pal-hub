@@ -10,6 +10,9 @@ import { Plus, Trash2 } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
+import { Checkbox } from "@/components/ui/checkbox";
+import { useDataTable } from "@/hooks/useDataTable";
+import { DataTableSearch, DataTablePagination, DataTableBulkActions, SelectAllCheckbox } from "@/components/ui/data-table-controls";
 
 interface StockMovement {
   id: string;
@@ -41,6 +44,12 @@ export default function StockOut() {
   const [deleteMovement, setDeleteMovement] = useState<StockMovement | null>(null);
   const { toast } = useToast();
   const { user } = useAuth();
+
+  const table = useDataTable({
+    data: stockMovements,
+    searchFields: ['product_name', 'warehouse_name', 'reference_number'] as (keyof StockMovement)[],
+    defaultPageSize: 100,
+  });
 
   useEffect(() => {
     fetchStockMovements();
@@ -131,6 +140,19 @@ export default function StockOut() {
     setDeleteMovement(null);
   };
 
+  const handleBulkDelete = async () => {
+    const ids = Array.from(table.selectedIds);
+    const { error } = await supabase.from('stock_movements').delete().in('id', ids);
+
+    if (error) {
+      toast({ title: 'Error', description: error.message, variant: 'destructive' });
+    } else {
+      toast({ title: 'Success', description: `${ids.length} movements deleted successfully` });
+      table.clearSelection();
+      fetchStockMovements();
+    }
+  };
+
   return (
     <div className="space-y-6 p-6">
       <div className="flex items-center justify-between">
@@ -201,12 +223,31 @@ export default function StockOut() {
       <Card>
         <CardHeader>
           <CardTitle>Recent Stock Out Transactions</CardTitle>
+          <div className="flex flex-col gap-4 sm:flex-row sm:items-center mt-4">
+            <DataTableSearch
+              value={table.searchTerm}
+              onChange={table.setSearchTerm}
+              placeholder="Search by product, warehouse, or reference..."
+            />
+          </div>
+          <DataTableBulkActions
+            selectedCount={table.selectedIds.size}
+            onDelete={handleBulkDelete}
+            itemName="movements"
+          />
         </CardHeader>
         <CardContent>
           <div className="overflow-x-auto">
             <table className="w-full">
               <thead>
                 <tr className="border-b">
+                  <th className="py-3 px-4 text-left">
+                    <SelectAllCheckbox
+                      isAllSelected={table.isAllSelected}
+                      isSomeSelected={table.isSomeSelected}
+                      onToggle={table.selectAll}
+                    />
+                  </th>
                   <th className="py-3 px-4 text-left text-sm font-medium text-muted-foreground">Date</th>
                   <th className="py-3 px-4 text-left text-sm font-medium text-muted-foreground">Product</th>
                   <th className="py-3 px-4 text-left text-sm font-medium text-muted-foreground">Warehouse</th>
@@ -216,15 +257,21 @@ export default function StockOut() {
                 </tr>
               </thead>
               <tbody>
-                {stockMovements.length === 0 ? (
+                {table.paginatedData.length === 0 ? (
                   <tr>
-                    <td colSpan={6} className="py-8 text-center text-muted-foreground">
+                    <td colSpan={7} className="py-8 text-center text-muted-foreground">
                       No stock movements found
                     </td>
                   </tr>
                 ) : (
-                  stockMovements.map((movement) => (
+                  table.paginatedData.map((movement) => (
                     <tr key={movement.id} className="border-b transition-colors hover:bg-muted/50">
+                      <td className="py-3 px-4">
+                        <Checkbox
+                          checked={table.selectedIds.has(movement.id)}
+                          onCheckedChange={() => table.toggleSelect(movement.id)}
+                        />
+                      </td>
                       <td className="py-3 px-4 text-sm">
                         {movement.created_at ? new Date(movement.created_at).toLocaleDateString() : 'N/A'}
                       </td>
@@ -243,6 +290,14 @@ export default function StockOut() {
               </tbody>
             </table>
           </div>
+          <DataTablePagination
+            currentPage={table.currentPage}
+            totalPages={table.totalPages}
+            pageSize={table.pageSize}
+            totalItems={table.totalItems}
+            onPageChange={table.goToPage}
+            onPageSizeChange={table.changePageSize}
+          />
         </CardContent>
       </Card>
 
