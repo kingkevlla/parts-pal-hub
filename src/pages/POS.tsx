@@ -6,12 +6,14 @@ import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { useToast } from '@/hooks/use-toast';
-import { Trash2 } from 'lucide-react';
+import { Trash2, AlertTriangle, Minus, Plus } from 'lucide-react';
 import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from '@/contexts/AuthContext';
 import { useCurrency } from '@/hooks/useCurrency';
+import { useSystemSettings } from '@/hooks/useSystemSettings';
 import Receipt from '@/components/pos/Receipt';
 import POSHeader from '@/components/pos/POSHeader';
+import { Badge } from '@/components/ui/badge';
 
 interface CartItem {
   productId: string;
@@ -27,9 +29,36 @@ interface Warehouse {
   location: string | null;
 }
 
+interface ProductWithStock {
+  id: string;
+  name: string;
+  sku: string | null;
+  selling_price: number;
+  min_stock_level: number | null;
+  stock?: number;
+}
+
+// Fuzzy search function
+const fuzzySearch = (text: string, query: string): boolean => {
+  const textLower = text.toLowerCase();
+  const queryLower = query.toLowerCase();
+  
+  // Direct includes
+  if (textLower.includes(queryLower)) return true;
+  
+  // Fuzzy match - check if all characters appear in order
+  let queryIndex = 0;
+  for (let i = 0; i < textLower.length && queryIndex < queryLower.length; i++) {
+    if (textLower[i] === queryLower[queryIndex]) {
+      queryIndex++;
+    }
+  }
+  return queryIndex === queryLower.length;
+};
+
 export default function POS() {
   const [cart, setCart] = useState<CartItem[]>([]);
-  const [products, setProducts] = useState<any[]>([]);
+  const [products, setProducts] = useState<ProductWithStock[]>([]);
   const [warehouses, setWarehouses] = useState<Warehouse[]>([]);
   const [selectedWarehouse, setSelectedWarehouse] = useState('');
   const [customerName, setCustomerName] = useState('');
@@ -37,21 +66,45 @@ export default function POS() {
   const [paymentMethod, setPaymentMethod] = useState('cash');
   const [isProcessing, setIsProcessing] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
-  const [quantity, setQuantity] = useState(1);
   const [showReceipt, setShowReceipt] = useState(false);
   const [lastSaleData, setLastSaleData] = useState<any>(null);
   const { toast } = useToast();
   const { user } = useAuth();
   const { formatAmount } = useCurrency();
+  const { settings } = useSystemSettings();
 
   useEffect(() => {
-    fetchProducts();
     fetchWarehouses();
   }, []);
 
-  const fetchProducts = async () => {
-    const { data, error } = await supabase.from('products').select('*').eq('is_active', true).order('name');
-    if (!error) setProducts(data || []);
+  useEffect(() => {
+    if (selectedWarehouse) {
+      fetchProductsWithStock();
+    }
+  }, [selectedWarehouse]);
+
+  const fetchProductsWithStock = async () => {
+    const { data: productsData, error: productsError } = await supabase
+      .from('products')
+      .select('id, name, sku, selling_price, min_stock_level')
+      .eq('is_active', true)
+      .order('name');
+    
+    if (productsError) return;
+
+    const { data: inventoryData } = await supabase
+      .from('inventory')
+      .select('product_id, quantity')
+      .eq('warehouse_id', selectedWarehouse);
+
+    const stockMap = new Map(inventoryData?.map(i => [i.product_id, i.quantity || 0]) || []);
+    
+    const productsWithStock = (productsData || []).map(p => ({
+      ...p,
+      stock: stockMap.get(p.id) || 0
+    }));
+
+    setProducts(productsWithStock);
   };
 
   const fetchWarehouses = async () => {
@@ -62,42 +115,76 @@ export default function POS() {
     }
   };
 
-  const addToCart = async (item: CartItem) => {
+  const getStockStatus = (product: ProductWithStock) => {
+    const stock = product.stock || 0;
+    const minStock = product.min_stock_level || settings.low_stock_threshold;
+    if (stock === 0) return 'out';
+    if (stock <= minStock) return 'low';
+    return 'ok';
+  };
+
+  const addToCart = (product: ProductWithStock, qty: number = 1) => {
     if (!selectedWarehouse) {
       toast({ title: 'Error', description: 'Please select a warehouse', variant: 'destructive' });
       return;
     }
 
-    const { data: inventory } = await supabase
-      .from('inventory')
-      .select('quantity')
-      .eq('product_id', item.productId)
-      .eq('warehouse_id', selectedWarehouse)
-      .maybeSingle();
+    const currentCartQty = cart.find(i => i.productId === product.id)?.quantity || 0;
+    const totalQty = currentCartQty + qty;
+    const availableStock = product.stock || 0;
 
-    const currentCartQty = cart.find(i => i.productId === item.productId)?.quantity || 0;
-    const totalQty = currentCartQty + item.quantity;
-
-    if (!inventory || (inventory.quantity || 0) < totalQty) {
+    if (availableStock < totalQty) {
       toast({ 
-        title: 'Error', 
-        description: `Insufficient stock. Available: ${inventory?.quantity || 0}`, 
+        title: 'Insufficient Stock', 
+        description: `Available: ${availableStock}`, 
         variant: 'destructive' 
       });
       return;
     }
 
     setCart(prev => {
-      const existing = prev.find(i => i.productId === item.productId);
+      const existing = prev.find(i => i.productId === product.id);
       if (existing) {
         return prev.map(i => 
-          i.productId === item.productId 
-            ? { ...i, quantity: i.quantity + item.quantity, subtotal: (i.quantity + item.quantity) * i.price }
+          i.productId === product.id 
+            ? { ...i, quantity: totalQty, subtotal: totalQty * i.price }
             : i
         );
       }
-      return [...prev, item];
+      return [...prev, {
+        productId: product.id,
+        name: product.name,
+        quantity: qty,
+        price: product.selling_price,
+        subtotal: product.selling_price * qty,
+      }];
     });
+  };
+
+  const updateCartQuantity = (productId: string, newQty: number) => {
+    if (newQty < 1) {
+      removeFromCart(productId);
+      return;
+    }
+
+    const product = products.find(p => p.id === productId);
+    if (!product) return;
+
+    const availableStock = product.stock || 0;
+    if (newQty > availableStock) {
+      toast({ 
+        title: 'Insufficient Stock', 
+        description: `Maximum available: ${availableStock}`, 
+        variant: 'destructive' 
+      });
+      return;
+    }
+
+    setCart(prev => prev.map(item => 
+      item.productId === productId 
+        ? { ...item, quantity: newQty, subtotal: newQty * item.price }
+        : item
+    ));
   };
 
   const removeFromCart = (productId: string) => {
@@ -120,7 +207,6 @@ export default function POS() {
     setIsProcessing(true);
 
     try {
-      // Create transaction
       const transactionNumber = `TXN-${Date.now()}`;
       const { data: transaction, error: transactionError } = await supabase
         .from('transactions')
@@ -137,7 +223,6 @@ export default function POS() {
 
       if (transactionError) throw transactionError;
 
-      // Create transaction items
       const transactionItems = cart.map(item => ({
         transaction_id: transaction.id,
         product_id: item.productId,
@@ -149,7 +234,6 @@ export default function POS() {
       const { error: itemsError } = await supabase.from('transaction_items').insert(transactionItems);
       if (itemsError) throw itemsError;
 
-      // Create stock movements
       const stockMovements = cart.map(item => ({
         product_id: item.productId,
         warehouse_id: selectedWarehouse,
@@ -163,7 +247,6 @@ export default function POS() {
       const { error: movementError } = await supabase.from('stock_movements').insert(stockMovements);
       if (movementError) throw movementError;
 
-      // Prepare receipt data
       setLastSaleData({
         id: transaction.id,
         items: cart.map(item => ({
@@ -182,11 +265,11 @@ export default function POS() {
       setShowReceipt(true);
       toast({ title: 'Success', description: 'Sale completed successfully' });
 
-      // Reset form
       setCart([]);
       setCustomerName('');
       setCustomerPhone('');
       setPaymentMethod('cash');
+      fetchProductsWithStock(); // Refresh stock
 
     } catch (error: any) {
       toast({ title: 'Error', description: error.message, variant: 'destructive' });
@@ -196,14 +279,14 @@ export default function POS() {
   };
 
   const filteredProducts = products.filter(p => 
-    p.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-    (p.sku?.toLowerCase().includes(searchQuery.toLowerCase()) ?? false)
+    fuzzySearch(p.name, searchQuery) ||
+    (p.sku && fuzzySearch(p.sku, searchQuery))
   );
 
   const handleRefresh = () => {
-    fetchProducts();
+    fetchProductsWithStock();
     fetchWarehouses();
-    toast({ title: 'Refreshed', description: 'Products and warehouses updated' });
+    toast({ title: 'Refreshed', description: 'Products and stock updated' });
   };
 
   return (
@@ -238,41 +321,53 @@ export default function POS() {
                 placeholder="Search by name or SKU..."
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
+                autoFocus
               />
             </div>
 
             {searchQuery && (
-              <div className="max-h-48 overflow-y-auto border rounded-md">
-                {filteredProducts.slice(0, 10).map(product => (
-                  <button
-                    key={product.id}
-                    type="button"
-                    className="w-full text-left px-3 py-2 hover:bg-accent transition-colors"
-                    onClick={() => {
-                      addToCart({
-                        productId: product.id,
-                        name: product.name,
-                        quantity,
-                        price: product.selling_price,
-                        subtotal: product.selling_price * quantity,
-                      });
-                      setSearchQuery('');
-                      setQuantity(1);
-                    }}
-                  >
-                    <div className="font-medium">{product.name}</div>
-                    <div className="text-sm text-muted-foreground">
-                      {product.sku && `SKU: ${product.sku} - `}{formatAmount(product.selling_price)}
-                    </div>
-                  </button>
-                ))}
+              <div className="max-h-56 overflow-y-auto border rounded-md divide-y">
+                {filteredProducts.length === 0 ? (
+                  <div className="p-3 text-center text-muted-foreground">No products found</div>
+                ) : (
+                  filteredProducts.slice(0, 15).map(product => {
+                    const stockStatus = getStockStatus(product);
+                    return (
+                      <button
+                        key={product.id}
+                        type="button"
+                        disabled={stockStatus === 'out'}
+                        className="w-full text-left px-3 py-2 hover:bg-accent transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                        onClick={() => {
+                          addToCart(product);
+                          setSearchQuery('');
+                        }}
+                      >
+                        <div className="flex items-center justify-between">
+                          <div className="flex-1">
+                            <div className="font-medium">{product.name}</div>
+                            <div className="text-sm text-muted-foreground">
+                              {product.sku && `SKU: ${product.sku} • `}{formatAmount(product.selling_price)}
+                            </div>
+                          </div>
+                          <div className="flex items-center gap-2">
+                            {stockStatus === 'low' && (
+                              <AlertTriangle className="h-4 w-4 text-orange-500" />
+                            )}
+                            <Badge 
+                              variant={stockStatus === 'out' ? 'destructive' : stockStatus === 'low' ? 'secondary' : 'outline'}
+                              className={stockStatus === 'low' ? 'bg-orange-100 text-orange-700 border-orange-300' : ''}
+                            >
+                              {product.stock} in stock
+                            </Badge>
+                          </div>
+                        </div>
+                      </button>
+                    );
+                  })
+                )}
               </div>
             )}
-
-            <div className="space-y-2">
-              <Label>Quantity</Label>
-              <Input type="number" min="1" value={quantity} onChange={(e) => setQuantity(parseInt(e.target.value) || 1)} />
-            </div>
 
             {cart.length > 0 && (
               <div className="space-y-4">
@@ -280,20 +375,46 @@ export default function POS() {
                   <TableHeader>
                     <TableRow>
                       <TableHead>Item</TableHead>
-                      <TableHead>Qty</TableHead>
-                      <TableHead>Price</TableHead>
+                      <TableHead className="text-center">Qty</TableHead>
+                      <TableHead className="text-right">Price</TableHead>
                       <TableHead></TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
                     {cart.map((item) => (
                       <TableRow key={item.productId}>
-                        <TableCell>{item.name}</TableCell>
-                        <TableCell>{item.quantity}</TableCell>
-                        <TableCell>{formatAmount(item.subtotal)}</TableCell>
+                        <TableCell className="font-medium">{item.name}</TableCell>
                         <TableCell>
-                          <Button variant="ghost" size="icon" onClick={() => removeFromCart(item.productId)}>
-                            <Trash2 className="h-4 w-4" />
+                          <div className="flex items-center justify-center gap-1">
+                            <Button 
+                              variant="outline" 
+                              size="icon" 
+                              className="h-7 w-7"
+                              onClick={() => updateCartQuantity(item.productId, item.quantity - 1)}
+                            >
+                              <Minus className="h-3 w-3" />
+                            </Button>
+                            <Input
+                              type="number"
+                              min="1"
+                              value={item.quantity}
+                              onChange={(e) => updateCartQuantity(item.productId, parseInt(e.target.value) || 1)}
+                              className="w-14 h-7 text-center"
+                            />
+                            <Button 
+                              variant="outline" 
+                              size="icon" 
+                              className="h-7 w-7"
+                              onClick={() => updateCartQuantity(item.productId, item.quantity + 1)}
+                            >
+                              <Plus className="h-3 w-3" />
+                            </Button>
+                          </div>
+                        </TableCell>
+                        <TableCell className="text-right">{formatAmount(item.subtotal)}</TableCell>
+                        <TableCell>
+                          <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => removeFromCart(item.productId)}>
+                            <Trash2 className="h-4 w-4 text-destructive" />
                           </Button>
                         </TableCell>
                       </TableRow>
