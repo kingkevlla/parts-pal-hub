@@ -8,9 +8,8 @@ import { Switch } from "@/components/ui/switch";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
-import { Upload } from "lucide-react";
 
-interface ReceiptSettings {
+interface ReceiptSettingsData {
   receipt_logo_url: string;
   receipt_header_text: string;
   receipt_company_info: boolean;
@@ -25,7 +24,7 @@ export default function ReceiptSettings() {
   const { toast } = useToast();
   const [loading, setLoading] = useState(false);
   const [uploading, setUploading] = useState(false);
-  const [settings, setSettings] = useState<ReceiptSettings>({
+  const [settings, setSettings] = useState<ReceiptSettingsData>({
     receipt_logo_url: "",
     receipt_header_text: "RECEIPT",
     receipt_company_info: true,
@@ -44,20 +43,21 @@ export default function ReceiptSettings() {
     try {
       const { data, error } = await supabase
         .from("system_settings")
-        .select("*")
-        .eq("category", "receipt");
+        .select("key, value");
 
       if (error) throw error;
 
       const settingsMap: any = { ...settings };
-      data?.forEach((setting: any) => {
-        const value = setting.value;
-        if (typeof value === 'boolean') {
-          settingsMap[setting.key] = value;
-        } else if (typeof value === 'string') {
-          settingsMap[setting.key] = value;
-        } else {
-          settingsMap[setting.key] = String(value || '');
+      data?.forEach((setting) => {
+        if (setting.key.startsWith('receipt_')) {
+          const value = setting.value;
+          if (typeof value === 'boolean') {
+            settingsMap[setting.key] = value;
+          } else if (typeof value === 'string') {
+            settingsMap[setting.key] = value;
+          } else {
+            settingsMap[setting.key] = String(value || '');
+          }
         }
       });
       setSettings(settingsMap);
@@ -75,7 +75,7 @@ export default function ReceiptSettings() {
       const fileExt = file.name.split('.').pop();
       const fileName = `receipt-logo-${Date.now()}.${fileExt}`;
 
-      const { error: uploadError, data } = await supabase.storage
+      const { error: uploadError } = await supabase.storage
         .from('avatars')
         .upload(fileName, file);
 
@@ -99,10 +99,22 @@ export default function ReceiptSettings() {
       setLoading(true);
       
       for (const [key, value] of Object.entries(settings)) {
-        await supabase
+        const { data: existing } = await supabase
           .from("system_settings")
-          .update({ value: value })
-          .eq("key", key);
+          .select("id")
+          .eq("key", key)
+          .maybeSingle();
+
+        if (existing) {
+          await supabase
+            .from("system_settings")
+            .update({ value: value })
+            .eq("key", key);
+        } else {
+          await supabase
+            .from("system_settings")
+            .insert({ key, value });
+        }
       }
 
       toast({ title: "Receipt settings saved successfully" });

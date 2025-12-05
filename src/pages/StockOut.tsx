@@ -13,18 +13,18 @@ import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, 
 
 interface StockMovement {
   id: string;
-  created_at: string;
-  reference: string;
-  notes: string;
+  created_at: string | null;
+  reference_number: string | null;
+  notes: string | null;
   quantity: number;
-  products: { name: string };
-  warehouses: { name: string };
+  product_name: string;
+  warehouse_name: string;
 }
 
 interface Product {
   id: string;
   name: string;
-  sku: string;
+  sku: string | null;
 }
 
 interface Warehouse {
@@ -51,14 +51,23 @@ export default function StockOut() {
   const fetchStockMovements = async () => {
     const { data, error } = await supabase
       .from('stock_movements')
-      .select('*, products(name), warehouses(name)')
-      .eq('type', 'out')
+      .select('id, created_at, reference_number, notes, quantity, movement_type, products(name), warehouses(name)')
+      .eq('movement_type', 'out')
       .order('created_at', { ascending: false });
 
     if (error) {
       toast({ title: 'Error', description: error.message, variant: 'destructive' });
     } else {
-      setStockMovements(data || []);
+      const movements: StockMovement[] = (data || []).map(m => ({
+        id: m.id,
+        created_at: m.created_at,
+        reference_number: m.reference_number,
+        notes: m.notes,
+        quantity: m.quantity,
+        product_name: (m.products as any)?.name || 'Unknown',
+        warehouse_name: (m.warehouses as any)?.name || 'Unknown'
+      }));
+      setStockMovements(movements);
     }
   };
 
@@ -81,15 +90,14 @@ export default function StockOut() {
     const warehouseId = formData.get('warehouse_id') as string;
     const quantity = parseInt(formData.get('quantity') as string);
 
-    // Create stock movement - inventory check and update will be handled by database trigger
     const { error } = await supabase.from('stock_movements').insert({
       product_id: productId,
       warehouse_id: warehouseId,
-      type: 'out',
+      movement_type: 'out',
       quantity,
-      reference: formData.get('reference') as string,
-      notes: formData.get('notes') as string,
-      user_id: user?.id,
+      reference_number: formData.get('reference') as string || null,
+      notes: formData.get('notes') as string || null,
+      created_by: user?.id,
     });
 
     if (error) {
@@ -151,7 +159,7 @@ export default function StockOut() {
                   <SelectContent>
                     {products.map((product) => (
                       <SelectItem key={product.id} value={product.id}>
-                        {product.name} ({product.sku})
+                        {product.name} {product.sku && `(${product.sku})`}
                       </SelectItem>
                     ))}
                   </SelectContent>
@@ -208,20 +216,30 @@ export default function StockOut() {
                 </tr>
               </thead>
               <tbody>
-                {stockMovements.map((movement) => (
-                  <tr key={movement.id} className="border-b transition-colors hover:bg-muted/50">
-                    <td className="py-3 px-4 text-sm">{new Date(movement.created_at).toLocaleDateString()}</td>
-                    <td className="py-3 px-4 font-medium">{movement.products.name}</td>
-                    <td className="py-3 px-4">{movement.warehouses.name}</td>
-                    <td className="py-3 px-4 text-red-600 font-medium">-{movement.quantity}</td>
-                    <td className="py-3 px-4">{movement.reference || 'N/A'}</td>
-                    <td className="py-3 px-4">
-                      <Button variant="ghost" size="sm" onClick={() => setDeleteMovement(movement)}>
-                        <Trash2 className="h-4 w-4" />
-                      </Button>
+                {stockMovements.length === 0 ? (
+                  <tr>
+                    <td colSpan={6} className="py-8 text-center text-muted-foreground">
+                      No stock movements found
                     </td>
                   </tr>
-                ))}
+                ) : (
+                  stockMovements.map((movement) => (
+                    <tr key={movement.id} className="border-b transition-colors hover:bg-muted/50">
+                      <td className="py-3 px-4 text-sm">
+                        {movement.created_at ? new Date(movement.created_at).toLocaleDateString() : 'N/A'}
+                      </td>
+                      <td className="py-3 px-4 font-medium">{movement.product_name}</td>
+                      <td className="py-3 px-4">{movement.warehouse_name}</td>
+                      <td className="py-3 px-4 text-red-600 font-medium">-{movement.quantity}</td>
+                      <td className="py-3 px-4">{movement.reference_number || 'N/A'}</td>
+                      <td className="py-3 px-4">
+                        <Button variant="ghost" size="sm" onClick={() => setDeleteMovement(movement)}>
+                          <Trash2 className="h-4 w-4" />
+                        </Button>
+                      </td>
+                    </tr>
+                  ))
+                )}
               </tbody>
             </table>
           </div>
