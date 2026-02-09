@@ -99,7 +99,7 @@ export default function POS() {
   const [cart, setCart] = useState<CartItem[]>([]);
   const [products, setProducts] = useState<ProductWithStock[]>([]);
   const [warehouses, setWarehouses] = useState<Warehouse[]>([]);
-  const [selectedWarehouse, setSelectedWarehouse] = useState('');
+  const [selectedWarehouse, setSelectedWarehouse] = useState('all');
   const [customerName, setCustomerName] = useState('');
   const [customerPhone, setCustomerPhone] = useState('');
   const [paymentMethod, setPaymentMethod] = useState('cash');
@@ -151,9 +151,7 @@ export default function POS() {
   }, []);
 
   useEffect(() => {
-    if (selectedWarehouse) {
-      fetchProductsWithStock();
-    }
+    fetchProductsWithStock();
   }, [selectedWarehouse]);
 
   const fetchProductsWithStock = async () => {
@@ -165,12 +163,16 @@ export default function POS() {
     
     if (productsError) return;
 
-    const { data: inventoryData } = await supabase
-      .from('inventory')
-      .select('product_id, quantity')
-      .eq('warehouse_id', selectedWarehouse);
+    let inventoryQuery = supabase.from('inventory').select('product_id, quantity');
+    if (selectedWarehouse !== 'all') {
+      inventoryQuery = inventoryQuery.eq('warehouse_id', selectedWarehouse);
+    }
+    const { data: inventoryData } = await inventoryQuery;
 
-    const stockMap = new Map(inventoryData?.map(i => [i.product_id, i.quantity || 0]) || []);
+    const stockMap = new Map<string, number>();
+    (inventoryData || []).forEach(i => {
+      stockMap.set(i.product_id, (stockMap.get(i.product_id) || 0) + (i.quantity || 0));
+    });
     
     const productsWithStock = (productsData || []).map(p => ({
       ...p,
@@ -184,7 +186,6 @@ export default function POS() {
     const { data, error } = await supabase.from('warehouses').select('*').eq('is_active', true).order('name');
     if (!error) {
       setWarehouses(data || []);
-      if (data && data.length > 0) setSelectedWarehouse(data[0].id);
     }
   };
 
@@ -335,10 +336,6 @@ export default function POS() {
   };
 
   const addToCart = (product: ProductWithStock, qty: number = 1) => {
-    if (!selectedWarehouse) {
-      toast({ title: 'Error', description: 'Please select a warehouse', variant: 'destructive' });
-      return;
-    }
 
     const currentCartQty = cart.find(i => i.productId === product.id)?.quantity || 0;
     const totalQty = currentCartQty + qty;
@@ -431,8 +428,8 @@ export default function POS() {
       return;
     }
 
-    if (!selectedWarehouse) {
-      toast({ title: 'Error', description: 'Please select a warehouse', variant: 'destructive' });
+    if (!selectedWarehouse || selectedWarehouse === 'all') {
+      toast({ title: 'Error', description: 'Please select a specific warehouse before checkout', variant: 'destructive' });
       return;
     }
 
@@ -538,8 +535,8 @@ export default function POS() {
       return;
     }
 
-    if (!selectedWarehouse) {
-      toast({ title: 'Error', description: 'Please select a warehouse', variant: 'destructive' });
+    if (!selectedWarehouse || selectedWarehouse === 'all') {
+      toast({ title: 'Error', description: 'Please select a specific warehouse before checkout', variant: 'destructive' });
       return;
     }
 
@@ -716,6 +713,7 @@ export default function POS() {
                         <SelectValue placeholder="Select Warehouse" />
                       </SelectTrigger>
                       <SelectContent>
+                        <SelectItem value="all">All Warehouses</SelectItem>
                         {warehouses.map((w) => (
                           <SelectItem key={w.id} value={w.id}>{w.name}</SelectItem>
                         ))}
