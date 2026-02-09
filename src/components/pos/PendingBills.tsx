@@ -47,11 +47,12 @@ interface PendingBillItem {
 interface PendingBillsProps {
   selectedWarehouse: string;
   cart: CartItem[];
+  manualProductIds?: Set<string>;
   onLoadBill: (items: CartItem[], billId: string, customerName: string, customerPhone: string, warehouseId: string) => void;
   onBillSaved: () => void;
 }
 
-export default function PendingBills({ selectedWarehouse, cart, onLoadBill, onBillSaved }: PendingBillsProps) {
+export default function PendingBills({ selectedWarehouse, cart, manualProductIds, onLoadBill, onBillSaved }: PendingBillsProps) {
   const [bills, setBills] = useState<PendingBill[]>([]);
   const [showCreateDialog, setShowCreateDialog] = useState(false);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState<string | null>(null);
@@ -112,7 +113,10 @@ export default function PendingBills({ selectedWarehouse, cart, onLoadBill, onBi
       toast({ title: 'Error', description: 'Customer name is required', variant: 'destructive' });
       return;
     }
-    if (!selectedWarehouse || selectedWarehouse === 'all') {
+    const hasRegularItems = manualProductIds 
+      ? cart.some(item => !manualProductIds.has(item.productId))
+      : true;
+    if (hasRegularItems && (!selectedWarehouse || selectedWarehouse === 'all')) {
       toast({ title: 'Error', description: 'Please select a specific warehouse before saving a bill', variant: 'destructive' });
       return;
     }
@@ -123,12 +127,34 @@ export default function PendingBills({ selectedWarehouse, cart, onLoadBill, onBi
 
     setIsLoading(true);
     try {
+      // Resolve warehouse: use Extra warehouse for all-manual carts
+      let warehouseId = selectedWarehouse;
+      if (!hasRegularItems || !warehouseId || warehouseId === 'all') {
+        const { data: extraWh } = await supabase
+          .from('warehouses')
+          .select('id')
+          .eq('name', 'Extra')
+          .limit(1);
+        if (extraWh && extraWh.length > 0) {
+          warehouseId = extraWh[0].id;
+        } else {
+          // Create Extra warehouse
+          const { data: created, error: createErr } = await supabase
+            .from('warehouses')
+            .insert({ name: 'Extra', location: 'Manual/Extra Items', is_active: true })
+            .select('id')
+            .single();
+          if (createErr) throw createErr;
+          warehouseId = created.id;
+        }
+      }
+
       const { data: bill, error: billError } = await supabase
         .from('pending_bills')
         .insert({
           customer_name: billName.trim(),
           customer_phone: billPhone.trim() || null,
-          warehouse_id: selectedWarehouse,
+          warehouse_id: warehouseId,
           notes: billNotes.trim() || null,
           created_by: user?.id,
         })
