@@ -47,7 +47,7 @@ interface PendingBillItem {
 interface PendingBillsProps {
   selectedWarehouse: string;
   cart: CartItem[];
-  onLoadBill: (items: CartItem[], billId: string, customerName: string, customerPhone: string) => void;
+  onLoadBill: (items: CartItem[], billId: string, customerName: string, customerPhone: string, warehouseId: string) => void;
   onBillSaved: () => void;
 }
 
@@ -235,7 +235,7 @@ export default function PendingBills({ selectedWarehouse, cart, onLoadBill, onBi
       subtotal: item.subtotal,
     }));
     setActiveBillId(bill.id);
-    onLoadBill(items, bill.id, bill.customer_name, bill.customer_phone || '');
+    onLoadBill(items, bill.id, bill.customer_name, bill.customer_phone || '', bill.warehouse_id);
   };
 
   const closeBill = async (billId: string) => {
