@@ -28,6 +28,7 @@ interface CartItem {
   quantity: number;
   price: number;
   subtotal: number;
+  isManual?: boolean;
 }
 
 interface Warehouse {
@@ -132,8 +133,6 @@ export default function POS() {
   const [newCustomerPhone, setNewCustomerPhone] = useState('');
   // Pending bill tracking
   const [activePendingBillId, setActivePendingBillId] = useState<string | null>(null);
-  // Track manually added product IDs (skip stock validation for these)
-  const [manualProductIds, setManualProductIds] = useState<Set<string>>(new Set());
   const { toast } = useToast();
   const { user } = useAuth();
   const { formatAmount } = useCurrency();
@@ -379,9 +378,18 @@ export default function POS() {
     }
 
     // Skip stock validation for manually added items
-    if (!manualProductIds.has(productId)) {
+    const cartItem = cart.find(i => i.productId === productId);
+    if (!cartItem?.isManual) {
       const product = products.find(p => p.id === productId);
-      if (!product) return;
+      if (!product) {
+        // Product not in inventory (e.g. loaded from pending bill) — allow free editing
+        setCart(prev => prev.map(item => 
+          item.productId === productId 
+            ? { ...item, quantity: newQty, subtotal: newQty * item.price }
+            : item
+        ));
+        return;
+      }
 
       const availableStock = product.stock || 0;
       if (newQty > availableStock) {
@@ -434,7 +442,7 @@ export default function POS() {
       return;
     }
 
-    const hasRegularItems = cart.some(item => !manualProductIds.has(item.productId));
+    const hasRegularItems = cart.some(item => !item.isManual);
     if (hasRegularItems && (!selectedWarehouse || selectedWarehouse === 'all')) {
       toast({ title: 'Error', description: 'Please select a specific warehouse before checkout', variant: 'destructive' });
       return;
@@ -481,7 +489,7 @@ export default function POS() {
 
       // Get Extra warehouse id for manual items if needed
       let extraWarehouseId: string | null = null;
-      const hasManualItems = cart.some(item => manualProductIds.has(item.productId));
+      const hasManualItems = cart.some(item => item.isManual);
       if (hasManualItems) {
         const { data: extraWh } = await supabase
           .from('warehouses')
@@ -493,7 +501,7 @@ export default function POS() {
 
       const stockMovements = cart.map(item => ({
         product_id: item.productId,
-        warehouse_id: manualProductIds.has(item.productId) && extraWarehouseId ? extraWarehouseId : selectedWarehouse,
+        warehouse_id: item.isManual && extraWarehouseId ? extraWarehouseId : selectedWarehouse,
         quantity: item.quantity,
         movement_type: 'out',
         reference_number: transactionNumber,
@@ -531,7 +539,6 @@ export default function POS() {
       }
 
       setCart([]);
-      setManualProductIds(new Set());
       setCustomerName('');
       setCustomerPhone('');
       setPaymentMethod('cash');
@@ -555,7 +562,7 @@ export default function POS() {
       return;
     }
 
-    const hasRegularItems = cart.some(item => !manualProductIds.has(item.productId));
+    const hasRegularItems = cart.some(item => !item.isManual);
     if (hasRegularItems && (!selectedWarehouse || selectedWarehouse === 'all')) {
       toast({ title: 'Error', description: 'Please select a specific warehouse before checkout', variant: 'destructive' });
       return;
@@ -604,7 +611,7 @@ export default function POS() {
 
       // Get Extra warehouse id for manual items if needed
       let extraWarehouseId: string | null = null;
-      const hasManualItems = cart.some(item => manualProductIds.has(item.productId));
+      const hasManualItems = cart.some(item => item.isManual);
       if (hasManualItems) {
         const { data: extraWh } = await supabase
           .from('warehouses')
@@ -617,7 +624,7 @@ export default function POS() {
       // Create stock movements
       const stockMovements = cart.map(item => ({
         product_id: item.productId,
-        warehouse_id: manualProductIds.has(item.productId) && extraWarehouseId ? extraWarehouseId : selectedWarehouse,
+        warehouse_id: item.isManual && extraWarehouseId ? extraWarehouseId : selectedWarehouse,
         quantity: item.quantity,
         movement_type: 'out',
         reference_number: transactionNumber,
@@ -671,7 +678,6 @@ export default function POS() {
 
       // Reset state
       setCart([]);
-      setManualProductIds(new Set());
       setCustomerName('');
       setCustomerPhone('');
       setPaymentMethod('cash');
@@ -885,8 +891,7 @@ export default function POS() {
 
               <ManualItemEntry
                 onItemAdded={(item) => {
-                  setManualProductIds(prev => new Set(prev).add(item.productId));
-                  setCart(prev => [...prev, item]);
+                  setCart(prev => [...prev, { ...item, isManual: true }]);
                 }}
               />
 
@@ -942,7 +947,6 @@ export default function POS() {
           <PendingBills
             selectedWarehouse={selectedWarehouse}
             cart={cart}
-            manualProductIds={manualProductIds}
             onLoadBill={(items, billId, name, phone, warehouseId) => {
               setCart(items);
               setCustomerName(name);
@@ -953,7 +957,6 @@ export default function POS() {
             }}
             onBillSaved={() => {
               setCart([]);
-              setManualProductIds(new Set());
               setCustomerName('');
               setCustomerPhone('');
             }}
