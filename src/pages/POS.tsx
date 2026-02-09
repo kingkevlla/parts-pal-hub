@@ -20,6 +20,7 @@ import { BarcodeScanner } from '@/components/inventory/BarcodeScanner';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { format, addDays } from 'date-fns';
 import PendingBills from '@/components/pos/PendingBills';
+import ManualItemEntry from '@/components/pos/ManualItemEntry';
 
 interface CartItem {
   productId: string;
@@ -131,6 +132,8 @@ export default function POS() {
   const [newCustomerPhone, setNewCustomerPhone] = useState('');
   // Pending bill tracking
   const [activePendingBillId, setActivePendingBillId] = useState<string | null>(null);
+  // Track manually added product IDs (skip stock validation for these)
+  const [manualProductIds, setManualProductIds] = useState<Set<string>>(new Set());
   const { toast } = useToast();
   const { user } = useAuth();
   const { formatAmount } = useCurrency();
@@ -375,17 +378,20 @@ export default function POS() {
       return;
     }
 
-    const product = products.find(p => p.id === productId);
-    if (!product) return;
+    // Skip stock validation for manually added items
+    if (!manualProductIds.has(productId)) {
+      const product = products.find(p => p.id === productId);
+      if (!product) return;
 
-    const availableStock = product.stock || 0;
-    if (newQty > availableStock) {
-      toast({ 
-        title: 'Insufficient Stock', 
-        description: `Maximum available: ${availableStock}`, 
-        variant: 'destructive' 
-      });
-      return;
+      const availableStock = product.stock || 0;
+      if (newQty > availableStock) {
+        toast({ 
+          title: 'Insufficient Stock', 
+          description: `Maximum available: ${availableStock}`, 
+          variant: 'destructive' 
+        });
+        return;
+      }
     }
 
     setCart(prev => prev.map(item => 
@@ -428,7 +434,8 @@ export default function POS() {
       return;
     }
 
-    if (!selectedWarehouse || selectedWarehouse === 'all') {
+    const hasRegularItems = cart.some(item => !manualProductIds.has(item.productId));
+    if (hasRegularItems && (!selectedWarehouse || selectedWarehouse === 'all')) {
       toast({ title: 'Error', description: 'Please select a specific warehouse before checkout', variant: 'destructive' });
       return;
     }
@@ -472,9 +479,21 @@ export default function POS() {
       const { error: itemsError } = await supabase.from('transaction_items').insert(transactionItems);
       if (itemsError) throw itemsError;
 
+      // Get Extra warehouse id for manual items if needed
+      let extraWarehouseId: string | null = null;
+      const hasManualItems = cart.some(item => manualProductIds.has(item.productId));
+      if (hasManualItems) {
+        const { data: extraWh } = await supabase
+          .from('warehouses')
+          .select('id')
+          .eq('name', 'Extra')
+          .limit(1);
+        extraWarehouseId = extraWh?.[0]?.id || null;
+      }
+
       const stockMovements = cart.map(item => ({
         product_id: item.productId,
-        warehouse_id: selectedWarehouse,
+        warehouse_id: manualProductIds.has(item.productId) && extraWarehouseId ? extraWarehouseId : selectedWarehouse,
         quantity: item.quantity,
         movement_type: 'out',
         reference_number: transactionNumber,
@@ -512,6 +531,7 @@ export default function POS() {
       }
 
       setCart([]);
+      setManualProductIds(new Set());
       setCustomerName('');
       setCustomerPhone('');
       setPaymentMethod('cash');
@@ -535,7 +555,8 @@ export default function POS() {
       return;
     }
 
-    if (!selectedWarehouse || selectedWarehouse === 'all') {
+    const hasRegularItems = cart.some(item => !manualProductIds.has(item.productId));
+    if (hasRegularItems && (!selectedWarehouse || selectedWarehouse === 'all')) {
       toast({ title: 'Error', description: 'Please select a specific warehouse before checkout', variant: 'destructive' });
       return;
     }
@@ -581,10 +602,22 @@ export default function POS() {
       const { error: itemsError } = await supabase.from('transaction_items').insert(transactionItems);
       if (itemsError) throw itemsError;
 
+      // Get Extra warehouse id for manual items if needed
+      let extraWarehouseId: string | null = null;
+      const hasManualItems = cart.some(item => manualProductIds.has(item.productId));
+      if (hasManualItems) {
+        const { data: extraWh } = await supabase
+          .from('warehouses')
+          .select('id')
+          .eq('name', 'Extra')
+          .limit(1);
+        extraWarehouseId = extraWh?.[0]?.id || null;
+      }
+
       // Create stock movements
       const stockMovements = cart.map(item => ({
         product_id: item.productId,
-        warehouse_id: selectedWarehouse,
+        warehouse_id: manualProductIds.has(item.productId) && extraWarehouseId ? extraWarehouseId : selectedWarehouse,
         quantity: item.quantity,
         movement_type: 'out',
         reference_number: transactionNumber,
@@ -638,6 +671,7 @@ export default function POS() {
 
       // Reset state
       setCart([]);
+      setManualProductIds(new Set());
       setCustomerName('');
       setCustomerPhone('');
       setPaymentMethod('cash');
@@ -849,6 +883,13 @@ export default function POS() {
                 )}
               </ScrollArea>
 
+              <ManualItemEntry
+                onItemAdded={(item) => {
+                  setManualProductIds(prev => new Set(prev).add(item.productId));
+                  setCart(prev => [...prev, item]);
+                }}
+              />
+
               <div className="border-t pt-3 mt-3 space-y-3">
                 <div className="flex justify-between text-lg font-bold">
                   <span>Total:</span>
@@ -911,6 +952,7 @@ export default function POS() {
             }}
             onBillSaved={() => {
               setCart([]);
+              setManualProductIds(new Set());
               setCustomerName('');
               setCustomerPhone('');
             }}
