@@ -19,6 +19,7 @@ interface CartItem {
   quantity: number;
   price: number;
   subtotal: number;
+  isManual?: boolean;
 }
 
 interface PendingBill {
@@ -47,12 +48,11 @@ interface PendingBillItem {
 interface PendingBillsProps {
   selectedWarehouse: string;
   cart: CartItem[];
-  manualProductIds?: Set<string>;
   onLoadBill: (items: CartItem[], billId: string, customerName: string, customerPhone: string, warehouseId: string) => void;
   onBillSaved: () => void;
 }
 
-export default function PendingBills({ selectedWarehouse, cart, manualProductIds, onLoadBill, onBillSaved }: PendingBillsProps) {
+export default function PendingBills({ selectedWarehouse, cart, onLoadBill, onBillSaved }: PendingBillsProps) {
   const [bills, setBills] = useState<PendingBill[]>([]);
   const [showCreateDialog, setShowCreateDialog] = useState(false);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState<string | null>(null);
@@ -113,9 +113,7 @@ export default function PendingBills({ selectedWarehouse, cart, manualProductIds
       toast({ title: 'Error', description: 'Customer name is required', variant: 'destructive' });
       return;
     }
-    const hasRegularItems = manualProductIds 
-      ? cart.some(item => !manualProductIds.has(item.productId))
-      : true;
+    const hasRegularItems = cart.some(item => !item.isManual);
     if (hasRegularItems && (!selectedWarehouse || selectedWarehouse === 'all')) {
       toast({ title: 'Error', description: 'Please select a specific warehouse before saving a bill', variant: 'destructive' });
       return;
@@ -252,13 +250,27 @@ export default function PendingBills({ selectedWarehouse, cart, manualProductIds
     }
   };
 
-  const loadBillToCart = (bill: PendingBill) => {
+  const loadBillToCart = async (bill: PendingBill) => {
+    // Detect which items are manual by checking product descriptions
+    const productIds = bill.items.map(i => i.product_id);
+    const { data: productData } = await supabase
+      .from('products')
+      .select('id, description')
+      .in('id', productIds);
+
+    const manualIds = new Set(
+      (productData || [])
+        .filter(p => p.description === 'Manually added via POS')
+        .map(p => p.id)
+    );
+
     const items: CartItem[] = bill.items.map(item => ({
       productId: item.product_id,
       name: item.product_name,
       quantity: item.quantity,
       price: item.unit_price,
       subtotal: item.subtotal,
+      isManual: manualIds.has(item.product_id),
     }));
     setActiveBillId(bill.id);
     onLoadBill(items, bill.id, bill.customer_name, bill.customer_phone || '', bill.warehouse_id);
