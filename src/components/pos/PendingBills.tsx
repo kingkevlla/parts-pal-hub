@@ -112,8 +112,8 @@ export default function PendingBills({ selectedWarehouse, cart, onLoadBill, onBi
       toast({ title: 'Error', description: 'Customer name is required', variant: 'destructive' });
       return;
     }
-    if (!selectedWarehouse) {
-      toast({ title: 'Error', description: 'Please select a warehouse first', variant: 'destructive' });
+    if (!selectedWarehouse || selectedWarehouse === 'all') {
+      toast({ title: 'Error', description: 'Please select a specific warehouse before saving a bill', variant: 'destructive' });
       return;
     }
     if (cart.length === 0) {
