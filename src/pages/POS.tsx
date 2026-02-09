@@ -942,6 +942,7 @@ export default function POS() {
           <PendingBills
             selectedWarehouse={selectedWarehouse}
             cart={cart}
+            manualProductIds={manualProductIds}
             onLoadBill={(items, billId, name, phone, warehouseId) => {
               setCart(items);
               setCustomerName(name);
