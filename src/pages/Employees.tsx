@@ -1,7 +1,7 @@
 import { useState, useEffect } from "react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Plus, Pencil, Trash2, Users, UserCheck, UserX, Calendar, Clock, Star, DollarSign } from "lucide-react";
+import { Plus, Pencil, Trash2, Users, UserCheck, UserX, Calendar, Clock, Star, DollarSign, Banknote, CreditCard } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { Label } from "@/components/ui/label";
@@ -74,15 +74,43 @@ interface Payroll {
   employees?: { first_name: string; last_name: string } | null;
 }
 
+interface EmployeeLoan {
+  id: string;
+  employee_id: string;
+  amount: number;
+  paid_amount: number;
+  monthly_deduction: number;
+  loan_date: string;
+  due_date: string | null;
+  status: string | null;
+  reason: string | null;
+  notes: string | null;
+  employees?: { first_name: string; last_name: string } | null;
+}
+
+interface EmployeeLoanPayment {
+  id: string;
+  loan_id: string;
+  amount: number;
+  payment_date: string;
+  payment_method: string | null;
+  notes: string | null;
+}
+
 export default function Employees() {
   const [employees, setEmployees] = useState<Employee[]>([]);
   const [attendance, setAttendance] = useState<Attendance[]>([]);
   const [leaves, setLeaves] = useState<Leave[]>([]);
   const [payrolls, setPayrolls] = useState<Payroll[]>([]);
+  const [employeeLoans, setEmployeeLoans] = useState<EmployeeLoan[]>([]);
+  const [loanPayments, setLoanPayments] = useState<EmployeeLoanPayment[]>([]);
   const [isEmployeeOpen, setIsEmployeeOpen] = useState(false);
   const [isAttendanceOpen, setIsAttendanceOpen] = useState(false);
   const [isLeaveOpen, setIsLeaveOpen] = useState(false);
   const [isPayrollOpen, setIsPayrollOpen] = useState(false);
+  const [isLoanOpen, setIsLoanOpen] = useState(false);
+  const [isLoanPaymentOpen, setIsLoanPaymentOpen] = useState(false);
+  const [selectedLoanId, setSelectedLoanId] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [editingEmployee, setEditingEmployee] = useState<Employee | null>(null);
   const [deleteEmployee, setDeleteEmployee] = useState<Employee | null>(null);
@@ -100,12 +128,14 @@ export default function Employees() {
   const activeEmployees = employees.filter(e => e.status === 'active').length;
   const totalSalary = employees.filter(e => e.status === 'active').reduce((sum, e) => sum + (e.salary || 0), 0);
   const pendingLeaves = leaves.filter(l => l.status === 'pending').length;
+  const totalLoans = employeeLoans.filter(l => l.status === 'active').reduce((sum, l) => sum + (l.amount - l.paid_amount), 0);
 
   useEffect(() => {
     fetchEmployees();
     fetchAttendance();
     fetchLeaves();
     fetchPayrolls();
+    fetchEmployeeLoans();
   }, []);
 
   const fetchEmployees = async () => {
@@ -136,6 +166,23 @@ export default function Employees() {
       .select('*, employees(first_name, last_name)')
       .order('pay_period_start', { ascending: false });
     if (!error) setPayrolls(data || []);
+  };
+
+  const fetchEmployeeLoans = async () => {
+    const { data, error } = await supabase
+      .from('employee_loans')
+      .select('*, employees(first_name, last_name)')
+      .order('created_at', { ascending: false });
+    if (!error) setEmployeeLoans((data as any) || []);
+  };
+
+  const fetchLoanPayments = async (loanId: string) => {
+    const { data, error } = await supabase
+      .from('employee_loan_payments')
+      .select('*')
+      .eq('loan_id', loanId)
+      .order('payment_date', { ascending: false });
+    if (!error) setLoanPayments((data as any) || []);
   };
 
   const handleEmployeeSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
@@ -320,6 +367,79 @@ export default function Employees() {
     }
   };
 
+  const getLoanStatusBadge = (status: string | null) => {
+    switch (status) {
+      case 'active': return <Badge className="bg-blue-600">Active</Badge>;
+      case 'paid': return <Badge className="bg-green-600">Paid</Badge>;
+      case 'defaulted': return <Badge variant="destructive">Defaulted</Badge>;
+      default: return <Badge variant="secondary">{status}</Badge>;
+    }
+  };
+
+  const handleLoanSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
+    e.preventDefault();
+    setIsLoading(true);
+    try {
+      const formData = new FormData(e.currentTarget);
+      const { error } = await supabase.from('employee_loans').insert({
+        employee_id: formData.get('employee_id') as string,
+        amount: parseFloat(formData.get('amount') as string),
+        monthly_deduction: parseFloat(formData.get('monthly_deduction') as string) || 0,
+        loan_date: formData.get('loan_date') as string,
+        due_date: (formData.get('due_date') as string) || null,
+        reason: (formData.get('reason') as string) || null,
+        notes: (formData.get('notes') as string) || null,
+        status: 'active',
+        created_by: user?.id,
+      } as any);
+      if (error) throw error;
+      toast({ title: 'Success', description: 'Employee loan created' });
+      setIsLoanOpen(false);
+      fetchEmployeeLoans();
+    } catch (error: any) {
+      toast({ title: 'Error', description: error.message, variant: 'destructive' });
+    }
+    setIsLoading(false);
+  };
+
+  const handleLoanPaymentSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
+    e.preventDefault();
+    if (!selectedLoanId) return;
+    setIsLoading(true);
+    try {
+      const formData = new FormData(e.currentTarget);
+      const paymentAmount = parseFloat(formData.get('amount') as string);
+      
+      const { error } = await supabase.from('employee_loan_payments').insert({
+        loan_id: selectedLoanId,
+        amount: paymentAmount,
+        payment_date: formData.get('payment_date') as string,
+        payment_method: (formData.get('payment_method') as string) || null,
+        notes: (formData.get('notes') as string) || null,
+        created_by: user?.id,
+      } as any);
+      if (error) throw error;
+
+      // Update loan paid_amount
+      const loan = employeeLoans.find(l => l.id === selectedLoanId);
+      if (loan) {
+        const newPaidAmount = loan.paid_amount + paymentAmount;
+        const newStatus = newPaidAmount >= loan.amount ? 'paid' : 'active';
+        await supabase.from('employee_loans')
+          .update({ paid_amount: newPaidAmount, status: newStatus } as any)
+          .eq('id', selectedLoanId);
+      }
+
+      toast({ title: 'Success', description: 'Loan payment recorded' });
+      setIsLoanPaymentOpen(false);
+      setSelectedLoanId(null);
+      fetchEmployeeLoans();
+    } catch (error: any) {
+      toast({ title: 'Error', description: error.message, variant: 'destructive' });
+    }
+    setIsLoading(false);
+  };
+
   return (
     <div className="space-y-6 p-6">
       <div className="flex items-center justify-between flex-wrap gap-4">
@@ -489,6 +609,90 @@ export default function Employees() {
             </DialogContent>
           </Dialog>
 
+          <Dialog open={isLoanOpen} onOpenChange={setIsLoanOpen}>
+            <DialogTrigger asChild>
+              <Button variant="outline"><Banknote className="h-4 w-4 mr-2" />Employee Loan</Button>
+            </DialogTrigger>
+            <DialogContent>
+              <DialogHeader><DialogTitle>Create Employee Loan</DialogTitle></DialogHeader>
+              <form onSubmit={handleLoanSubmit} className="space-y-4">
+                <div className="space-y-2">
+                  <Label htmlFor="loan-employee">Employee *</Label>
+                  <Select name="employee_id" required>
+                    <SelectTrigger><SelectValue placeholder="Select employee" /></SelectTrigger>
+                    <SelectContent>
+                      {employees.filter(e => e.status === 'active').map(e => (
+                        <SelectItem key={e.id} value={e.id}>{e.first_name} {e.last_name}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="space-y-2">
+                    <Label htmlFor="loan-amount">Loan Amount *</Label>
+                    <Input id="loan-amount" name="amount" type="number" step="0.01" required />
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="monthly_deduction">Monthly Deduction</Label>
+                    <Input id="monthly_deduction" name="monthly_deduction" type="number" step="0.01" defaultValue="0" />
+                  </div>
+                </div>
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="space-y-2">
+                    <Label htmlFor="loan_date">Loan Date *</Label>
+                    <Input id="loan_date" name="loan_date" type="date" required defaultValue={format(new Date(), 'yyyy-MM-dd')} />
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="loan_due_date">Due Date</Label>
+                    <Input id="loan_due_date" name="due_date" type="date" />
+                  </div>
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="loan-reason">Reason</Label>
+                  <Input id="loan-reason" name="reason" />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="loan-notes">Notes</Label>
+                  <Textarea id="loan-notes" name="notes" />
+                </div>
+                <Button type="submit" disabled={isLoading} className="w-full">{isLoading ? 'Creating...' : 'Create Loan'}</Button>
+              </form>
+            </DialogContent>
+          </Dialog>
+
+          <Dialog open={isLoanPaymentOpen} onOpenChange={(open) => { setIsLoanPaymentOpen(open); if (!open) setSelectedLoanId(null); }}>
+            <DialogContent>
+              <DialogHeader><DialogTitle>Record Loan Payment</DialogTitle></DialogHeader>
+              <form onSubmit={handleLoanPaymentSubmit} className="space-y-4">
+                <div className="space-y-2">
+                  <Label htmlFor="pay-amount">Payment Amount *</Label>
+                  <Input id="pay-amount" name="amount" type="number" step="0.01" required />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="payment_date">Payment Date *</Label>
+                  <Input id="payment_date" name="payment_date" type="date" required defaultValue={format(new Date(), 'yyyy-MM-dd')} />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="pay-method">Payment Method</Label>
+                  <Select name="payment_method">
+                    <SelectTrigger><SelectValue placeholder="Select method" /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="salary_deduction">Salary Deduction</SelectItem>
+                      <SelectItem value="cash">Cash</SelectItem>
+                      <SelectItem value="bank_transfer">Bank Transfer</SelectItem>
+                      <SelectItem value="mobile_money">Mobile Money</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="pay-notes">Notes</Label>
+                  <Textarea id="pay-notes" name="notes" />
+                </div>
+                <Button type="submit" disabled={isLoading} className="w-full">{isLoading ? 'Recording...' : 'Record Payment'}</Button>
+              </form>
+            </DialogContent>
+          </Dialog>
+
           <Dialog open={isEmployeeOpen} onOpenChange={(open) => { setIsEmployeeOpen(open); if (!open) setEditingEmployee(null); }}>
             <DialogTrigger asChild>
               <Button><Plus className="h-4 w-4 mr-2" />Add Employee</Button>
@@ -600,7 +804,7 @@ export default function Employees() {
       </div>
 
       {/* Stats Cards */}
-      <div className="grid gap-4 md:grid-cols-4">
+      <div className="grid gap-4 md:grid-cols-5">
         <Card>
           <CardHeader className="flex flex-row items-center justify-between pb-2">
             <CardTitle className="text-sm font-medium">Total Employees</CardTitle>
@@ -637,6 +841,15 @@ export default function Employees() {
             <div className="text-2xl font-bold text-orange-500">{pendingLeaves}</div>
           </CardContent>
         </Card>
+        <Card>
+          <CardHeader className="flex flex-row items-center justify-between pb-2">
+            <CardTitle className="text-sm font-medium">Active Loans</CardTitle>
+            <Banknote className="h-4 w-4 text-muted-foreground" />
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold">{formatAmount(totalLoans)}</div>
+          </CardContent>
+        </Card>
       </div>
 
       <Tabs defaultValue="employees">
@@ -645,6 +858,7 @@ export default function Employees() {
           <TabsTrigger value="attendance">Attendance</TabsTrigger>
           <TabsTrigger value="leave">Leave Requests</TabsTrigger>
           <TabsTrigger value="payroll">Payroll</TabsTrigger>
+          <TabsTrigger value="loans">Loans</TabsTrigger>
         </TabsList>
 
         <TabsContent value="employees">
@@ -820,6 +1034,56 @@ export default function Employees() {
                         <td className="py-3 px-2"><Badge variant={pay.status === 'paid' ? 'default' : 'secondary'}>{pay.status}</Badge></td>
                       </tr>
                     ))}
+                  </tbody>
+                </table>
+              </div>
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        <TabsContent value="loans">
+          <Card>
+            <CardContent className="pt-6">
+              <div className="overflow-x-auto">
+                <table className="w-full">
+                  <thead>
+                    <tr className="border-b">
+                      <th className="py-3 px-2 text-left text-sm font-medium text-muted-foreground">Employee</th>
+                      <th className="py-3 px-2 text-left text-sm font-medium text-muted-foreground">Amount</th>
+                      <th className="py-3 px-2 text-left text-sm font-medium text-muted-foreground">Paid</th>
+                      <th className="py-3 px-2 text-left text-sm font-medium text-muted-foreground">Balance</th>
+                      <th className="py-3 px-2 text-left text-sm font-medium text-muted-foreground">Monthly Deduction</th>
+                      <th className="py-3 px-2 text-left text-sm font-medium text-muted-foreground">Loan Date</th>
+                      <th className="py-3 px-2 text-left text-sm font-medium text-muted-foreground">Due Date</th>
+                      <th className="py-3 px-2 text-left text-sm font-medium text-muted-foreground">Reason</th>
+                      <th className="py-3 px-2 text-left text-sm font-medium text-muted-foreground">Status</th>
+                      <th className="py-3 px-2 text-left text-sm font-medium text-muted-foreground">Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {employeeLoans.map((loan) => (
+                      <tr key={loan.id} className="border-b">
+                        <td className="py-3 px-2">{loan.employees?.first_name} {loan.employees?.last_name}</td>
+                        <td className="py-3 px-2 font-medium">{formatAmount(loan.amount)}</td>
+                        <td className="py-3 px-2 text-green-600">{formatAmount(loan.paid_amount)}</td>
+                        <td className="py-3 px-2 font-bold">{formatAmount(loan.amount - loan.paid_amount)}</td>
+                        <td className="py-3 px-2">{loan.monthly_deduction ? formatAmount(loan.monthly_deduction) : '-'}</td>
+                        <td className="py-3 px-2 text-sm">{format(new Date(loan.loan_date), 'MMM d, yyyy')}</td>
+                        <td className="py-3 px-2 text-sm">{loan.due_date ? format(new Date(loan.due_date), 'MMM d, yyyy') : '-'}</td>
+                        <td className="py-3 px-2 text-sm text-muted-foreground max-w-[150px] truncate">{loan.reason || '-'}</td>
+                        <td className="py-3 px-2">{getLoanStatusBadge(loan.status)}</td>
+                        <td className="py-3 px-2">
+                          {loan.status === 'active' && (
+                            <Button variant="outline" size="sm" onClick={() => { setSelectedLoanId(loan.id); setIsLoanPaymentOpen(true); }}>
+                              <CreditCard className="h-3 w-3 mr-1" /> Pay
+                            </Button>
+                          )}
+                        </td>
+                      </tr>
+                    ))}
+                    {employeeLoans.length === 0 && (
+                      <tr><td colSpan={10} className="py-8 text-center text-muted-foreground">No employee loans found</td></tr>
+                    )}
                   </tbody>
                 </table>
               </div>

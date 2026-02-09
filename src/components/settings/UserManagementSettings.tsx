@@ -21,9 +21,8 @@ import {
 } from "@/components/ui/select";
 import { Shield, User } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
-import type { Database } from "@/integrations/supabase/types";
 
-type AppRole = Database["public"]["Enums"]["app_role"];
+type AppRole = "admin" | "owner" | "manager" | "cashier" | "user";
 
 interface UserProfile {
   id: string;
@@ -73,7 +72,7 @@ export default function UserManagementSettings() {
 
       const rolesMap: Record<string, AppRole> = {};
       userRoles?.forEach((ur) => {
-        rolesMap[ur.user_id] = ur.role;
+        rolesMap[ur.user_id] = ur.role as AppRole;
       });
 
       const usersWithRoles: UserProfile[] = (profiles || []).map((profile) => ({

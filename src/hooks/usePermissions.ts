@@ -1,9 +1,7 @@
 import { useState, useEffect } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
-import type { Database } from "@/integrations/supabase/types";
-
-type AppRole = Database["public"]["Enums"]["app_role"];
+type AppRole = "admin" | "owner" | "manager" | "cashier" | "user";
 
 export interface UserPermissions {
   role: AppRole | null;

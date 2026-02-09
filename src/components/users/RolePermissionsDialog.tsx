@@ -52,48 +52,25 @@ export default function RolePermissionsDialog({
   const fetchRolePermissions = async () => {
     setLoading(true);
     try {
-      const { data, error } = await supabase
-        .from("roles")
-        .select("permissions")
-        .eq("id", roleId)
-        .single();
-
-      if (error) throw error;
-
-      const perms = Array.isArray(data?.permissions) ? data.permissions as string[] : [];
+      // Use the hardcoded ROLE_PERMISSIONS since there's no roles table
+      const ROLE_PERMISSIONS: Record<string, string[]> = {
+        admin: ["dashboard", "pos", "inventory", "stock_in", "stock_out", "products", "categories", "suppliers", "customers", "transactions", "reports", "loans", "warehouses", "settings", "users"],
+        owner: ["dashboard", "pos", "inventory", "stock_in", "stock_out", "products", "categories", "suppliers", "customers", "transactions", "reports", "loans", "warehouses", "settings", "users"],
+        manager: ["dashboard", "pos", "inventory", "stock_in", "stock_out", "products", "categories", "suppliers", "customers", "transactions", "reports", "loans", "warehouses"],
+        cashier: ["dashboard", "pos", "customers", "transactions"],
+        user: ["dashboard"],
+      };
+      const perms = ROLE_PERMISSIONS[roleName] || [];
       setSelectedPermissions(new Set(perms));
-    } catch (error: any) {
-      toast({
-        title: "Error loading permissions",
-        description: error.message,
-        variant: "destructive"
-      });
     } finally {
       setLoading(false);
     }
   };
 
   const handleSave = async () => {
-    setLoading(true);
-    try {
-      const { error } = await supabase
-        .from("roles")
-        .update({ permissions: Array.from(selectedPermissions) })
-        .eq("id", roleId);
-
-      if (error) throw error;
-
-      toast({ title: "Permissions updated successfully" });
-      onOpenChange(false);
-    } catch (error: any) {
-      toast({
-        title: "Error updating permissions",
-        description: error.message,
-        variant: "destructive"
-      });
-    } finally {
-      setLoading(false);
-    }
+    // Permissions are currently hardcoded per role - this is a read-only view
+    toast({ title: "Role permissions are managed through the system configuration" });
+    onOpenChange(false);
   };
 
   const togglePermission = (permId: string) => {

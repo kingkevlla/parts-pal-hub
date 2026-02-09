@@ -60,12 +60,13 @@ export default function AddEditUserDialog({ open, onOpenChange, user, onSuccess 
   }, [user]);
 
   const fetchRoles = async () => {
-    const { data, error } = await supabase.from("roles").select("id, name");
-    if (error) {
-      console.error("Error fetching roles:", error);
-      return;
-    }
-    setRoles(data || []);
+    setRoles([
+      { id: 'admin', name: 'admin' },
+      { id: 'owner', name: 'owner' },
+      { id: 'manager', name: 'manager' },
+      { id: 'cashier', name: 'cashier' },
+      { id: 'user', name: 'user' },
+    ]);
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -91,7 +92,7 @@ export default function AddEditUserDialog({ open, onOpenChange, user, onSuccess 
           await supabase.from("user_roles").delete().eq("user_id", user.id);
           const { error: roleError } = await supabase
             .from("user_roles")
-            .insert({ user_id: user.id, role_id: role.id });
+            .insert({ user_id: user.id, role: role.name });
           if (roleError) throw roleError;
         }
 
@@ -128,7 +129,7 @@ export default function AddEditUserDialog({ open, onOpenChange, user, onSuccess 
             
             await supabase
               .from("user_roles")
-              .insert({ user_id: authData.user.id, role_id: role.id });
+              .insert({ user_id: authData.user.id, role: role.name });
           }
         }
 
