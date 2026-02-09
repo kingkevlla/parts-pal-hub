@@ -11,9 +11,7 @@ import { usePermissions } from '@/hooks/usePermissions';
 import AddEditUserDialog from '@/components/users/AddEditUserDialog';
 import DeleteUserDialog from '@/components/users/DeleteUserDialog';
 import RolePermissionsDialog from '@/components/users/RolePermissionsDialog';
-import type { Database } from '@/integrations/supabase/types';
-
-type AppRole = Database["public"]["Enums"]["app_role"];
+type AppRole = "admin" | "owner" | "manager" | "cashier" | "user";
 
 interface UserProfile {
   id: string;
@@ -118,24 +116,15 @@ export default function UserManagement() {
   };
 
   const fetchRoles = async () => {
-    const { data, error } = await supabase
-      .from('roles')
-      .select('id, name, description, permissions')
-      .order('name', { ascending: true });
-
-    if (error) {
-      toast({
-        title: 'Error',
-        description: error.message,
-        variant: 'destructive',
-      });
-      return;
-    }
-
-    setRoles(data?.map(r => ({
-      ...r,
-      permissions: Array.isArray(r.permissions) ? r.permissions as string[] : []
-    })) || []);
+    // Roles are defined in the permission system, not a separate table
+    const defaultRoles = [
+      { id: 'admin', name: 'admin', description: 'Full system access', permissions: ['dashboard', 'pos', 'inventory', 'stock_in', 'stock_out', 'products', 'categories', 'suppliers', 'customers', 'transactions', 'reports', 'loans', 'warehouses', 'settings', 'users'] },
+      { id: 'owner', name: 'owner', description: 'Business owner access', permissions: ['dashboard', 'pos', 'inventory', 'stock_in', 'stock_out', 'products', 'categories', 'suppliers', 'customers', 'transactions', 'reports', 'loans', 'warehouses', 'settings', 'users'] },
+      { id: 'manager', name: 'manager', description: 'Operational management', permissions: ['dashboard', 'pos', 'inventory', 'stock_in', 'stock_out', 'products', 'categories', 'suppliers', 'customers', 'transactions', 'reports', 'loans', 'warehouses'] },
+      { id: 'cashier', name: 'cashier', description: 'POS operations', permissions: ['dashboard', 'pos', 'customers', 'transactions'] },
+      { id: 'user', name: 'user', description: 'Basic access', permissions: ['dashboard'] },
+    ];
+    setRoles(defaultRoles);
   };
 
   const handleAddUser = () => {

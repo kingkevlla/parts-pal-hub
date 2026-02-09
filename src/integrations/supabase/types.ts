@@ -188,6 +188,103 @@ export type Database = {
           },
         ]
       }
+      employee_loan_payments: {
+        Row: {
+          amount: number
+          created_at: string
+          created_by: string | null
+          id: string
+          loan_id: string
+          notes: string | null
+          payment_date: string
+          payment_method: string | null
+        }
+        Insert: {
+          amount: number
+          created_at?: string
+          created_by?: string | null
+          id?: string
+          loan_id: string
+          notes?: string | null
+          payment_date?: string
+          payment_method?: string | null
+        }
+        Update: {
+          amount?: number
+          created_at?: string
+          created_by?: string | null
+          id?: string
+          loan_id?: string
+          notes?: string | null
+          payment_date?: string
+          payment_method?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "employee_loan_payments_loan_id_fkey"
+            columns: ["loan_id"]
+            isOneToOne: false
+            referencedRelation: "employee_loans"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      employee_loans: {
+        Row: {
+          amount: number
+          approved_by: string | null
+          created_at: string
+          created_by: string | null
+          due_date: string | null
+          employee_id: string
+          id: string
+          loan_date: string
+          monthly_deduction: number | null
+          notes: string | null
+          paid_amount: number | null
+          reason: string | null
+          status: string | null
+        }
+        Insert: {
+          amount: number
+          approved_by?: string | null
+          created_at?: string
+          created_by?: string | null
+          due_date?: string | null
+          employee_id: string
+          id?: string
+          loan_date?: string
+          monthly_deduction?: number | null
+          notes?: string | null
+          paid_amount?: number | null
+          reason?: string | null
+          status?: string | null
+        }
+        Update: {
+          amount?: number
+          approved_by?: string | null
+          created_at?: string
+          created_by?: string | null
+          due_date?: string | null
+          employee_id?: string
+          id?: string
+          loan_date?: string
+          monthly_deduction?: number | null
+          notes?: string | null
+          paid_amount?: number | null
+          reason?: string | null
+          status?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "employee_loans_employee_id_fkey"
+            columns: ["employee_id"]
+            isOneToOne: false
+            referencedRelation: "employees"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       employee_payroll: {
         Row: {
           base_salary: number
