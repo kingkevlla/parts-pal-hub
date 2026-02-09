@@ -6,7 +6,7 @@ import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { useToast } from '@/hooks/use-toast';
-import { Trash2, AlertTriangle, Minus, Plus, Package, CreditCard, Banknote, Smartphone, Building2, X, Split, Wallet, Calendar, CheckCircle, UserPlus, Percent } from 'lucide-react';
+import { Trash2, AlertTriangle, Minus, Plus, Package, CreditCard, Banknote, Smartphone, Building2, X, Split, Wallet, Calendar, CheckCircle, UserPlus, Percent, ClipboardList } from 'lucide-react';
 import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from '@/contexts/AuthContext';
 import { useCurrency } from '@/hooks/useCurrency';
@@ -19,6 +19,7 @@ import { ScrollArea } from '@/components/ui/scroll-area';
 import { BarcodeScanner } from '@/components/inventory/BarcodeScanner';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { format, addDays } from 'date-fns';
+import PendingBills from '@/components/pos/PendingBills';
 
 interface CartItem {
   productId: string;
@@ -128,6 +129,8 @@ export default function POS() {
   const [showNewCustomerForm, setShowNewCustomerForm] = useState(false);
   const [newCustomerName, setNewCustomerName] = useState('');
   const [newCustomerPhone, setNewCustomerPhone] = useState('');
+  // Pending bill tracking
+  const [activePendingBillId, setActivePendingBillId] = useState<string | null>(null);
   const { toast } = useToast();
   const { user } = useAuth();
   const { formatAmount } = useCurrency();
@@ -505,6 +508,12 @@ export default function POS() {
       setSplitPayments([]);
       toast({ title: 'Success', description: 'Sale completed successfully' });
 
+      // Close pending bill if this sale was loaded from one
+      if (activePendingBillId) {
+        await supabase.from('pending_bills').update({ status: 'closed' }).eq('id', activePendingBillId);
+        setActivePendingBillId(null);
+      }
+
       setCart([]);
       setCustomerName('');
       setCustomerPhone('');
@@ -624,6 +633,12 @@ export default function POS() {
         description: `Loan of ${formatAmount(totalLoanAmount)} created for ${selectedCustomer?.name}` 
       });
 
+      // Close pending bill if loaded from one
+      if (activePendingBillId) {
+        await supabase.from('pending_bills').update({ status: 'closed' }).eq('id', activePendingBillId);
+        setActivePendingBillId(null);
+      }
+
       // Reset state
       setCart([]);
       setCustomerName('');
@@ -681,6 +696,9 @@ export default function POS() {
           <TabsList className="mb-4 w-fit">
             <TabsTrigger value="sales" className="gap-2">
               <Package className="h-4 w-4" /> Sales
+            </TabsTrigger>
+            <TabsTrigger value="pending" className="gap-2">
+              <ClipboardList className="h-4 w-4" /> Pending Bills
             </TabsTrigger>
             <TabsTrigger value="loans" className="gap-2">
               <Wallet className="h-4 w-4" /> Loan Payments
@@ -878,6 +896,26 @@ export default function POS() {
               </CardContent>
             </Card>
           </div>
+        </TabsContent>
+
+        {/* Pending Bills Tab */}
+        <TabsContent value="pending" className="flex-1 overflow-hidden mt-0">
+          <PendingBills
+            selectedWarehouse={selectedWarehouse}
+            cart={cart}
+            onLoadBill={(items, billId, name, phone) => {
+              setCart(items);
+              setCustomerName(name);
+              setCustomerPhone(phone);
+              setActivePendingBillId(billId);
+              setActiveTab('sales');
+            }}
+            onBillSaved={() => {
+              setCart([]);
+              setCustomerName('');
+              setCustomerPhone('');
+            }}
+          />
         </TabsContent>
 
         {/* Loan Payments Tab */}
