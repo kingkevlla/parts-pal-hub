@@ -1,7 +1,8 @@
 import { useState, useEffect, useRef } from "react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Plus, Pencil, Trash2, AlertTriangle, Upload, X, RefreshCw, Image, Wand2 } from "lucide-react";
+import { Plus, Pencil, Trash2, AlertTriangle, Upload, X, RefreshCw, Image, Wand2, PackagePlus } from "lucide-react";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { compressImage, generateSKU } from "@/lib/imageCompression";
 import { Badge } from "@/components/ui/badge";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
@@ -38,6 +39,7 @@ interface Product {
 
 interface ProductWithStock extends Product {
   total_stock: number;
+  isExtra?: boolean;
 }
 
 interface Category {
@@ -67,6 +69,7 @@ const handleBulkGenerateSKUs = async (products: ProductWithStock[], toast: any, 
 };
 
 export default function Inventory() {
+  const [activeTab, setActiveTab] = useState("inventory");
   const [products, setProducts] = useState<ProductWithStock[]>([]);
   const [categories, setCategories] = useState<Category[]>([]);
   const [selectedCategory, setSelectedCategory] = useState<string>("all");
@@ -83,10 +86,14 @@ export default function Inventory() {
   const { toast } = useToast();
   const { formatAmount } = useCurrency();
 
-  // Filter products
+  // Separate regular and extra products
+  const regularProducts = products.filter(p => !p.isExtra);
+  const extraProducts = products.filter(p => p.isExtra);
+
+  // Filter regular products
   const filteredByCategory = selectedCategory === "all" 
-    ? products 
-    : products.filter(p => p.category_id === selectedCategory);
+    ? regularProducts 
+    : regularProducts.filter(p => p.category_id === selectedCategory);
 
   const filteredByExpiry = expiryFilter === "all"
     ? filteredByCategory
@@ -104,9 +111,15 @@ export default function Inventory() {
     defaultPageSize: 100,
   });
 
+  const extraTable = useDataTable({
+    data: extraProducts,
+    searchFields: ['name', 'sku', 'description'] as (keyof ProductWithStock)[],
+    defaultPageSize: 100,
+  });
+
   // Expiry alerts count
-  const expiredCount = products.filter(p => getExpiryStatus(p.expiry_date) === 'expired').length;
-  const expiringCount = products.filter(p => getExpiryStatus(p.expiry_date) === 'warning').length;
+  const expiredCount = regularProducts.filter(p => getExpiryStatus(p.expiry_date) === 'expired').length;
+  const expiringCount = regularProducts.filter(p => getExpiryStatus(p.expiry_date) === 'warning').length;
 
   useEffect(() => {
     fetchProducts();
@@ -114,6 +127,15 @@ export default function Inventory() {
   }, []);
 
   const fetchProducts = async () => {
+    // Fetch the Extra warehouse ID
+    const { data: extraWarehouse } = await supabase
+      .from('warehouses')
+      .select('id')
+      .eq('name', 'Extra')
+      .maybeSingle();
+
+    const extraWarehouseId = extraWarehouse?.id;
+
     const { data: productsData, error: productsError } = await supabase
       .from('products')
       .select('*, categories(name)')
@@ -128,10 +150,15 @@ export default function Inventory() {
       (productsData || []).map(async (product) => {
         const { data: inventoryData } = await supabase
           .from('inventory')
-          .select('quantity')
+          .select('quantity, warehouse_id')
           .eq('product_id', product.id);
 
         const total_stock = inventoryData?.reduce((sum, inv) => sum + (inv.quantity || 0), 0) || 0;
+
+        // A product is "extra" if it ONLY exists in the Extra warehouse
+        const isExtra = extraWarehouseId
+          ? (inventoryData || []).length > 0 && (inventoryData || []).every(inv => inv.warehouse_id === extraWarehouseId)
+          : false;
 
         return {
           id: product.id,
@@ -147,6 +174,7 @@ export default function Inventory() {
           expiry_date: product.expiry_date,
           image_url: product.image_url,
           total_stock,
+          isExtra,
         };
       })
     );
@@ -504,132 +532,218 @@ export default function Inventory() {
         </div>
       </div>
 
-      <Card>
-        <CardHeader>
-          <div className="flex flex-col gap-4 sm:flex-row sm:items-center">
-            <DataTableSearch
-              value={table.searchTerm}
-              onChange={table.setSearchTerm}
-              placeholder="Search by name, SKU, barcode..."
-            />
-            <Select value={selectedCategory} onValueChange={setSelectedCategory}>
-              <SelectTrigger className="w-[180px]">
-                <SelectValue placeholder="Category" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">All Categories</SelectItem>
-                {categories.map((category) => (
-                  <SelectItem key={category.id} value={category.id}>
-                    {category.name}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-            <Select value={expiryFilter} onValueChange={setExpiryFilter}>
-              <SelectTrigger className="w-[180px]">
-                <SelectValue placeholder="Expiry Status" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">All Products</SelectItem>
-                <SelectItem value="expired">Expired Only</SelectItem>
-                <SelectItem value="expiring">Expiring Soon</SelectItem>
-                <SelectItem value="has_expiry">Has Expiry Date</SelectItem>
-              </SelectContent>
-            </Select>
-          </div>
-          <DataTableBulkActions
-            selectedCount={table.selectedIds.size}
-            onDelete={handleBulkDelete}
-            itemName="products"
-          />
-        </CardHeader>
-        <CardContent>
-          <div className="overflow-x-auto">
-            <table className="w-full">
-              <thead>
-                <tr className="border-b">
-                  <th className="py-3 px-2 text-left">
-                    <SelectAllCheckbox
-                      isAllSelected={table.isAllSelected}
-                      isSomeSelected={table.isSomeSelected}
-                      onToggle={table.selectAll}
-                    />
-                  </th>
-                  <th className="py-3 px-2 text-left text-sm font-medium text-muted-foreground">SKU</th>
-                  <th className="py-3 px-2 text-left text-sm font-medium text-muted-foreground">Product</th>
-                  <th className="py-3 px-2 text-left text-sm font-medium text-muted-foreground">Category</th>
-                  <th className="py-3 px-2 text-left text-sm font-medium text-muted-foreground">Stock</th>
-                  <th className="py-3 px-2 text-left text-sm font-medium text-muted-foreground">Price</th>
-                  <th className="py-3 px-2 text-left text-sm font-medium text-muted-foreground">Expiry</th>
-                  <th className="py-3 px-2 text-left text-sm font-medium text-muted-foreground">Actions</th>
-                </tr>
-              </thead>
-              <tbody>
-                {table.paginatedData.map((product) => (
-                  <tr key={product.id} className="border-b transition-colors hover:bg-muted/50">
-                    <td className="py-3 px-2">
-                      <Checkbox
-                        checked={table.selectedIds.has(product.id)}
-                        onCheckedChange={() => table.toggleSelect(product.id)}
-                      />
-                    </td>
-                    <td className="py-3 px-2 font-mono text-sm">{product.sku || '-'}</td>
-                    <td className="py-3 px-2">
-                      <div className="flex items-center gap-3">
-                        {product.image_url ? (
-                          <img src={product.image_url} alt={product.name} className="h-10 w-10 rounded object-cover" />
-                        ) : (
-                          <div className="h-10 w-10 rounded bg-muted flex items-center justify-center">
-                            <Image className="h-5 w-5 text-muted-foreground" />
+      <Tabs value={activeTab} onValueChange={setActiveTab}>
+        <TabsList className="mb-4">
+          <TabsTrigger value="inventory">Inventory ({regularProducts.length})</TabsTrigger>
+          <TabsTrigger value="extra" className="gap-2">
+            <PackagePlus className="h-4 w-4" />
+            Extra Inventory ({extraProducts.length})
+          </TabsTrigger>
+        </TabsList>
+
+        <TabsContent value="inventory">
+          <Card>
+            <CardHeader>
+              <div className="flex flex-col gap-4 sm:flex-row sm:items-center">
+                <DataTableSearch
+                  value={table.searchTerm}
+                  onChange={table.setSearchTerm}
+                  placeholder="Search by name, SKU, barcode..."
+                />
+                <Select value={selectedCategory} onValueChange={setSelectedCategory}>
+                  <SelectTrigger className="w-[180px]">
+                    <SelectValue placeholder="Category" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">All Categories</SelectItem>
+                    {categories.map((category) => (
+                      <SelectItem key={category.id} value={category.id}>
+                        {category.name}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <Select value={expiryFilter} onValueChange={setExpiryFilter}>
+                  <SelectTrigger className="w-[180px]">
+                    <SelectValue placeholder="Expiry Status" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">All Products</SelectItem>
+                    <SelectItem value="expired">Expired Only</SelectItem>
+                    <SelectItem value="expiring">Expiring Soon</SelectItem>
+                    <SelectItem value="has_expiry">Has Expiry Date</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              <DataTableBulkActions
+                selectedCount={table.selectedIds.size}
+                onDelete={handleBulkDelete}
+                itemName="products"
+              />
+            </CardHeader>
+            <CardContent>
+              <div className="overflow-x-auto">
+                <table className="w-full">
+                  <thead>
+                    <tr className="border-b">
+                      <th className="py-3 px-2 text-left">
+                        <SelectAllCheckbox
+                          isAllSelected={table.isAllSelected}
+                          isSomeSelected={table.isSomeSelected}
+                          onToggle={table.selectAll}
+                        />
+                      </th>
+                      <th className="py-3 px-2 text-left text-sm font-medium text-muted-foreground">SKU</th>
+                      <th className="py-3 px-2 text-left text-sm font-medium text-muted-foreground">Product</th>
+                      <th className="py-3 px-2 text-left text-sm font-medium text-muted-foreground">Category</th>
+                      <th className="py-3 px-2 text-left text-sm font-medium text-muted-foreground">Stock</th>
+                      <th className="py-3 px-2 text-left text-sm font-medium text-muted-foreground">Price</th>
+                      <th className="py-3 px-2 text-left text-sm font-medium text-muted-foreground">Expiry</th>
+                      <th className="py-3 px-2 text-left text-sm font-medium text-muted-foreground">Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {table.paginatedData.map((product) => (
+                      <tr key={product.id} className="border-b transition-colors hover:bg-muted/50">
+                        <td className="py-3 px-2">
+                          <Checkbox
+                            checked={table.selectedIds.has(product.id)}
+                            onCheckedChange={() => table.toggleSelect(product.id)}
+                          />
+                        </td>
+                        <td className="py-3 px-2 font-mono text-sm">{product.sku || '-'}</td>
+                        <td className="py-3 px-2">
+                          <div className="flex items-center gap-3">
+                            {product.image_url ? (
+                              <img src={product.image_url} alt={product.name} className="h-10 w-10 rounded object-cover" />
+                            ) : (
+                              <div className="h-10 w-10 rounded bg-muted flex items-center justify-center">
+                                <Image className="h-5 w-5 text-muted-foreground" />
+                              </div>
+                            )}
+                            <div>
+                              <span className="font-medium">{product.name}</span>
+                              {product.barcode && (
+                                <span className="block text-xs text-muted-foreground">#{product.barcode}</span>
+                              )}
+                            </div>
                           </div>
-                        )}
-                        <div>
-                          <span className="font-medium">{product.name}</span>
-                          {product.barcode && (
-                            <span className="block text-xs text-muted-foreground">#{product.barcode}</span>
-                          )}
-                        </div>
-                      </div>
-                    </td>
-                    <td className="py-3 px-2">
-                      {product.categories ? (
-                        <Badge variant="secondary">{product.categories.name}</Badge>
-                      ) : '-'}
-                    </td>
-                    <td className="py-3 px-2">
-                      <span className={product.total_stock < product.min_stock_level ? "font-medium text-red-600" : "text-green-600"}>
-                        {product.total_stock}
-                      </span>
-                    </td>
-                    <td className="py-3 px-2 font-medium">{formatAmount(product.selling_price)}</td>
-                    <td className="py-3 px-2">
-                      <ExpiryAlert expiryDate={product.expiry_date} />
-                    </td>
-                    <td className="py-3 px-2">
-                      <div className="flex gap-1">
-                        <Button variant="ghost" size="sm" onClick={() => handleEdit(product)}>
-                          <Pencil className="h-4 w-4" />
-                        </Button>
-                        <Button variant="ghost" size="sm" onClick={() => setDeleteProduct(product)}>
-                          <Trash2 className="h-4 w-4" />
-                        </Button>
-                      </div>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-          <DataTablePagination
-            currentPage={table.currentPage}
-            totalPages={table.totalPages}
-            pageSize={table.pageSize}
-            totalItems={table.totalItems}
-            onPageChange={table.goToPage}
-            onPageSizeChange={table.changePageSize}
-          />
-        </CardContent>
-      </Card>
+                        </td>
+                        <td className="py-3 px-2">
+                          {product.categories ? (
+                            <Badge variant="secondary">{product.categories.name}</Badge>
+                          ) : '-'}
+                        </td>
+                        <td className="py-3 px-2">
+                          <span className={product.total_stock < product.min_stock_level ? "font-medium text-destructive" : "text-green-600"}>
+                            {product.total_stock}
+                          </span>
+                        </td>
+                        <td className="py-3 px-2 font-medium">{formatAmount(product.selling_price)}</td>
+                        <td className="py-3 px-2">
+                          <ExpiryAlert expiryDate={product.expiry_date} />
+                        </td>
+                        <td className="py-3 px-2">
+                          <div className="flex gap-1">
+                            <Button variant="ghost" size="sm" onClick={() => handleEdit(product)}>
+                              <Pencil className="h-4 w-4" />
+                            </Button>
+                            <Button variant="ghost" size="sm" onClick={() => setDeleteProduct(product)}>
+                              <Trash2 className="h-4 w-4" />
+                            </Button>
+                          </div>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+              <DataTablePagination
+                currentPage={table.currentPage}
+                totalPages={table.totalPages}
+                pageSize={table.pageSize}
+                totalItems={table.totalItems}
+                onPageChange={table.goToPage}
+                onPageSizeChange={table.changePageSize}
+              />
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        <TabsContent value="extra">
+          <Card>
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                <PackagePlus className="h-5 w-5" />
+                Extra Inventory
+              </CardTitle>
+              <p className="text-sm text-muted-foreground">Items added manually via POS that are not part of regular inventory</p>
+              <div className="flex flex-col gap-4 sm:flex-row sm:items-center mt-2">
+                <DataTableSearch
+                  value={extraTable.searchTerm}
+                  onChange={extraTable.setSearchTerm}
+                  placeholder="Search extra items..."
+                />
+              </div>
+            </CardHeader>
+            <CardContent>
+              {extraProducts.length === 0 ? (
+                <div className="text-center py-12 text-muted-foreground">
+                  <PackagePlus className="h-12 w-12 mx-auto mb-4 opacity-50" />
+                  <p className="text-lg font-medium">No extra items yet</p>
+                  <p className="text-sm">Items added manually in the POS will appear here</p>
+                </div>
+              ) : (
+                <>
+                  <div className="overflow-x-auto">
+                    <table className="w-full">
+                      <thead>
+                        <tr className="border-b">
+                          <th className="py-3 px-2 text-left text-sm font-medium text-muted-foreground">Product</th>
+                          <th className="py-3 px-2 text-left text-sm font-medium text-muted-foreground">Stock</th>
+                          <th className="py-3 px-2 text-left text-sm font-medium text-muted-foreground">Price</th>
+                          <th className="py-3 px-2 text-left text-sm font-medium text-muted-foreground">Added</th>
+                          <th className="py-3 px-2 text-left text-sm font-medium text-muted-foreground">Actions</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {extraTable.paginatedData.map((product) => (
+                          <tr key={product.id} className="border-b transition-colors hover:bg-muted/50">
+                            <td className="py-3 px-2">
+                              <div>
+                                <span className="font-medium">{product.name}</span>
+                                <span className="block text-xs text-muted-foreground">{product.description || 'Manually added'}</span>
+                              </div>
+                            </td>
+                            <td className="py-3 px-2">{product.total_stock}</td>
+                            <td className="py-3 px-2 font-medium">{formatAmount(product.selling_price)}</td>
+                            <td className="py-3 px-2 text-sm text-muted-foreground">
+                              {new Date(product.expiry_date || '').toLocaleDateString() || '-'}
+                            </td>
+                            <td className="py-3 px-2">
+                              <Button variant="ghost" size="sm" onClick={() => setDeleteProduct(product)}>
+                                <Trash2 className="h-4 w-4" />
+                              </Button>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                  <DataTablePagination
+                    currentPage={extraTable.currentPage}
+                    totalPages={extraTable.totalPages}
+                    pageSize={extraTable.pageSize}
+                    totalItems={extraTable.totalItems}
+                    onPageChange={extraTable.goToPage}
+                    onPageSizeChange={extraTable.changePageSize}
+                  />
+                </>
+              )}
+            </CardContent>
+          </Card>
+        </TabsContent>
+      </Tabs>
 
       <AlertDialog open={!!deleteProduct} onOpenChange={(open) => !open && setDeleteProduct(null)}>
         <AlertDialogContent>
