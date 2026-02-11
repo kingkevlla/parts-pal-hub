@@ -499,6 +499,31 @@ export default function POS() {
         extraWarehouseId = extraWh?.[0]?.id || null;
       }
 
+      // For manual items, top up stock if cart qty exceeds current inventory to prevent negative stock
+      for (const item of cart) {
+        if (item.isManual && extraWarehouseId) {
+          const { data: inv } = await supabase
+            .from('inventory')
+            .select('quantity')
+            .eq('product_id', item.productId)
+            .eq('warehouse_id', extraWarehouseId)
+            .maybeSingle();
+
+          const currentStock = inv?.quantity || 0;
+          if (item.quantity > currentStock) {
+            const topUp = item.quantity - currentStock;
+            await supabase.from('stock_movements').insert({
+              product_id: item.productId,
+              warehouse_id: extraWarehouseId,
+              quantity: topUp,
+              movement_type: 'in',
+              notes: 'Auto top-up for manual POS item',
+              created_by: user?.id,
+            });
+          }
+        }
+      }
+
       const stockMovements = cart.map(item => ({
         product_id: item.productId,
         warehouse_id: item.isManual && extraWarehouseId ? extraWarehouseId : selectedWarehouse,
@@ -619,6 +644,31 @@ export default function POS() {
           .eq('name', 'Extra')
           .limit(1);
         extraWarehouseId = extraWh?.[0]?.id || null;
+      }
+
+      // For manual items, top up stock if cart qty exceeds current inventory to prevent negative stock
+      for (const item of cart) {
+        if (item.isManual && extraWarehouseId) {
+          const { data: inv } = await supabase
+            .from('inventory')
+            .select('quantity')
+            .eq('product_id', item.productId)
+            .eq('warehouse_id', extraWarehouseId)
+            .maybeSingle();
+
+          const currentStock = inv?.quantity || 0;
+          if (item.quantity > currentStock) {
+            const topUp = item.quantity - currentStock;
+            await supabase.from('stock_movements').insert({
+              product_id: item.productId,
+              warehouse_id: extraWarehouseId,
+              quantity: topUp,
+              movement_type: 'in',
+              notes: 'Auto top-up for manual POS item (credit)',
+              created_by: user?.id,
+            });
+          }
+        }
       }
 
       // Create stock movements
