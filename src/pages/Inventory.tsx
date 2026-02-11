@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from "react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Plus, Pencil, Trash2, AlertTriangle, Upload, X, RefreshCw, Image, Wand2, PackagePlus } from "lucide-react";
+import { Plus, Pencil, Trash2, AlertTriangle, Upload, X, RefreshCw, Image, Wand2, PackagePlus, ArrowRightLeft } from "lucide-react";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { compressImage, generateSKU } from "@/lib/imageCompression";
 import { Badge } from "@/components/ui/badge";
@@ -78,6 +78,11 @@ export default function Inventory() {
   const [isLoading, setIsLoading] = useState(false);
   const [editingProduct, setEditingProduct] = useState<ProductWithStock | null>(null);
   const [deleteProduct, setDeleteProduct] = useState<ProductWithStock | null>(null);
+  const [moveProduct, setMoveProduct] = useState<ProductWithStock | null>(null);
+  const [moveCategory, setMoveCategory] = useState('');
+  const [moveWarehouse, setMoveWarehouse] = useState('');
+  const [moveWarehouses, setMoveWarehouses] = useState<{ id: string; name: string }[]>([]);
+  const [isMoving, setIsMoving] = useState(false);
   const [formSku, setFormSku] = useState('');
   const [imageFile, setImageFile] = useState<File | null>(null);
   const [imagePreview, setImagePreview] = useState<string | null>(null);
@@ -124,7 +129,77 @@ export default function Inventory() {
   useEffect(() => {
     fetchProducts();
     fetchCategories();
+    fetchMoveWarehouses();
   }, []);
+
+  const fetchMoveWarehouses = async () => {
+    const { data } = await supabase
+      .from('warehouses')
+      .select('id, name')
+      .eq('is_active', true)
+      .neq('name', 'Extra')
+      .order('name');
+    setMoveWarehouses(data || []);
+  };
+
+  const handleMoveToRegular = async () => {
+    if (!moveProduct || !moveCategory || !moveWarehouse) {
+      toast({ title: 'Error', description: 'Please select a category and warehouse', variant: 'destructive' });
+      return;
+    }
+
+    setIsMoving(true);
+    try {
+      // Update product with category
+      const { error: updateError } = await supabase
+        .from('products')
+        .update({ category_id: moveCategory })
+        .eq('id', moveProduct.id);
+      if (updateError) throw updateError;
+
+      // Get Extra warehouse ID
+      const { data: extraWh } = await supabase
+        .from('warehouses')
+        .select('id')
+        .eq('name', 'Extra')
+        .maybeSingle();
+
+      if (extraWh && moveProduct.total_stock > 0) {
+        // Move stock: create 'out' from Extra, 'in' to target warehouse
+        const { error: outError } = await supabase
+          .from('stock_movements')
+          .insert({
+            product_id: moveProduct.id,
+            warehouse_id: extraWh.id,
+            quantity: moveProduct.total_stock,
+            movement_type: 'out',
+            notes: `Moved to regular inventory (${moveWarehouses.find(w => w.id === moveWarehouse)?.name})`,
+          });
+        if (outError) throw outError;
+
+        const { error: inError } = await supabase
+          .from('stock_movements')
+          .insert({
+            product_id: moveProduct.id,
+            warehouse_id: moveWarehouse,
+            quantity: moveProduct.total_stock,
+            movement_type: 'in',
+            notes: `Moved from Extra inventory`,
+          });
+        if (inError) throw inError;
+      }
+
+      toast({ title: 'Success', description: `"${moveProduct.name}" moved to regular inventory` });
+      setMoveProduct(null);
+      setMoveCategory('');
+      setMoveWarehouse('');
+      fetchProducts();
+    } catch (error: any) {
+      toast({ title: 'Error', description: error.message, variant: 'destructive' });
+    } finally {
+      setIsMoving(false);
+    }
+  };
 
   const fetchProducts = async () => {
     // Fetch the Extra warehouse ID
@@ -721,9 +796,18 @@ export default function Inventory() {
                               {new Date(product.expiry_date || '').toLocaleDateString() || '-'}
                             </td>
                             <td className="py-3 px-2">
-                              <Button variant="ghost" size="sm" onClick={() => setDeleteProduct(product)}>
-                                <Trash2 className="h-4 w-4" />
-                              </Button>
+                              <div className="flex gap-1">
+                                <Button variant="ghost" size="sm" onClick={() => {
+                                  setMoveProduct(product);
+                                  setMoveCategory('');
+                                  setMoveWarehouse('');
+                                }} title="Move to Regular Inventory">
+                                  <ArrowRightLeft className="h-4 w-4" />
+                                </Button>
+                                <Button variant="ghost" size="sm" onClick={() => setDeleteProduct(product)}>
+                                  <Trash2 className="h-4 w-4" />
+                                </Button>
+                              </div>
                             </td>
                           </tr>
                         ))}
@@ -744,6 +828,52 @@ export default function Inventory() {
           </Card>
         </TabsContent>
       </Tabs>
+
+      {/* Move to Regular Inventory Dialog */}
+      <Dialog open={!!moveProduct} onOpenChange={(open) => { if (!open) setMoveProduct(null); }}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Move to Regular Inventory</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4">
+            <p className="text-sm text-muted-foreground">
+              Move <span className="font-medium text-foreground">"{moveProduct?.name}"</span> (Stock: {moveProduct?.total_stock}) to regular inventory.
+            </p>
+            <div className="space-y-2">
+              <Label>Category *</Label>
+              <Select value={moveCategory} onValueChange={setMoveCategory}>
+                <SelectTrigger>
+                  <SelectValue placeholder="Select category" />
+                </SelectTrigger>
+                <SelectContent>
+                  {categories.map((c) => (
+                    <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="space-y-2">
+              <Label>Target Warehouse *</Label>
+              <Select value={moveWarehouse} onValueChange={setMoveWarehouse}>
+                <SelectTrigger>
+                  <SelectValue placeholder="Select warehouse" />
+                </SelectTrigger>
+                <SelectContent>
+                  {moveWarehouses.map((w) => (
+                    <SelectItem key={w.id} value={w.id}>{w.name}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="flex gap-2 justify-end">
+              <Button variant="outline" onClick={() => setMoveProduct(null)}>Cancel</Button>
+              <Button onClick={handleMoveToRegular} disabled={isMoving || !moveCategory || !moveWarehouse}>
+                {isMoving ? 'Moving...' : 'Move to Regular'}
+              </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
 
       <AlertDialog open={!!deleteProduct} onOpenChange={(open) => !open && setDeleteProduct(null)}>
         <AlertDialogContent>
