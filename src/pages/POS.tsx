@@ -509,8 +509,8 @@ export default function POS() {
             .eq('warehouse_id', extraWarehouseId)
             .maybeSingle();
 
-          const currentStock = inv?.quantity || 0;
-          if (item.quantity > currentStock) {
+          const currentStock = inv?.quantity ?? 0;
+          if (currentStock < item.quantity) {
             const topUp = item.quantity - currentStock;
             await supabase.from('stock_movements').insert({
               product_id: item.productId,
@@ -656,8 +656,8 @@ export default function POS() {
             .eq('warehouse_id', extraWarehouseId)
             .maybeSingle();
 
-          const currentStock = inv?.quantity || 0;
-          if (item.quantity > currentStock) {
+          const currentStock = inv?.quantity ?? 0;
+          if (currentStock < item.quantity) {
             const topUp = item.quantity - currentStock;
             await supabase.from('stock_movements').insert({
               product_id: item.productId,
