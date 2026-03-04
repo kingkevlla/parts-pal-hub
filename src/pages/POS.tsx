@@ -996,6 +996,7 @@ export default function POS() {
         <TabsContent value="pending" className="flex-1 overflow-hidden mt-0">
           <PendingBills
             selectedWarehouse={selectedWarehouse}
+            warehouses={warehouses}
             cart={cart}
             onLoadBill={(items, billId, name, phone, warehouseId) => {
               setCart(items);
