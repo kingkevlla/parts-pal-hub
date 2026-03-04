@@ -10,6 +10,7 @@ import { useToast } from '@/hooks/use-toast';
 import { useCurrency } from '@/hooks/useCurrency';
 import { useAuth } from '@/contexts/AuthContext';
 import { supabase } from '@/integrations/supabase/client';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { ClipboardList, Plus, Trash2, ShoppingCart, UserPlus, Clock, Edit } from 'lucide-react';
 import { format } from 'date-fns';
 
@@ -45,20 +46,27 @@ interface PendingBillItem {
   subtotal: number;
 }
 
+interface Warehouse {
+  id: string;
+  name: string;
+}
+
 interface PendingBillsProps {
   selectedWarehouse: string;
+  warehouses: Warehouse[];
   cart: CartItem[];
   onLoadBill: (items: CartItem[], billId: string, customerName: string, customerPhone: string, warehouseId: string) => void;
   onBillSaved: () => void;
 }
 
-export default function PendingBills({ selectedWarehouse, cart, onLoadBill, onBillSaved }: PendingBillsProps) {
+export default function PendingBills({ selectedWarehouse, warehouses, cart, onLoadBill, onBillSaved }: PendingBillsProps) {
   const [bills, setBills] = useState<PendingBill[]>([]);
   const [showCreateDialog, setShowCreateDialog] = useState(false);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState<string | null>(null);
   const [billName, setBillName] = useState('');
   const [billPhone, setBillPhone] = useState('');
   const [billNotes, setBillNotes] = useState('');
+  const [billWarehouseId, setBillWarehouseId] = useState('');
   const [searchQuery, setSearchQuery] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [activeBillId, setActiveBillId] = useState<string | null>(null);
@@ -113,9 +121,8 @@ export default function PendingBills({ selectedWarehouse, cart, onLoadBill, onBi
       toast({ title: 'Error', description: 'Customer name is required', variant: 'destructive' });
       return;
     }
-    const hasRegularItems = cart.some(item => !item.isManual);
-    if (hasRegularItems && (!selectedWarehouse || selectedWarehouse === 'all')) {
-      toast({ title: 'Error', description: 'Please select a specific warehouse before saving a bill', variant: 'destructive' });
+    if (!billWarehouseId) {
+      toast({ title: 'Error', description: 'Please select a warehouse for this bill', variant: 'destructive' });
       return;
     }
     if (cart.length === 0) {
@@ -125,27 +132,7 @@ export default function PendingBills({ selectedWarehouse, cart, onLoadBill, onBi
 
     setIsLoading(true);
     try {
-      // Resolve warehouse: use Extra warehouse for all-manual carts
-      let warehouseId = selectedWarehouse;
-      if (!hasRegularItems || !warehouseId || warehouseId === 'all') {
-        const { data: extraWh } = await supabase
-          .from('warehouses')
-          .select('id')
-          .eq('name', 'Extra')
-          .limit(1);
-        if (extraWh && extraWh.length > 0) {
-          warehouseId = extraWh[0].id;
-        } else {
-          // Create Extra warehouse
-          const { data: created, error: createErr } = await supabase
-            .from('warehouses')
-            .insert({ name: 'Extra', location: 'Manual/Extra Items', is_active: true })
-            .select('id')
-            .single();
-          if (createErr) throw createErr;
-          warehouseId = created.id;
-        }
-      }
+      const warehouseId = billWarehouseId;
 
       const { data: bill, error: billError } = await supabase
         .from('pending_bills')
@@ -332,7 +319,10 @@ export default function PendingBills({ selectedWarehouse, cart, onLoadBill, onBi
             />
             <Button
               size="sm"
-              onClick={() => setShowCreateDialog(true)}
+              onClick={() => {
+                setBillWarehouseId(selectedWarehouse !== 'all' ? selectedWarehouse : '');
+                setShowCreateDialog(true);
+              }}
               disabled={cart.length === 0}
               className="gap-1 whitespace-nowrap"
             >
@@ -513,6 +503,19 @@ export default function PendingBills({ selectedWarehouse, cart, onLoadBill, onBi
               />
             </div>
             <div className="space-y-2">
+              <Label>Warehouse *</Label>
+              <Select value={billWarehouseId} onValueChange={setBillWarehouseId}>
+                <SelectTrigger>
+                  <SelectValue placeholder="Select warehouse" />
+                </SelectTrigger>
+                <SelectContent>
+                  {warehouses.filter(w => w.name !== 'Extra').map(w => (
+                    <SelectItem key={w.id} value={w.id}>{w.name}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="space-y-2">
               <Label>Notes (optional)</Label>
               <Input
                 placeholder="e.g. Table 5, waiting for more guests..."
@@ -523,7 +526,7 @@ export default function PendingBills({ selectedWarehouse, cart, onLoadBill, onBi
             <Button
               className="w-full"
               onClick={createNewBill}
-              disabled={isLoading || !billName.trim()}
+              disabled={isLoading || !billName.trim() || !billWarehouseId}
             >
               {isLoading ? 'Saving...' : 'Save Bill'}
             </Button>
