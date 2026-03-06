@@ -27,6 +27,7 @@ import OwnerDashboard from "./pages/OwnerDashboard";
 import Expenses from "./pages/Expenses";
 import Employees from "./pages/Employees";
 import SalesHistory from "./pages/SalesHistory";
+import StockAdjustment from "./pages/StockAdjustment";
 import NotFound from "./pages/NotFound";
 
 const queryClient = new QueryClient();
@@ -90,6 +91,7 @@ const App = () => (
             <Route path="/expenses" element={<ProtectedRoute><Layout><Expenses /></Layout></ProtectedRoute>} />
             <Route path="/employees" element={<ProtectedRoute><Layout><Employees /></Layout></ProtectedRoute>} />
             <Route path="/warehouses" element={<ProtectedRoute><Layout><Warehouses /></Layout></ProtectedRoute>} />
+            <Route path="/stock-adjustment" element={<ProtectedRoute><Layout><StockAdjustment /></Layout></ProtectedRoute>} />
             <Route path="/support" element={<ProtectedRoute><Layout><Support /></Layout></ProtectedRoute>} />
             <Route path="/reports" element={<ProtectedRoute><Layout><Reports /></Layout></ProtectedRoute>} />
             <Route path="/users" element={<ProtectedRoute><Layout><UserManagement /></Layout></ProtectedRoute>} />
