@@ -35,7 +35,7 @@ interface AdjustmentEntry {
 }
 
 export default function StockAdjustment() {
-  const { isAdmin, isOwner, loading: permLoading } = usePermissions();
+  const { isAdmin, isOwner, isManager, hasPermission, loading: permLoading } = usePermissions();
   const { user } = useAuth();
   const { toast } = useToast();
 
@@ -169,7 +169,7 @@ export default function StockAdjustment() {
   };
 
   if (permLoading) return <div className="p-6">Loading...</div>;
-  if (!isAdmin && !isOwner) return <Navigate to="/" replace />;
+  if (!hasPermission("stock_adjustment")) return <Navigate to="/" replace />;
 
   return (
     <div className="space-y-6 p-6">
