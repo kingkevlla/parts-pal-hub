@@ -5,7 +5,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { useToast } from '@/hooks/use-toast';
-import { Download, Upload, FileSpreadsheet, AlertCircle } from 'lucide-react';
+import { Download, Upload, FileSpreadsheet, AlertCircle, CheckCircle2 } from 'lucide-react';
 import { supabase } from '@/integrations/supabase/client';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 
@@ -14,44 +14,126 @@ interface ExportImportDialogProps {
   categories: Array<{ id: string; name: string }>;
 }
 
+const parseCSV = (text: string): string[][] => {
+  const lines: string[][] = [];
+  let currentLine: string[] = [];
+  let currentField = '';
+  let inQuotes = false;
+
+  for (let i = 0; i < text.length; i++) {
+    const char = text[i];
+    const nextChar = text[i + 1];
+
+    if (inQuotes) {
+      if (char === '"' && nextChar === '"') {
+        currentField += '"';
+        i++;
+      } else if (char === '"') {
+        inQuotes = false;
+      } else {
+        currentField += char;
+      }
+    } else {
+      if (char === '"') {
+        inQuotes = true;
+      } else if (char === ',') {
+        currentLine.push(currentField.trim());
+        currentField = '';
+      } else if (char === '\n' || (char === '\r' && nextChar === '\n')) {
+        currentLine.push(currentField.trim());
+        if (currentLine.some(f => f)) lines.push(currentLine);
+        currentLine = [];
+        currentField = '';
+        if (char === '\r') i++;
+      } else if (char !== '\r') {
+        currentField += char;
+      }
+    }
+  }
+
+  if (currentField || currentLine.length > 0) {
+    currentLine.push(currentField.trim());
+    if (currentLine.some(f => f)) lines.push(currentLine);
+  }
+
+  return lines;
+};
+
+const escapeCSV = (val: string | number | null | undefined): string => {
+  const str = String(val ?? '');
+  if (str.includes(',') || str.includes('"') || str.includes('\n')) {
+    return `"${str.replace(/"/g, '""')}"`;
+  }
+  return str;
+};
+
 export function ExportImportDialog({ onImportComplete, categories }: ExportImportDialogProps) {
   const [isOpen, setIsOpen] = useState(false);
+  const [isExporting, setIsExporting] = useState(false);
   const [isImporting, setIsImporting] = useState(false);
   const [importErrors, setImportErrors] = useState<string[]>([]);
   const [importSuccess, setImportSuccess] = useState(0);
   const { toast } = useToast();
 
   const exportToCSV = async () => {
+    setIsExporting(true);
     try {
-      const { data, error } = await supabase
+      // Fetch products with categories
+      const { data: products, error: prodError } = await supabase
         .from('products')
         .select('*, categories(name)')
         .order('name');
+      if (prodError) throw prodError;
 
-      if (error) throw error;
+      // Fetch all inventory with warehouse names
+      const { data: inventory, error: invError } = await supabase
+        .from('inventory')
+        .select('product_id, quantity, warehouses(name)');
+      if (invError) throw invError;
+
+      // Build stock map: product_id -> total quantity
+      const stockMap = new Map<string, number>();
+      const warehouseStockMap = new Map<string, Map<string, number>>();
+      for (const inv of inventory || []) {
+        stockMap.set(inv.product_id, (stockMap.get(inv.product_id) || 0) + (inv.quantity || 0));
+        if (!warehouseStockMap.has(inv.product_id)) {
+          warehouseStockMap.set(inv.product_id, new Map());
+        }
+        const whName = (inv.warehouses as any)?.name || 'Unknown';
+        warehouseStockMap.get(inv.product_id)!.set(whName, inv.quantity || 0);
+      }
+
+      // Collect all warehouse names for columns
+      const allWarehouses = new Set<string>();
+      for (const map of warehouseStockMap.values()) {
+        for (const wh of map.keys()) allWarehouses.add(wh);
+      }
+      const warehouseList = Array.from(allWarehouses).sort();
 
       const headers = [
-        'name', 'sku', 'barcode', 'description', 'purchase_price', 
-        'selling_price', 'min_stock_level', 'category', 'expiry_date', 'is_active'
+        'name', 'sku', 'barcode', 'description', 'purchase_price',
+        'selling_price', 'min_stock_level', 'category', 'expiry_date',
+        'is_active', 'total_stock',
+        ...warehouseList.map(w => `stock_${w}`),
       ];
 
-      const csvContent = [
-        headers.join(','),
-        ...(data || []).map(p => [
-          `"${(p.name || '').replace(/"/g, '""')}"`,
-          `"${(p.sku || '').replace(/"/g, '""')}"`,
-          `"${(p.barcode || '').replace(/"/g, '""')}"`,
-          `"${(p.description || '').replace(/"/g, '""')}"`,
-          p.purchase_price || 0,
-          p.selling_price || 0,
-          p.min_stock_level || 0,
-          `"${(p.categories as any)?.name || ''}"`,
-          p.expiry_date || '',
-          p.is_active ? 'true' : 'false'
-        ].join(','))
-      ].join('\n');
+      const rows = (products || []).map(p => [
+        escapeCSV(p.name),
+        escapeCSV(p.sku),
+        escapeCSV(p.barcode),
+        escapeCSV(p.description),
+        p.purchase_price || 0,
+        p.selling_price || 0,
+        p.min_stock_level || 0,
+        escapeCSV((p.categories as any)?.name || ''),
+        p.expiry_date || '',
+        p.is_active ? 'true' : 'false',
+        stockMap.get(p.id) || 0,
+        ...warehouseList.map(w => warehouseStockMap.get(p.id)?.get(w) || 0),
+      ].join(','));
 
-      const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+      const csvContent = [headers.join(','), ...rows].join('\n');
+      const blob = new Blob(['\uFEFF' + csvContent], { type: 'text/csv;charset=utf-8;' });
       const url = URL.createObjectURL(blob);
       const link = document.createElement('a');
       link.href = url;
@@ -59,22 +141,23 @@ export function ExportImportDialog({ onImportComplete, categories }: ExportImpor
       link.click();
       URL.revokeObjectURL(url);
 
-      toast({ title: 'Success', description: `Exported ${data?.length || 0} products` });
+      toast({ title: 'Export Complete', description: `Exported ${products?.length || 0} products with stock data` });
     } catch (error: any) {
-      toast({ title: 'Error', description: error.message, variant: 'destructive' });
+      toast({ title: 'Export Error', description: error.message, variant: 'destructive' });
+    } finally {
+      setIsExporting(false);
     }
   };
 
   const downloadSampleCSV = () => {
     const sampleData = [
       ['name', 'sku', 'barcode', 'description', 'purchase_price', 'selling_price', 'min_stock_level', 'category', 'expiry_date', 'is_active'],
-      ['Sample Product 1', 'SKU-SAMPLE-001', 'BAR123456789', 'Description of product 1', '10.00', '15.00', '10', 'Electronics', '2025-12-31', 'true'],
-      ['Sample Product 2', 'SKU-SAMPLE-002', 'BAR987654321', 'Description of product 2', '5.50', '9.99', '20', 'Food & Beverages', '2025-06-15', 'true'],
-      ['Sample Product 3', 'SKU-SAMPLE-003', '', 'Product without barcode/expiry', '25.00', '39.99', '5', '', '', 'true'],
+      ['"Sample Product 1"', '"SKU-001"', '"BAR123"', '"A sample product"', '10.00', '15.00', '10', '"Electronics"', '2027-12-31', 'true'],
+      ['"Sample Product 2"', '""', '""', '"No SKU product"', '5.50', '9.99', '20', '"Food"', '', 'true'],
     ];
 
-    const csvContent = sampleData.map(row => row.map(cell => `"${cell}"`).join(',')).join('\n');
-    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const csvContent = sampleData.map(row => row.join(',')).join('\n');
+    const blob = new Blob(['\uFEFF' + csvContent], { type: 'text/csv;charset=utf-8;' });
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
     link.href = url;
@@ -82,57 +165,18 @@ export function ExportImportDialog({ onImportComplete, categories }: ExportImpor
     link.click();
     URL.revokeObjectURL(url);
 
-    toast({ title: 'Downloaded', description: 'Sample CSV template downloaded' });
-  };
-
-  const parseCSV = (text: string): string[][] => {
-    const lines: string[][] = [];
-    let currentLine: string[] = [];
-    let currentField = '';
-    let inQuotes = false;
-
-    for (let i = 0; i < text.length; i++) {
-      const char = text[i];
-      const nextChar = text[i + 1];
-
-      if (inQuotes) {
-        if (char === '"' && nextChar === '"') {
-          currentField += '"';
-          i++;
-        } else if (char === '"') {
-          inQuotes = false;
-        } else {
-          currentField += char;
-        }
-      } else {
-        if (char === '"') {
-          inQuotes = true;
-        } else if (char === ',') {
-          currentLine.push(currentField.trim());
-          currentField = '';
-        } else if (char === '\n' || (char === '\r' && nextChar === '\n')) {
-          currentLine.push(currentField.trim());
-          if (currentLine.some(f => f)) lines.push(currentLine);
-          currentLine = [];
-          currentField = '';
-          if (char === '\r') i++;
-        } else if (char !== '\r') {
-          currentField += char;
-        }
-      }
-    }
-
-    if (currentField || currentLine.length > 0) {
-      currentLine.push(currentField.trim());
-      if (currentLine.some(f => f)) lines.push(currentLine);
-    }
-
-    return lines;
+    toast({ title: 'Downloaded', description: 'Import template downloaded' });
   };
 
   const handleImport = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
+
+    if (file.size > 5 * 1024 * 1024) {
+      toast({ title: 'Error', description: 'File must be under 5MB', variant: 'destructive' });
+      e.target.value = '';
+      return;
+    }
 
     setIsImporting(true);
     setImportErrors([]);
@@ -143,95 +187,144 @@ export function ExportImportDialog({ onImportComplete, categories }: ExportImpor
       const rows = parseCSV(text);
 
       if (rows.length < 2) {
-        throw new Error('CSV file must have headers and at least one data row');
+        throw new Error('CSV must have a header row and at least one data row');
       }
 
       const headers = rows[0].map(h => h.toLowerCase().trim());
-      const requiredHeaders = ['name'];
-      const missingHeaders = requiredHeaders.filter(h => !headers.includes(h));
-
-      if (missingHeaders.length > 0) {
-        throw new Error(`Missing required headers: ${missingHeaders.join(', ')}`);
+      if (!headers.includes('name')) {
+        throw new Error('Missing required column: name');
       }
 
+      const getValue = (row: string[], header: string) => {
+        const idx = headers.indexOf(header);
+        return idx >= 0 && idx < row.length ? row[idx]?.trim() || '' : '';
+      };
+
       const categoryMap = new Map(categories.map(c => [c.name.toLowerCase(), c.id]));
+
+      // Fetch existing products by SKU for matching
+      const { data: existingProducts } = await supabase.from('products').select('id, sku, name');
+      const skuMap = new Map<string, string>();
+      const nameMap = new Map<string, string>();
+      for (const p of existingProducts || []) {
+        if (p.sku) skuMap.set(p.sku.toLowerCase(), p.id);
+        nameMap.set(p.name.toLowerCase(), p.id);
+      }
+
       const errors: string[] = [];
-      const validProducts: any[] = [];
+      let successCount = 0;
 
       for (let i = 1; i < rows.length; i++) {
         const row = rows[i];
         const rowNum = i + 1;
 
         try {
-          const getValue = (header: string) => {
-            const idx = headers.indexOf(header.toLowerCase());
-            return idx >= 0 ? row[idx]?.trim() || '' : '';
-          };
-
-          const name = getValue('name');
+          const name = getValue(row, 'name');
           if (!name) {
-            errors.push(`Row ${rowNum}: Name is required`);
+            errors.push(`Row ${rowNum}: Name is required, skipping`);
+            continue;
+          }
+          if (name.length > 200) {
+            errors.push(`Row ${rowNum}: Name too long (max 200 chars)`);
             continue;
           }
 
-          const categoryName = getValue('category');
-          const categoryId = categoryName ? categoryMap.get(categoryName.toLowerCase()) : null;
+          const sku = getValue(row, 'sku') || null;
+          const barcode = getValue(row, 'barcode') || null;
+          const description = getValue(row, 'description') || null;
 
-          if (categoryName && !categoryId) {
-            errors.push(`Row ${rowNum}: Category "${categoryName}" not found`);
+          const purchasePrice = parseFloat(getValue(row, 'purchase_price'));
+          const sellingPrice = parseFloat(getValue(row, 'selling_price'));
+          const minStock = parseInt(getValue(row, 'min_stock_level'));
+
+          if (getValue(row, 'purchase_price') && (isNaN(purchasePrice) || purchasePrice < 0)) {
+            errors.push(`Row ${rowNum}: Invalid purchase price`);
+            continue;
+          }
+          if (getValue(row, 'selling_price') && (isNaN(sellingPrice) || sellingPrice < 0)) {
+            errors.push(`Row ${rowNum}: Invalid selling price`);
+            continue;
           }
 
-          const expiryDate = getValue('expiry_date');
-          let parsedExpiry: string | null = null;
-          if (expiryDate) {
-            const date = new Date(expiryDate);
-            if (isNaN(date.getTime())) {
-              errors.push(`Row ${rowNum}: Invalid expiry date format (use YYYY-MM-DD)`);
-            } else {
-              parsedExpiry = date.toISOString().split('T')[0];
+          const categoryName = getValue(row, 'category');
+          let categoryId: string | null = null;
+          if (categoryName) {
+            categoryId = categoryMap.get(categoryName.toLowerCase()) || null;
+            if (!categoryId) {
+              errors.push(`Row ${rowNum}: Category "${categoryName}" not found, importing without category`);
             }
           }
 
-          validProducts.push({
+          const expiryRaw = getValue(row, 'expiry_date');
+          let expiryDate: string | null = null;
+          if (expiryRaw) {
+            const d = new Date(expiryRaw);
+            if (isNaN(d.getTime())) {
+              errors.push(`Row ${rowNum}: Invalid date "${expiryRaw}", skipping expiry`);
+            } else {
+              expiryDate = d.toISOString().split('T')[0];
+            }
+          }
+
+          const isActiveRaw = getValue(row, 'is_active');
+          const isActive = isActiveRaw ? isActiveRaw.toLowerCase() !== 'false' : true;
+
+          const productData: any = {
             name,
-            sku: getValue('sku') || null,
-            barcode: getValue('barcode') || null,
-            description: getValue('description') || null,
-            purchase_price: parseFloat(getValue('purchase_price')) || 0,
-            selling_price: parseFloat(getValue('selling_price')) || 0,
-            min_stock_level: parseInt(getValue('min_stock_level')) || 0,
-            category_id: categoryId || null,
-            expiry_date: parsedExpiry,
-            is_active: getValue('is_active').toLowerCase() !== 'false',
-          });
+            sku: sku || null,
+            barcode: barcode || null,
+            description,
+            purchase_price: isNaN(purchasePrice) ? 0 : purchasePrice,
+            selling_price: isNaN(sellingPrice) ? 0 : sellingPrice,
+            min_stock_level: isNaN(minStock) ? 0 : Math.max(0, minStock),
+            category_id: categoryId,
+            expiry_date: expiryDate,
+            is_active: isActive,
+          };
+
+          // Match existing product by SKU first, then by exact name
+          let existingId: string | undefined;
+          if (sku) existingId = skuMap.get(sku.toLowerCase());
+          if (!existingId) existingId = nameMap.get(name.toLowerCase());
+
+          if (existingId) {
+            // Update existing
+            const { error } = await supabase
+              .from('products')
+              .update(productData)
+              .eq('id', existingId);
+            if (error) {
+              errors.push(`Row ${rowNum}: Update failed - ${error.message}`);
+              continue;
+            }
+          } else {
+            // Insert new
+            const { error } = await supabase
+              .from('products')
+              .insert(productData);
+            if (error) {
+              errors.push(`Row ${rowNum}: Insert failed - ${error.message}`);
+              continue;
+            }
+          }
+
+          successCount++;
         } catch (err: any) {
           errors.push(`Row ${rowNum}: ${err.message}`);
         }
       }
 
-      if (validProducts.length > 0) {
-        const { data, error } = await supabase
-          .from('products')
-          .upsert(validProducts, { onConflict: 'sku', ignoreDuplicates: false })
-          .select();
-
-        if (error) {
-          errors.push(`Database error: ${error.message}`);
-        } else {
-          setImportSuccess(data?.length || validProducts.length);
-        }
-      }
-
+      setImportSuccess(successCount);
       setImportErrors(errors);
 
-      if (validProducts.length > 0) {
-        toast({ 
-          title: 'Import Complete', 
-          description: `Imported ${validProducts.length} products${errors.length > 0 ? ` with ${errors.length} warnings` : ''}` 
+      if (successCount > 0) {
+        toast({
+          title: 'Import Complete',
+          description: `${successCount} product(s) imported/updated${errors.length > 0 ? `, ${errors.length} warning(s)` : ''}`,
         });
         onImportComplete();
-      } else if (errors.length > 0) {
-        toast({ title: 'Import Failed', description: 'No valid products found', variant: 'destructive' });
+      } else {
+        toast({ title: 'Import Failed', description: 'No products were imported', variant: 'destructive' });
       }
     } catch (error: any) {
       toast({ title: 'Error', description: error.message, variant: 'destructive' });
@@ -243,7 +336,13 @@ export function ExportImportDialog({ onImportComplete, categories }: ExportImpor
   };
 
   return (
-    <Dialog open={isOpen} onOpenChange={setIsOpen}>
+    <Dialog open={isOpen} onOpenChange={(open) => {
+      setIsOpen(open);
+      if (!open) {
+        setImportErrors([]);
+        setImportSuccess(0);
+      }
+    }}>
       <DialogTrigger asChild>
         <Button variant="outline" className="gap-2">
           <FileSpreadsheet className="h-4 w-4" />
@@ -262,17 +361,17 @@ export function ExportImportDialog({ onImportComplete, categories }: ExportImpor
 
           <TabsContent value="export" className="space-y-4">
             <p className="text-sm text-muted-foreground">
-              Export all products to a CSV file that can be opened in Excel or Google Sheets.
+              Export all products with stock quantities per warehouse to CSV. Opens in Excel or Google Sheets.
             </p>
-            <Button onClick={exportToCSV} className="w-full gap-2">
+            <Button onClick={exportToCSV} disabled={isExporting} className="w-full gap-2">
               <Download className="h-4 w-4" />
-              Export Products to CSV
+              {isExporting ? 'Exporting...' : 'Export Products to CSV'}
             </Button>
           </TabsContent>
 
           <TabsContent value="import" className="space-y-4">
             <p className="text-sm text-muted-foreground">
-              Import products from a CSV file. Download the sample template to see the correct format.
+              Import or update products from CSV. Existing products are matched by SKU or exact name and updated; new ones are created.
             </p>
 
             <Button variant="outline" onClick={downloadSampleCSV} className="w-full gap-2">
@@ -292,13 +391,14 @@ export function ExportImportDialog({ onImportComplete, categories }: ExportImpor
             </div>
 
             {isImporting && (
-              <p className="text-sm text-muted-foreground">Importing...</p>
+              <p className="text-sm text-muted-foreground animate-pulse">Importing products...</p>
             )}
 
             {importSuccess > 0 && (
               <Alert>
+                <CheckCircle2 className="h-4 w-4" />
                 <AlertDescription className="text-green-600">
-                  Successfully imported {importSuccess} products
+                  Successfully imported/updated {importSuccess} product(s)
                 </AlertDescription>
               </Alert>
             )}
@@ -307,7 +407,7 @@ export function ExportImportDialog({ onImportComplete, categories }: ExportImpor
               <Alert variant="destructive">
                 <AlertCircle className="h-4 w-4" />
                 <AlertDescription>
-                  <div className="max-h-32 overflow-y-auto">
+                  <div className="max-h-40 overflow-y-auto space-y-1">
                     {importErrors.map((err, i) => (
                       <div key={i} className="text-sm">{err}</div>
                     ))}
@@ -317,12 +417,14 @@ export function ExportImportDialog({ onImportComplete, categories }: ExportImpor
             )}
 
             <div className="text-xs text-muted-foreground space-y-1">
-              <p><strong>Tips:</strong></p>
-              <ul className="list-disc list-inside">
-                <li>Name is required, all other fields are optional</li>
-                <li>Use YYYY-MM-DD format for expiry dates</li>
+              <p><strong>How it works:</strong></p>
+              <ul className="list-disc list-inside space-y-0.5">
+                <li><code>name</code> is required; all other fields are optional</li>
+                <li>Products with a matching <strong>SKU</strong> or <strong>exact name</strong> will be updated</li>
+                <li>New products without a match will be created</li>
+                <li>Use YYYY-MM-DD for expiry dates</li>
                 <li>Category names must match existing categories</li>
-                <li>Existing products with same SKU will be updated</li>
+                <li>Stock quantities are not modified — use Stock Adjustment for that</li>
               </ul>
             </div>
           </TabsContent>
