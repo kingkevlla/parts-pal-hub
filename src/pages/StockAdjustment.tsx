@@ -15,6 +15,7 @@ import { useDataTable } from "@/hooks/useDataTable";
 import { DataTableSearch, DataTablePagination } from "@/components/ui/data-table-controls";
 import { AlertTriangle, CheckCircle2, ClipboardEdit } from "lucide-react";
 import { Navigate } from "react-router-dom";
+import { BulkStockAdjustmentDialog } from "@/components/inventory/BulkStockAdjustmentDialog";
 
 interface InventoryRow {
   id: string;
