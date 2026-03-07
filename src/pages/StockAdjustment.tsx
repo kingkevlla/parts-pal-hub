@@ -15,6 +15,7 @@ import { useDataTable } from "@/hooks/useDataTable";
 import { DataTableSearch, DataTablePagination } from "@/components/ui/data-table-controls";
 import { AlertTriangle, CheckCircle2, ClipboardEdit } from "lucide-react";
 import { Navigate } from "react-router-dom";
+import { BulkStockAdjustmentDialog } from "@/components/inventory/BulkStockAdjustmentDialog";
 
 interface InventoryRow {
   id: string;
@@ -173,11 +174,14 @@ export default function StockAdjustment() {
 
   return (
     <div className="space-y-6 p-6">
-      <div>
-        <h1 className="text-3xl font-bold">Stock Adjustment</h1>
-        <p className="text-muted-foreground">
-          Manually correct inventory quantities across warehouses
-        </p>
+      <div className="flex items-center justify-between flex-wrap gap-4">
+        <div>
+          <h1 className="text-3xl font-bold">Stock Adjustment</h1>
+          <p className="text-muted-foreground">
+            Manually correct inventory quantities across warehouses
+          </p>
+        </div>
+        <BulkStockAdjustmentDialog onComplete={() => { fetchInventory(); fetchHistory(); }} />
       </div>
 
       <div className="grid gap-6 lg:grid-cols-3">
