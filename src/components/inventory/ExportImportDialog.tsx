@@ -219,8 +219,18 @@ export function ExportImportDialog({ onImportComplete, categories }: ExportImpor
     setImportSuccess(0);
 
     try {
-      const text = await file.text();
-      const rows = parseCSV(text);
+      let rows: string[][];
+
+      if (file.name.endsWith('.xlsx') || file.name.endsWith('.xls')) {
+        const buffer = await file.arrayBuffer();
+        const wb = XLSX.read(buffer, { type: 'array' });
+        const ws = wb.Sheets[wb.SheetNames[0]];
+        const jsonData = XLSX.utils.sheet_to_json<string[]>(ws, { header: 1, defval: '' });
+        rows = jsonData.map(r => r.map(c => String(c ?? '').trim()));
+      } else {
+        const text = await file.text();
+        rows = parseCSV(text);
+      }
 
       if (rows.length < 2) {
         throw new Error('CSV must have a header row and at least one data row');
