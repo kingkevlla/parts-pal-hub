@@ -487,20 +487,20 @@ export function ExportImportDialog({ onImportComplete, categories }: ExportImpor
 
           <TabsContent value="import" className="space-y-4">
             <p className="text-sm text-muted-foreground">
-              Import or update products from CSV. Existing products are matched by SKU or exact name and updated; new ones are created.
+              Import or update products from Excel (.xlsx) or CSV. Existing products are matched by SKU or exact name and updated; new ones are created.
             </p>
 
             <Button variant="outline" onClick={downloadSampleCSV} className="w-full gap-2">
               <Download className="h-4 w-4" />
-              Download Sample Template
+              Download Sample Template (CSV)
             </Button>
 
             <div className="space-y-2">
-              <Label htmlFor="csv-file">Upload CSV File</Label>
+              <Label htmlFor="csv-file">Upload Excel or CSV File</Label>
               <Input
                 id="csv-file"
                 type="file"
-                accept=".csv"
+                accept=".csv,.xlsx,.xls"
                 onChange={handleImport}
                 disabled={isImporting}
               />
