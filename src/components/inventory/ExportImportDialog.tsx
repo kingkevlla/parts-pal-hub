@@ -76,63 +76,94 @@ export function ExportImportDialog({ onImportComplete, categories }: ExportImpor
   const [importSuccess, setImportSuccess] = useState(0);
   const { toast } = useToast();
 
+  const fetchExportData = async () => {
+    const { data: products, error: prodError } = await supabase
+      .from('products')
+      .select('*, categories(name)')
+      .order('name');
+    if (prodError) throw prodError;
+
+    const { data: inventory, error: invError } = await supabase
+      .from('inventory')
+      .select('product_id, quantity, warehouses(name)');
+    if (invError) throw invError;
+
+    const stockMap = new Map<string, number>();
+    const warehouseStockMap = new Map<string, Map<string, number>>();
+    for (const inv of inventory || []) {
+      stockMap.set(inv.product_id, (stockMap.get(inv.product_id) || 0) + (inv.quantity || 0));
+      if (!warehouseStockMap.has(inv.product_id)) {
+        warehouseStockMap.set(inv.product_id, new Map());
+      }
+      const whName = (inv.warehouses as any)?.name || 'Unknown';
+      warehouseStockMap.get(inv.product_id)!.set(whName, inv.quantity || 0);
+    }
+
+    const allWarehouses = new Set<string>();
+    for (const map of warehouseStockMap.values()) {
+      for (const wh of map.keys()) allWarehouses.add(wh);
+    }
+    const warehouseList = Array.from(allWarehouses).sort();
+
+    const headers = [
+      'name', 'sku', 'barcode', 'description', 'purchase_price',
+      'selling_price', 'min_stock_level', 'category', 'expiry_date',
+      'is_active', 'total_stock',
+      ...warehouseList.map(w => `stock_${w}`),
+    ];
+
+    const dataRows = (products || []).map(p => {
+      const row: Record<string, string | number | boolean> = {
+        name: p.name || '',
+        sku: p.sku || '',
+        barcode: p.barcode || '',
+        description: p.description || '',
+        purchase_price: p.purchase_price || 0,
+        selling_price: p.selling_price || 0,
+        min_stock_level: p.min_stock_level || 0,
+        category: (p.categories as any)?.name || '',
+        expiry_date: p.expiry_date || '',
+        is_active: p.is_active ? 'true' : 'false',
+        total_stock: stockMap.get(p.id) || 0,
+      };
+      for (const w of warehouseList) {
+        row[`stock_${w}`] = warehouseStockMap.get(p.id)?.get(w) || 0;
+      }
+      return row;
+    });
+
+    return { headers, dataRows, count: products?.length || 0 };
+  };
+
+  const exportToExcel = async () => {
+    setIsExporting(true);
+    try {
+      const { headers, dataRows, count } = await fetchExportData();
+      const ws = XLSX.utils.json_to_sheet(dataRows, { header: headers });
+
+      // Auto-size columns
+      ws['!cols'] = headers.map(h => ({ wch: Math.max(h.length + 2, 12) }));
+
+      const wb = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(wb, ws, 'Products');
+      XLSX.writeFile(wb, `products_export_${new Date().toISOString().split('T')[0]}.xlsx`);
+
+      toast({ title: 'Export Complete', description: `Exported ${count} products to Excel` });
+    } catch (error: any) {
+      toast({ title: 'Export Error', description: error.message, variant: 'destructive' });
+    } finally {
+      setIsExporting(false);
+    }
+  };
+
   const exportToCSV = async () => {
     setIsExporting(true);
     try {
-      // Fetch products with categories
-      const { data: products, error: prodError } = await supabase
-        .from('products')
-        .select('*, categories(name)')
-        .order('name');
-      if (prodError) throw prodError;
+      const { headers, dataRows, count } = await fetchExportData();
 
-      // Fetch all inventory with warehouse names
-      const { data: inventory, error: invError } = await supabase
-        .from('inventory')
-        .select('product_id, quantity, warehouses(name)');
-      if (invError) throw invError;
-
-      // Build stock map: product_id -> total quantity
-      const stockMap = new Map<string, number>();
-      const warehouseStockMap = new Map<string, Map<string, number>>();
-      for (const inv of inventory || []) {
-        stockMap.set(inv.product_id, (stockMap.get(inv.product_id) || 0) + (inv.quantity || 0));
-        if (!warehouseStockMap.has(inv.product_id)) {
-          warehouseStockMap.set(inv.product_id, new Map());
-        }
-        const whName = (inv.warehouses as any)?.name || 'Unknown';
-        warehouseStockMap.get(inv.product_id)!.set(whName, inv.quantity || 0);
-      }
-
-      // Collect all warehouse names for columns
-      const allWarehouses = new Set<string>();
-      for (const map of warehouseStockMap.values()) {
-        for (const wh of map.keys()) allWarehouses.add(wh);
-      }
-      const warehouseList = Array.from(allWarehouses).sort();
-
-      const headers = [
-        'name', 'sku', 'barcode', 'description', 'purchase_price',
-        'selling_price', 'min_stock_level', 'category', 'expiry_date',
-        'is_active', 'total_stock',
-        ...warehouseList.map(w => `stock_${w}`),
-      ];
-
-      const rows = (products || []).map(p => [
-        escapeCSV(p.name),
-        escapeCSV(p.sku),
-        escapeCSV(p.barcode),
-        escapeCSV(p.description),
-        p.purchase_price || 0,
-        p.selling_price || 0,
-        p.min_stock_level || 0,
-        escapeCSV((p.categories as any)?.name || ''),
-        p.expiry_date || '',
-        p.is_active ? 'true' : 'false',
-        stockMap.get(p.id) || 0,
-        ...warehouseList.map(w => warehouseStockMap.get(p.id)?.get(w) || 0),
-      ].join(','));
-
+      const rows = dataRows.map(r =>
+        headers.map(h => escapeCSV(r[h])).join(',')
+      );
       const csvContent = [headers.join(','), ...rows].join('\n');
       const blob = new Blob(['\uFEFF' + csvContent], { type: 'text/csv;charset=utf-8;' });
       const url = URL.createObjectURL(blob);
@@ -142,7 +173,7 @@ export function ExportImportDialog({ onImportComplete, categories }: ExportImpor
       link.click();
       URL.revokeObjectURL(url);
 
-      toast({ title: 'Export Complete', description: `Exported ${products?.length || 0} products with stock data` });
+      toast({ title: 'Export Complete', description: `Exported ${count} products to CSV` });
     } catch (error: any) {
       toast({ title: 'Export Error', description: error.message, variant: 'destructive' });
     } finally {
