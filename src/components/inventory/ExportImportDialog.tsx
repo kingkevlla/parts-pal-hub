@@ -215,8 +215,25 @@ export function ExportImportDialog({ onImportComplete, categories }: ExportImpor
         nameMap.set(p.name.toLowerCase(), p.id);
       }
 
-      const errors: string[] = [];
-      let successCount = 0;
+      // Detect stock_* columns and resolve warehouse names
+      const stockColumns: { headerIdx: number; warehouseName: string }[] = [];
+      const { data: warehouses } = await supabase.from('warehouses').select('id, name').eq('is_active', true);
+      const warehouseMap = new Map((warehouses || []).map(w => [w.name.toLowerCase(), w.id]));
+
+      headers.forEach((h, idx) => {
+        if (h.startsWith('stock_')) {
+          stockColumns.push({ headerIdx: idx, warehouseName: h.replace('stock_', '') });
+        }
+      });
+
+      // Validate warehouse names from stock columns
+      const validStockColumns = stockColumns.filter(sc => {
+        if (!warehouseMap.has(sc.warehouseName.toLowerCase())) {
+          errors.push(`Warning: Warehouse "${sc.warehouseName}" not found, stock column ignored`);
+          return false;
+        }
+        return true;
+      });
 
       for (let i = 1; i < rows.length; i++) {
         const row = rows[i];
@@ -291,8 +308,9 @@ export function ExportImportDialog({ onImportComplete, categories }: ExportImpor
           if (sku) existingId = skuMap.get(sku.toLowerCase());
           if (!existingId) existingId = nameMap.get(name.toLowerCase());
 
+          let productId: string;
+
           if (existingId) {
-            // Update existing
             const { error } = await supabase
               .from('products')
               .update(productData)
@@ -301,14 +319,60 @@ export function ExportImportDialog({ onImportComplete, categories }: ExportImpor
               errors.push(`Row ${rowNum}: Update failed - ${error.message}`);
               continue;
             }
+            productId = existingId;
           } else {
-            // Insert new
-            const { error } = await supabase
+            const { data: inserted, error } = await supabase
               .from('products')
-              .insert(productData);
-            if (error) {
-              errors.push(`Row ${rowNum}: Insert failed - ${error.message}`);
+              .insert(productData)
+              .select('id')
+              .single();
+            if (error || !inserted) {
+              errors.push(`Row ${rowNum}: Insert failed - ${error?.message || 'Unknown error'}`);
               continue;
+            }
+            productId = inserted.id;
+            // Add to maps so duplicate rows in same CSV are detected
+            nameMap.set(name.toLowerCase(), productId);
+            if (sku) skuMap.set(sku.toLowerCase(), productId);
+          }
+
+          // Process stock columns: set inventory to the specified quantity
+          for (const sc of validStockColumns) {
+            const rawVal = row[sc.headerIdx]?.trim();
+            if (!rawVal) continue;
+            const qty = parseInt(rawVal);
+            if (isNaN(qty) || qty < 0) {
+              errors.push(`Row ${rowNum}: Invalid stock quantity "${rawVal}" for warehouse "${sc.warehouseName}"`);
+              continue;
+            }
+            const warehouseId = warehouseMap.get(sc.warehouseName.toLowerCase())!;
+
+            // Get current inventory for this product+warehouse
+            const { data: currentInv } = await supabase
+              .from('inventory')
+              .select('quantity')
+              .eq('product_id', productId)
+              .eq('warehouse_id', warehouseId)
+              .maybeSingle();
+
+            const currentQty = currentInv?.quantity || 0;
+            const diff = qty - currentQty;
+
+            if (diff === 0) continue;
+
+            // Create a stock movement to adjust to the target quantity
+            const { error: mvError } = await supabase
+              .from('stock_movements')
+              .insert({
+                product_id: productId,
+                warehouse_id: warehouseId,
+                quantity: Math.abs(diff),
+                movement_type: diff > 0 ? 'in' : 'out',
+                notes: `CSV import adjustment: ${currentQty} → ${qty}`,
+              });
+
+            if (mvError) {
+              errors.push(`Row ${rowNum}: Stock update failed for "${sc.warehouseName}" - ${mvError.message}`);
             }
           }
 
