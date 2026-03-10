@@ -8,6 +8,7 @@ import { useToast } from '@/hooks/use-toast';
 import { Download, Upload, FileSpreadsheet, AlertCircle, CheckCircle2 } from 'lucide-react';
 import { supabase } from '@/integrations/supabase/client';
 import { Alert, AlertDescription } from '@/components/ui/alert';
+import * as XLSX from 'xlsx';
 
 interface ExportImportDialogProps {
   onImportComplete: () => void;
