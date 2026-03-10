@@ -467,7 +467,7 @@ export function ExportImportDialog({ onImportComplete, categories }: ExportImpor
             {importSuccess > 0 && (
               <Alert>
                 <CheckCircle2 className="h-4 w-4" />
-                <AlertDescription className="text-green-600">
+                <AlertDescription className="text-emerald-600 dark:text-emerald-400">
                   Successfully imported/updated {importSuccess} product(s)
                 </AlertDescription>
               </Alert>
