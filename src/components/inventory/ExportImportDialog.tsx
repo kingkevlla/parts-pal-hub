@@ -473,11 +473,15 @@ export function ExportImportDialog({ onImportComplete, categories }: ExportImpor
 
           <TabsContent value="export" className="space-y-4">
             <p className="text-sm text-muted-foreground">
-              Export all products with stock quantities per warehouse to CSV. Opens in Excel or Google Sheets.
+              Export all products with stock quantities per warehouse. Choose Excel (.xlsx) for best compatibility or CSV for lightweight use.
             </p>
-            <Button onClick={exportToCSV} disabled={isExporting} className="w-full gap-2">
+            <Button onClick={exportToExcel} disabled={isExporting} className="w-full gap-2">
               <Download className="h-4 w-4" />
-              {isExporting ? 'Exporting...' : 'Export Products to CSV'}
+              {isExporting ? 'Exporting...' : 'Export to Excel (.xlsx)'}
+            </Button>
+            <Button variant="outline" onClick={exportToCSV} disabled={isExporting} className="w-full gap-2">
+              <Download className="h-4 w-4" />
+              {isExporting ? 'Exporting...' : 'Export to CSV'}
             </Button>
           </TabsContent>
 
