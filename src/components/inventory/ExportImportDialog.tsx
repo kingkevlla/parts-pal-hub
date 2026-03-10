@@ -494,7 +494,7 @@ export function ExportImportDialog({ onImportComplete, categories }: ExportImpor
                 <li>New products without a match will be created</li>
                 <li>Use YYYY-MM-DD for expiry dates</li>
                 <li>Category names must match existing categories</li>
-                <li>Stock quantities are not modified — use Stock Adjustment for that</li>
+                <li>Add <code>stock_WarehouseName</code> columns to set inventory quantities (creates stock movements automatically)</li>
               </ul>
             </div>
           </TabsContent>
