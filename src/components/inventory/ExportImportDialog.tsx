@@ -216,6 +216,8 @@ export function ExportImportDialog({ onImportComplete, categories }: ExportImpor
       }
 
       // Detect stock_* columns and resolve warehouse names
+      const errors: string[] = [];
+      let successCount = 0;
       const stockColumns: { headerIdx: number; warehouseName: string }[] = [];
       const { data: warehouses } = await supabase.from('warehouses').select('id, name').eq('is_active', true);
       const warehouseMap = new Map((warehouses || []).map(w => [w.name.toLowerCase(), w.id]));
