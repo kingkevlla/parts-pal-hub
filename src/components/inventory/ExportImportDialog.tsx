@@ -149,11 +149,15 @@ export function ExportImportDialog({ onImportComplete, categories }: ExportImpor
     }
   };
 
-  const downloadSampleCSV = () => {
+  const downloadSampleCSV = async () => {
+    // Fetch warehouse names so template includes stock columns
+    const { data: warehouses } = await supabase.from('warehouses').select('name').eq('is_active', true).order('name');
+    const whNames = (warehouses || []).map(w => w.name);
+
     const sampleData = [
-      ['name', 'sku', 'barcode', 'description', 'purchase_price', 'selling_price', 'min_stock_level', 'category', 'expiry_date', 'is_active'],
-      ['"Sample Product 1"', '"SKU-001"', '"BAR123"', '"A sample product"', '10.00', '15.00', '10', '"Electronics"', '2027-12-31', 'true'],
-      ['"Sample Product 2"', '""', '""', '"No SKU product"', '5.50', '9.99', '20', '"Food"', '', 'true'],
+      ['name', 'sku', 'barcode', 'description', 'purchase_price', 'selling_price', 'min_stock_level', 'category', 'expiry_date', 'is_active', ...whNames.map(w => `stock_${w}`)],
+      ['"Sample Product 1"', '"SKU-001"', '"BAR123"', '"A sample product"', '10.00', '15.00', '10', '"Electronics"', '2027-12-31', 'true', ...whNames.map(() => '50')],
+      ['"Sample Product 2"', '""', '""', '"No SKU product"', '5.50', '9.99', '20', '"Food"', '', 'true', ...whNames.map(() => '0')],
     ];
 
     const csvContent = sampleData.map(row => row.join(',')).join('\n');
@@ -165,7 +169,7 @@ export function ExportImportDialog({ onImportComplete, categories }: ExportImpor
     link.click();
     URL.revokeObjectURL(url);
 
-    toast({ title: 'Downloaded', description: 'Import template downloaded' });
+    toast({ title: 'Downloaded', description: 'Import template with stock columns downloaded' });
   };
 
   const handleImport = async (e: React.ChangeEvent<HTMLInputElement>) => {
