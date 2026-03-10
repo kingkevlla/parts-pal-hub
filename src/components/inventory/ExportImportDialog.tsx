@@ -60,7 +60,7 @@ const parseCSV = (text: string): string[][] => {
   return lines;
 };
 
-const escapeCSV = (val: string | number | null | undefined): string => {
+const escapeCSV = (val: string | number | boolean | null | undefined): string => {
   const str = String(val ?? '');
   if (str.includes(',') || str.includes('"') || str.includes('\n')) {
     return `"${str.replace(/"/g, '""')}"`;
