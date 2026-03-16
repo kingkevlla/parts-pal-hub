@@ -22,12 +22,21 @@ import {
   Bell,
   Volume2,
   VolumeX,
-  Eye
+  Eye,
+  CalendarDays,
+  Receipt,
+  BarChart3,
+  ArrowUpRight,
+  ArrowDownRight,
+  Clock,
+  PackageCheck,
+  Banknote
 } from "lucide-react";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { ProductDetailsDialog } from "@/components/owner/ProductDetailsDialog";
+import { Progress } from "@/components/ui/progress";
 
 interface Stats {
   totalSales: number;
@@ -71,6 +80,28 @@ interface Product {
   selling_price: number;
 }
 
+interface TodayStats {
+  todaySales: number;
+  todayRevenue: number;
+  todayExpenses: number;
+  todayProfit: number;
+  todayTransactions: number;
+}
+
+interface WarehouseStock {
+  id: string;
+  name: string;
+  location: string;
+  totalItems: number;
+  lowStockItems: number;
+}
+
+interface TopProduct {
+  name: string;
+  totalSold: number;
+  revenue: number;
+}
+
 export default function OwnerDashboard() {
   const { user } = useAuth();
   const { toast } = useToast();
@@ -85,6 +116,17 @@ export default function OwnerDashboard() {
     lowStockCount: 0,
     activeLoans: 0
   });
+  const [todayStats, setTodayStats] = useState<TodayStats>({
+    todaySales: 0,
+    todayRevenue: 0,
+    todayExpenses: 0,
+    todayProfit: 0,
+    todayTransactions: 0
+  });
+  const [warehouseStocks, setWarehouseStocks] = useState<WarehouseStock[]>([]);
+  const [topProducts, setTopProducts] = useState<TopProduct[]>([]);
+  const [inventoryValue, setInventoryValue] = useState(0);
+  const [totalExpenses, setTotalExpenses] = useState(0);
   const [activities, setActivities] = useState<ActivityItem[]>([]);
   const [users, setUsers] = useState<UserProfile[]>([]);
   const [showShutdownDialog, setShowShutdownDialog] = useState(false);
@@ -109,13 +151,21 @@ export default function OwnerDashboard() {
   useEffect(() => {
     if (canAccess && !permissionsLoading) {
       fetchStats();
+      fetchTodayStats();
+      fetchWarehouseStocks();
+      fetchTopProducts();
+      fetchInventoryValue();
+      fetchTotalExpenses();
       fetchActivities();
       fetchUsers();
       fetchDueLoans();
       fetchProducts();
       subscribeToRealtime();
       
-      const interval = setInterval(fetchDueLoans, 60000);
+      const interval = setInterval(() => {
+        fetchDueLoans();
+        fetchTodayStats();
+      }, 60000);
       return () => clearInterval(interval);
     }
   }, [canAccess, permissionsLoading]);
@@ -142,6 +192,117 @@ export default function OwnerDashboard() {
       });
     } catch (error) {
       console.error('Error fetching stats:', error);
+    }
+  };
+
+  const fetchTodayStats = async () => {
+    try {
+      const today = new Date();
+      const startOfDay = new Date(today.getFullYear(), today.getMonth(), today.getDate()).toISOString();
+      const endOfDay = new Date(today.getFullYear(), today.getMonth(), today.getDate() + 1).toISOString();
+
+      const [salesData, expensesData] = await Promise.all([
+        supabase.from('transactions').select('total_amount').gte('created_at', startOfDay).lt('created_at', endOfDay),
+        supabase.from('expenses').select('amount').gte('expense_date', today.toISOString().split('T')[0]).lte('expense_date', today.toISOString().split('T')[0])
+      ]);
+
+      const todayRevenue = salesData.data?.reduce((sum, t) => sum + Number(t.total_amount || 0), 0) || 0;
+      const todayExpenses = expensesData.data?.reduce((sum, e) => sum + Number(e.amount || 0), 0) || 0;
+
+      setTodayStats({
+        todaySales: salesData.data?.length || 0,
+        todayRevenue,
+        todayExpenses,
+        todayProfit: todayRevenue - todayExpenses,
+        todayTransactions: salesData.data?.length || 0
+      });
+    } catch (error) {
+      console.error('Error fetching today stats:', error);
+    }
+  };
+
+  const fetchWarehouseStocks = async () => {
+    try {
+      const [warehousesRes, inventoryRes] = await Promise.all([
+        supabase.from('warehouses').select('*').eq('is_active', true),
+        supabase.from('inventory').select('warehouse_id, quantity')
+      ]);
+
+      const warehouses = warehousesRes.data || [];
+      const inventory = inventoryRes.data || [];
+
+      const stocks: WarehouseStock[] = warehouses.map(wh => {
+        const whInventory = inventory.filter(inv => inv.warehouse_id === wh.id);
+        const totalItems = whInventory.reduce((sum, inv) => sum + (inv.quantity || 0), 0);
+        const lowStockItems = whInventory.filter(inv => (inv.quantity || 0) < 10).length;
+        return {
+          id: wh.id,
+          name: wh.name,
+          location: wh.location || 'No location',
+          totalItems,
+          lowStockItems
+        };
+      });
+
+      setWarehouseStocks(stocks);
+    } catch (error) {
+      console.error('Error fetching warehouse stocks:', error);
+    }
+  };
+
+  const fetchTopProducts = async () => {
+    try {
+      const { data: items } = await supabase
+        .from('transaction_items')
+        .select('product_id, quantity, total_price, products(name)');
+
+      if (!items) return;
+
+      const productMap = new Map<string, { name: string; totalSold: number; revenue: number }>();
+      items.forEach(item => {
+        const name = (item.products as any)?.name || 'Unknown';
+        const existing = productMap.get(item.product_id) || { name, totalSold: 0, revenue: 0 };
+        existing.totalSold += item.quantity;
+        existing.revenue += Number(item.total_price || 0);
+        productMap.set(item.product_id, existing);
+      });
+
+      const sorted = Array.from(productMap.values())
+        .sort((a, b) => b.revenue - a.revenue)
+        .slice(0, 5);
+
+      setTopProducts(sorted);
+    } catch (error) {
+      console.error('Error fetching top products:', error);
+    }
+  };
+
+  const fetchInventoryValue = async () => {
+    try {
+      const { data: inventory } = await supabase
+        .from('inventory')
+        .select('quantity, product_id, products(purchase_price, selling_price)');
+
+      if (!inventory) return;
+
+      const value = inventory.reduce((sum, inv) => {
+        const price = (inv.products as any)?.selling_price || 0;
+        return sum + (inv.quantity * Number(price));
+      }, 0);
+
+      setInventoryValue(value);
+    } catch (error) {
+      console.error('Error fetching inventory value:', error);
+    }
+  };
+
+  const fetchTotalExpenses = async () => {
+    try {
+      const { data } = await supabase.from('expenses').select('amount');
+      const total = data?.reduce((sum, e) => sum + Number(e.amount || 0), 0) || 0;
+      setTotalExpenses(total);
+    } catch (error) {
+      console.error('Error fetching expenses:', error);
     }
   };
 
@@ -315,6 +476,8 @@ export default function OwnerDashboard() {
       .channel('owner-transactions-changes')
       .on('postgres_changes', { event: '*', schema: 'public', table: 'transactions' }, () => {
         fetchStats();
+        fetchTodayStats();
+        fetchTopProducts();
         fetchActivities();
       })
       .subscribe();
@@ -323,6 +486,8 @@ export default function OwnerDashboard() {
       .channel('owner-stock-changes')
       .on('postgres_changes', { event: '*', schema: 'public', table: 'stock_movements' }, () => {
         fetchStats();
+        fetchWarehouseStocks();
+        fetchInventoryValue();
         fetchActivities();
       })
       .subscribe();
@@ -343,11 +508,30 @@ export default function OwnerDashboard() {
       })
       .subscribe();
 
+    const expensesChannel = supabase
+      .channel('owner-expenses-changes')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'expenses' }, () => {
+        fetchTodayStats();
+        fetchTotalExpenses();
+      })
+      .subscribe();
+
+    const inventoryChannel = supabase
+      .channel('owner-inventory-changes')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'inventory' }, () => {
+        fetchWarehouseStocks();
+        fetchInventoryValue();
+        fetchStats();
+      })
+      .subscribe();
+
     return () => {
       supabase.removeChannel(transactionsChannel);
       supabase.removeChannel(stockChannel);
       supabase.removeChannel(usersChannel);
       supabase.removeChannel(loansChannel);
+      supabase.removeChannel(expensesChannel);
+      supabase.removeChannel(inventoryChannel);
     };
   };
 
@@ -423,6 +607,8 @@ export default function OwnerDashboard() {
     );
   }
 
+  const netProfit = stats.totalRevenue - totalExpenses;
+
   return (
     <div className="space-y-4 pb-20 md:pb-6">
       {/* Header */}
@@ -493,7 +679,64 @@ export default function OwnerDashboard() {
         </Card>
       )}
 
-      {/* Stats Grid */}
+      {/* Today's Summary Cards */}
+      <div>
+        <h2 className="text-lg font-semibold mb-3 flex items-center gap-2">
+          <CalendarDays className="h-5 w-5 text-primary" />
+          Today's Summary
+        </h2>
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+          <Card className="bg-gradient-to-br from-emerald-500/10 to-emerald-600/5 border-emerald-500/20">
+            <CardContent className="p-4">
+              <div className="flex items-center gap-2 mb-1">
+                <ArrowUpRight className="h-4 w-4 text-emerald-600 dark:text-emerald-400" />
+                <p className="text-xs font-medium text-muted-foreground">Today's Sales</p>
+              </div>
+              <p className="text-xl font-bold">{formatAmount(todayStats.todayRevenue)}</p>
+              <p className="text-xs text-muted-foreground mt-1">{todayStats.todayTransactions} transactions</p>
+            </CardContent>
+          </Card>
+
+          <Card className="bg-gradient-to-br from-red-500/10 to-red-600/5 border-red-500/20">
+            <CardContent className="p-4">
+              <div className="flex items-center gap-2 mb-1">
+                <ArrowDownRight className="h-4 w-4 text-red-600 dark:text-red-400" />
+                <p className="text-xs font-medium text-muted-foreground">Today's Expenses</p>
+              </div>
+              <p className="text-xl font-bold">{formatAmount(todayStats.todayExpenses)}</p>
+              <p className="text-xs text-muted-foreground mt-1">Outgoing today</p>
+            </CardContent>
+          </Card>
+
+          <Card className="bg-gradient-to-br from-blue-500/10 to-blue-600/5 border-blue-500/20">
+            <CardContent className="p-4">
+              <div className="flex items-center gap-2 mb-1">
+                <BarChart3 className="h-4 w-4 text-blue-600 dark:text-blue-400" />
+                <p className="text-xs font-medium text-muted-foreground">Today's Profit</p>
+              </div>
+              <p className={`text-xl font-bold ${todayStats.todayProfit >= 0 ? 'text-emerald-600 dark:text-emerald-400' : 'text-red-600 dark:text-red-400'}`}>
+                {formatAmount(todayStats.todayProfit)}
+              </p>
+              <p className="text-xs text-muted-foreground mt-1">Revenue - Expenses</p>
+            </CardContent>
+          </Card>
+
+          <Card className="bg-gradient-to-br from-amber-500/10 to-amber-600/5 border-amber-500/20">
+            <CardContent className="p-4">
+              <div className="flex items-center gap-2 mb-1">
+                <Clock className="h-4 w-4 text-amber-600 dark:text-amber-400" />
+                <p className="text-xs font-medium text-muted-foreground">Last Sale</p>
+              </div>
+              <p className="text-xl font-bold">{todayStats.todaySales > 0 ? 'Active' : 'No sales'}</p>
+              <p className="text-xs text-muted-foreground mt-1">
+                {new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+              </p>
+            </CardContent>
+          </Card>
+        </div>
+      </div>
+
+      {/* All-time Stats Grid */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
         <Card className="bg-gradient-to-br from-primary/10 to-accent/10 border-primary/20">
           <CardContent className="p-4 sm:p-6">
@@ -501,7 +744,7 @@ export default function OwnerDashboard() {
               <div>
                 <p className="text-sm font-medium text-muted-foreground">Total Revenue</p>
                 <p className="text-2xl sm:text-3xl font-bold">{formatAmount(stats.totalRevenue)}</p>
-                <p className="text-xs text-success mt-1 flex items-center gap-1">
+                <p className="text-xs text-emerald-600 dark:text-emerald-400 mt-1 flex items-center gap-1">
                   <TrendingUp className="h-3 w-3" />
                   {stats.totalSales} sales
                 </p>
@@ -511,7 +754,7 @@ export default function OwnerDashboard() {
           </CardContent>
         </Card>
 
-        <Card className="bg-gradient-to-br from-accent/10 to-success/10 border-accent/20">
+        <Card className="bg-gradient-to-br from-accent/10 to-emerald-500/10 border-accent/20">
           <CardContent className="p-4 sm:p-6">
             <div className="flex items-center justify-between">
               <div>
@@ -562,74 +805,195 @@ export default function OwnerDashboard() {
         </Card>
       </div>
 
-      {/* Products Review */}
-      <Card>
-        <CardHeader className="pb-3">
-          <CardTitle className="flex items-center gap-2 text-lg">
-            <Package className="h-5 w-5 text-primary" />
-            Products Review
-          </CardTitle>
-        </CardHeader>
-        <CardContent>
-          <ScrollArea className="h-[400px] pr-4">
-            {products.length === 0 ? (
-              <p className="text-sm text-muted-foreground text-center py-8">No products found</p>
-            ) : (
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead>Product</TableHead>
-                    <TableHead>SKU</TableHead>
-                    <TableHead>Purchase Price</TableHead>
-                    <TableHead>Selling Price</TableHead>
-                    <TableHead>Profit</TableHead>
-                    <TableHead></TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {products.map((product) => {
-                    const profit = product.selling_price - product.purchase_price;
-                    const profitMargin = product.purchase_price > 0 ? (profit / product.purchase_price) * 100 : 0;
-                    
-                    return (
-                      <TableRow key={product.id}>
-                        <TableCell className="font-medium">{product.name}</TableCell>
-                        <TableCell className="text-sm text-muted-foreground">{product.sku}</TableCell>
-                        <TableCell className="text-destructive font-medium">
-                          {formatAmount(product.purchase_price)}
-                        </TableCell>
-                        <TableCell className="text-success font-medium">
-                          {formatAmount(product.selling_price)}
-                        </TableCell>
-                        <TableCell>
-                          <div>
-                            <p className="font-medium">{formatAmount(profit)}</p>
-                            <p className="text-xs text-muted-foreground">
-                              {profitMargin.toFixed(1)}%
-                            </p>
-                          </div>
-                        </TableCell>
-                        <TableCell>
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            onClick={() => {
-                              setSelectedProductId(product.id);
-                              setShowProductDetails(true);
-                            }}
-                          >
-                            <Eye className="h-4 w-4" />
-                          </Button>
-                        </TableCell>
-                      </TableRow>
-                    );
-                  })}
-                </TableBody>
-              </Table>
-            )}
-          </ScrollArea>
-        </CardContent>
-      </Card>
+      {/* Financial Overview & Inventory Value */}
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+        <Card className="bg-gradient-to-br from-emerald-500/10 to-teal-500/5 border-emerald-500/20">
+          <CardContent className="p-4 sm:p-6">
+            <div className="flex items-center gap-3">
+              <div className="h-10 w-10 rounded-full bg-emerald-500/20 flex items-center justify-center">
+                <Banknote className="h-5 w-5 text-emerald-600 dark:text-emerald-400" />
+              </div>
+              <div>
+                <p className="text-sm text-muted-foreground">Net Profit (All Time)</p>
+                <p className={`text-2xl font-bold ${netProfit >= 0 ? 'text-emerald-600 dark:text-emerald-400' : 'text-red-600 dark:text-red-400'}`}>
+                  {formatAmount(netProfit)}
+                </p>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+
+        <Card className="bg-gradient-to-br from-indigo-500/10 to-blue-500/5 border-indigo-500/20">
+          <CardContent className="p-4 sm:p-6">
+            <div className="flex items-center gap-3">
+              <div className="h-10 w-10 rounded-full bg-indigo-500/20 flex items-center justify-center">
+                <PackageCheck className="h-5 w-5 text-indigo-600 dark:text-indigo-400" />
+              </div>
+              <div>
+                <p className="text-sm text-muted-foreground">Inventory Value</p>
+                <p className="text-2xl font-bold text-indigo-600 dark:text-indigo-400">{formatAmount(inventoryValue)}</p>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+
+        <Card className="bg-gradient-to-br from-red-500/10 to-orange-500/5 border-red-500/20">
+          <CardContent className="p-4 sm:p-6">
+            <div className="flex items-center gap-3">
+              <div className="h-10 w-10 rounded-full bg-red-500/20 flex items-center justify-center">
+                <Receipt className="h-5 w-5 text-red-600 dark:text-red-400" />
+              </div>
+              <div>
+                <p className="text-sm text-muted-foreground">Total Expenses</p>
+                <p className="text-2xl font-bold text-red-600 dark:text-red-400">{formatAmount(totalExpenses)}</p>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+      </div>
+
+      {/* Warehouse Stock Overview */}
+      {warehouseStocks.length > 0 && (
+        <Card>
+          <CardHeader className="pb-3">
+            <CardTitle className="flex items-center gap-2 text-lg">
+              <Warehouse className="h-5 w-5 text-primary" />
+              Warehouse Stock Overview
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+              {warehouseStocks.map((wh) => {
+                const maxItems = Math.max(...warehouseStocks.map(w => w.totalItems), 1);
+                const fillPercent = (wh.totalItems / maxItems) * 100;
+                return (
+                  <div key={wh.id} className="p-4 rounded-lg border bg-muted/30 hover:bg-muted/50 transition-colors">
+                    <div className="flex items-center justify-between mb-2">
+                      <h4 className="font-semibold text-sm">{wh.name}</h4>
+                      {wh.lowStockItems > 0 && (
+                        <Badge variant="destructive" className="text-xs">
+                          {wh.lowStockItems} low
+                        </Badge>
+                      )}
+                    </div>
+                    <p className="text-xs text-muted-foreground mb-2">{wh.location}</p>
+                    <div className="flex items-center justify-between mb-1">
+                      <span className="text-xs text-muted-foreground">Stock Level</span>
+                      <span className="text-sm font-bold">{wh.totalItems} items</span>
+                    </div>
+                    <Progress value={fillPercent} className="h-2" />
+                  </div>
+                );
+              })}
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
+      {/* Top Products & Products Review */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+        {/* Top Selling Products */}
+        {topProducts.length > 0 && (
+          <Card>
+            <CardHeader className="pb-3">
+              <CardTitle className="flex items-center gap-2 text-lg">
+                <TrendingUp className="h-5 w-5 text-emerald-600 dark:text-emerald-400" />
+                Top Selling Products
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className="space-y-3">
+                {topProducts.map((product, idx) => {
+                  const maxRevenue = Math.max(...topProducts.map(p => p.revenue), 1);
+                  const barWidth = (product.revenue / maxRevenue) * 100;
+                  return (
+                    <div key={idx} className="space-y-1">
+                      <div className="flex items-center justify-between">
+                        <span className="text-sm font-medium truncate flex-1">{product.name}</span>
+                        <span className="text-sm font-bold ml-2">{formatAmount(product.revenue)}</span>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <div className="flex-1 h-2 bg-muted rounded-full overflow-hidden">
+                          <div 
+                            className="h-full bg-gradient-to-r from-primary to-primary/60 rounded-full transition-all duration-500"
+                            style={{ width: `${barWidth}%` }}
+                          />
+                        </div>
+                        <span className="text-xs text-muted-foreground w-16 text-right">{product.totalSold} sold</span>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </CardContent>
+          </Card>
+        )}
+
+        {/* Products Review */}
+        <Card>
+          <CardHeader className="pb-3">
+            <CardTitle className="flex items-center gap-2 text-lg">
+              <Package className="h-5 w-5 text-primary" />
+              Products Review
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <ScrollArea className="h-[300px] pr-4">
+              {products.length === 0 ? (
+                <p className="text-sm text-muted-foreground text-center py-8">No products found</p>
+              ) : (
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>Product</TableHead>
+                      <TableHead>Purchase</TableHead>
+                      <TableHead>Selling</TableHead>
+                      <TableHead>Profit</TableHead>
+                      <TableHead></TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {products.map((product) => {
+                      const profit = product.selling_price - product.purchase_price;
+                      const profitMargin = product.purchase_price > 0 ? (profit / product.purchase_price) * 100 : 0;
+                      
+                      return (
+                        <TableRow key={product.id}>
+                          <TableCell className="font-medium text-sm">{product.name}</TableCell>
+                          <TableCell className="text-destructive text-sm">
+                            {formatAmount(product.purchase_price)}
+                          </TableCell>
+                          <TableCell className="text-emerald-600 dark:text-emerald-400 text-sm font-medium">
+                            {formatAmount(product.selling_price)}
+                          </TableCell>
+                          <TableCell>
+                            <div>
+                              <p className="font-medium text-sm">{formatAmount(profit)}</p>
+                              <p className="text-xs text-muted-foreground">{profitMargin.toFixed(1)}%</p>
+                            </div>
+                          </TableCell>
+                          <TableCell>
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              onClick={() => {
+                                setSelectedProductId(product.id);
+                                setShowProductDetails(true);
+                              }}
+                            >
+                              <Eye className="h-4 w-4" />
+                            </Button>
+                          </TableCell>
+                        </TableRow>
+                      );
+                    })}
+                  </TableBody>
+                </Table>
+              )}
+            </ScrollArea>
+          </CardContent>
+        </Card>
+      </div>
 
       {/* Live Activity and User Management */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
@@ -650,7 +1014,7 @@ export default function OwnerDashboard() {
                   {activities.map((activity) => (
                     <div key={activity.id} className="flex items-start gap-3 p-3 rounded-lg bg-muted/50 hover:bg-muted transition-colors">
                       {activity.type === 'sale' ? (
-                        <ShoppingCart className="h-5 w-5 text-success flex-shrink-0 mt-0.5" />
+                        <ShoppingCart className="h-5 w-5 text-emerald-600 dark:text-emerald-400 flex-shrink-0 mt-0.5" />
                       ) : (
                         <Warehouse className="h-5 w-5 text-primary flex-shrink-0 mt-0.5" />
                       )}
@@ -804,7 +1168,7 @@ export default function OwnerDashboard() {
                             </div>
                             <div className="flex justify-between text-sm">
                               <span className="text-muted-foreground">Paid:</span>
-                              <span className="font-medium text-success">{formatAmount(loan.paid_amount)}</span>
+                              <span className="font-medium text-emerald-600 dark:text-emerald-400">{formatAmount(loan.paid_amount)}</span>
                             </div>
                             <div className="flex justify-between text-sm border-t pt-1">
                               <span className="text-muted-foreground">Remaining:</span>
