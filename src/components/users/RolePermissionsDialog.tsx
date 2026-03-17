@@ -8,22 +8,30 @@ import { supabase } from "@/integrations/supabase/client";
 import { Loader2, Shield } from "lucide-react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 
+import { ROLE_PERMISSIONS, type AppRole } from "@/hooks/usePermissions";
+
 const ALL_PERMISSIONS = [
   { id: "dashboard", name: "Dashboard", description: "Access to main dashboard", category: "General" },
+  { id: "owner_dashboard", name: "Owner Dashboard", description: "Owner oversight & analytics", category: "General" },
   { id: "pos", name: "Point of Sale", description: "Access to POS system", category: "Sales" },
-  { id: "inventory", name: "Inventory", description: "View inventory", category: "Inventory" },
+  { id: "sales_history", name: "Sales History", description: "View sales history", category: "Sales" },
+  { id: "transactions", name: "Transactions", description: "View transactions", category: "Sales" },
+  { id: "inventory", name: "Inventory", description: "View & manage inventory", category: "Inventory" },
+  { id: "categories", name: "Categories", description: "Manage categories", category: "Inventory" },
   { id: "stock_in", name: "Stock In", description: "Add stock to inventory", category: "Inventory" },
   { id: "stock_out", name: "Stock Out", description: "Remove stock from inventory", category: "Inventory" },
+  { id: "stock_adjustment", name: "Stock Adjustment", description: "Adjust stock quantities", category: "Inventory" },
   { id: "products", name: "Products", description: "Manage products", category: "Inventory" },
-  { id: "categories", name: "Categories", description: "Manage categories", category: "Inventory" },
-  { id: "suppliers", name: "Suppliers", description: "Manage suppliers", category: "Contacts" },
-  { id: "customers", name: "Customers", description: "Manage customers", category: "Contacts" },
-  { id: "transactions", name: "Transactions", description: "View transactions", category: "Sales" },
-  { id: "reports", name: "Reports", description: "Access reports", category: "Analytics" },
-  { id: "loans", name: "Loans", description: "Manage loans", category: "Finance" },
   { id: "warehouses", name: "Warehouses", description: "Manage warehouses", category: "Inventory" },
-  { id: "settings", name: "Settings", description: "Access system settings", category: "Administration" },
-  { id: "users", name: "Users", description: "Manage users", category: "Administration" },
+  { id: "loans", name: "Loans", description: "Manage loans", category: "Finance" },
+  { id: "expenses", name: "Expenses", description: "Track expenses", category: "Finance" },
+  { id: "employees", name: "Employees", description: "Manage employees", category: "People" },
+  { id: "suppliers", name: "Suppliers", description: "Manage suppliers", category: "People" },
+  { id: "customers", name: "Customers", description: "Manage customers", category: "People" },
+  { id: "reports", name: "Reports", description: "Access reports", category: "System" },
+  { id: "support", name: "Support", description: "Access support tickets", category: "System" },
+  { id: "settings", name: "Settings", description: "Access system settings", category: "System" },
+  { id: "users", name: "Users", description: "Manage users & roles", category: "System" },
 ];
 
 interface RolePermissionsDialogProps {
