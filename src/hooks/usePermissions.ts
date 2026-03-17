@@ -1,7 +1,35 @@
 import { useState, useEffect } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
-type AppRole = "admin" | "owner" | "manager" | "cashier" | "user";
+
+export type AppRole = "admin" | "owner" | "manager" | "cashier" | "user";
+
+export const ROLE_PERMISSIONS: Record<AppRole, string[]> = {
+  admin: [
+    "dashboard", "owner_dashboard", "pos", "inventory", "stock_in", "stock_out",
+    "stock_adjustment", "products", "categories", "suppliers", "customers",
+    "transactions", "sales_history", "reports", "loans", "expenses",
+    "employees", "warehouses", "support", "settings", "users",
+  ],
+  owner: [
+    "dashboard", "owner_dashboard", "pos", "inventory", "stock_in", "stock_out",
+    "stock_adjustment", "products", "categories", "suppliers", "customers",
+    "transactions", "sales_history", "reports", "loans", "expenses",
+    "employees", "warehouses", "support", "settings",
+  ],
+  manager: [
+    "dashboard", "pos", "inventory", "stock_in", "stock_out",
+    "stock_adjustment", "products", "categories", "suppliers", "customers",
+    "transactions", "sales_history", "reports", "loans", "expenses",
+    "employees", "warehouses",
+  ],
+  cashier: [
+    "dashboard", "pos", "customers", "transactions", "sales_history",
+  ],
+  user: [
+    "dashboard",
+  ],
+};
 
 export interface UserPermissions {
   role: AppRole | null;
@@ -13,14 +41,6 @@ export interface UserPermissions {
   hasPermission: (permission: string) => boolean;
   loading: boolean;
 }
-
-const ROLE_PERMISSIONS: Record<string, string[]> = {
-  admin: ["dashboard", "pos", "inventory", "stock_in", "stock_out", "stock_adjustment", "products", "categories", "suppliers", "customers", "transactions", "reports", "loans", "warehouses", "settings", "users"],
-  owner: ["dashboard", "pos", "inventory", "stock_in", "stock_out", "stock_adjustment", "products", "categories", "suppliers", "customers", "transactions", "reports", "loans", "warehouses", "settings", "users"],
-  manager: ["dashboard", "pos", "inventory", "stock_in", "stock_out", "stock_adjustment", "products", "categories", "suppliers", "customers", "transactions", "reports", "loans", "warehouses"],
-  cashier: ["dashboard", "pos", "customers", "transactions"],
-  user: ["dashboard"],
-};
 
 export function usePermissions(): UserPermissions {
   const { user } = useAuth();
@@ -53,7 +73,7 @@ export function usePermissions(): UserPermissions {
         setRole("user");
         setPermissions(ROLE_PERMISSIONS.user);
       } else {
-        const userRole = data?.role as AppRole;
+        const userRole = (data?.role as AppRole) || "user";
         setRole(userRole);
         setPermissions(ROLE_PERMISSIONS[userRole] || ROLE_PERMISSIONS.user);
       }
