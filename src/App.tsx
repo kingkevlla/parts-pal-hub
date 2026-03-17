@@ -7,6 +7,7 @@ import { SidebarProvider } from "@/components/ui/sidebar";
 import { Sidebar } from "@/components/layout/Sidebar";
 import { Header } from "@/components/layout/Header";
 import { AuthProvider, useAuth } from "@/contexts/AuthContext";
+import { usePermissions } from "@/hooks/usePermissions";
 import Dashboard from "./pages/Dashboard";
 import Inventory from "./pages/Inventory";
 import Categories from "./pages/Categories";
@@ -46,6 +47,24 @@ const ProtectedRoute = ({ children }: { children: React.ReactNode }) => {
   return <>{children}</>;
 };
 
+/**
+ * Route guard that checks if the user has the required permission.
+ * If not, redirects to dashboard.
+ */
+const PermissionGuard = ({ permission, children }: { permission: string; children: React.ReactNode }) => {
+  const { hasPermission, loading } = usePermissions();
+
+  if (loading) {
+    return <div className="flex items-center justify-center min-h-screen">Loading...</div>;
+  }
+
+  if (!hasPermission(permission)) {
+    return <Navigate to="/" replace />;
+  }
+
+  return <>{children}</>;
+};
+
 const Layout = ({ children }: { children: React.ReactNode }) => (
   <SidebarProvider>
     <div className="flex min-h-screen w-full bg-background">
@@ -68,6 +87,17 @@ const POSLayout = ({ children }: { children: React.ReactNode }) => (
   </div>
 );
 
+/** Helper: wrap a page in ProtectedRoute + Layout + PermissionGuard */
+const ProtectedPage = ({ permission, children }: { permission: string; children: React.ReactNode }) => (
+  <ProtectedRoute>
+    <Layout>
+      <PermissionGuard permission={permission}>
+        {children}
+      </PermissionGuard>
+    </Layout>
+  </ProtectedRoute>
+);
+
 const App = () => (
   <QueryClientProvider client={queryClient}>
     <TooltipProvider>
@@ -77,26 +107,47 @@ const App = () => (
         <AuthProvider>
           <Routes>
             <Route path="/auth" element={<Auth />} />
-            <Route path="/" element={<ProtectedRoute><Layout><Dashboard /></Layout></ProtectedRoute>} />
-            <Route path="/inventory" element={<ProtectedRoute><Layout><Inventory /></Layout></ProtectedRoute>} />
-            <Route path="/categories" element={<ProtectedRoute><Layout><Categories /></Layout></ProtectedRoute>} />
-            <Route path="/stock-in" element={<ProtectedRoute><Layout><StockIn /></Layout></ProtectedRoute>} />
-            <Route path="/stock-out" element={<ProtectedRoute><Layout><StockOut /></Layout></ProtectedRoute>} />
-            <Route path="/suppliers" element={<ProtectedRoute><Layout><Suppliers /></Layout></ProtectedRoute>} />
-            <Route path="/customers" element={<ProtectedRoute><Layout><Customers /></Layout></ProtectedRoute>} />
-            <Route path="/pos" element={<ProtectedRoute><POSLayout><POS /></POSLayout></ProtectedRoute>} />
-            <Route path="/transactions" element={<ProtectedRoute><Layout><Transactions /></Layout></ProtectedRoute>} />
-            <Route path="/sales-history" element={<ProtectedRoute><Layout><SalesHistory /></Layout></ProtectedRoute>} />
-            <Route path="/loans" element={<ProtectedRoute><Layout><Loans /></Layout></ProtectedRoute>} />
-            <Route path="/expenses" element={<ProtectedRoute><Layout><Expenses /></Layout></ProtectedRoute>} />
-            <Route path="/employees" element={<ProtectedRoute><Layout><Employees /></Layout></ProtectedRoute>} />
-            <Route path="/warehouses" element={<ProtectedRoute><Layout><Warehouses /></Layout></ProtectedRoute>} />
-            <Route path="/stock-adjustment" element={<ProtectedRoute><Layout><StockAdjustment /></Layout></ProtectedRoute>} />
-            <Route path="/support" element={<ProtectedRoute><Layout><Support /></Layout></ProtectedRoute>} />
-            <Route path="/reports" element={<ProtectedRoute><Layout><Reports /></Layout></ProtectedRoute>} />
-            <Route path="/users" element={<ProtectedRoute><Layout><UserManagement /></Layout></ProtectedRoute>} />
-            <Route path="/owner" element={<ProtectedRoute><Layout><OwnerDashboard /></Layout></ProtectedRoute>} />
-            <Route path="/settings" element={<ProtectedRoute><Layout><Settings /></Layout></ProtectedRoute>} />
+
+            {/* Dashboard - all authenticated users */}
+            <Route path="/" element={<ProtectedPage permission="dashboard"><Dashboard /></ProtectedPage>} />
+
+            {/* Owner dashboard - admin & owner only */}
+            <Route path="/owner" element={<ProtectedPage permission="owner_dashboard"><OwnerDashboard /></ProtectedPage>} />
+
+            {/* Sales */}
+            <Route path="/pos" element={
+              <ProtectedRoute>
+                <PermissionGuard permission="pos">
+                  <POSLayout><POS /></POSLayout>
+                </PermissionGuard>
+              </ProtectedRoute>
+            } />
+            <Route path="/sales-history" element={<ProtectedPage permission="sales_history"><SalesHistory /></ProtectedPage>} />
+            <Route path="/transactions" element={<ProtectedPage permission="transactions"><Transactions /></ProtectedPage>} />
+
+            {/* Inventory */}
+            <Route path="/inventory" element={<ProtectedPage permission="inventory"><Inventory /></ProtectedPage>} />
+            <Route path="/categories" element={<ProtectedPage permission="categories"><Categories /></ProtectedPage>} />
+            <Route path="/stock-in" element={<ProtectedPage permission="stock_in"><StockIn /></ProtectedPage>} />
+            <Route path="/stock-out" element={<ProtectedPage permission="stock_out"><StockOut /></ProtectedPage>} />
+            <Route path="/stock-adjustment" element={<ProtectedPage permission="stock_adjustment"><StockAdjustment /></ProtectedPage>} />
+            <Route path="/warehouses" element={<ProtectedPage permission="warehouses"><Warehouses /></ProtectedPage>} />
+
+            {/* Finance */}
+            <Route path="/loans" element={<ProtectedPage permission="loans"><Loans /></ProtectedPage>} />
+            <Route path="/expenses" element={<ProtectedPage permission="expenses"><Expenses /></ProtectedPage>} />
+
+            {/* People */}
+            <Route path="/employees" element={<ProtectedPage permission="employees"><Employees /></ProtectedPage>} />
+            <Route path="/suppliers" element={<ProtectedPage permission="suppliers"><Suppliers /></ProtectedPage>} />
+            <Route path="/customers" element={<ProtectedPage permission="customers"><Customers /></ProtectedPage>} />
+
+            {/* System */}
+            <Route path="/reports" element={<ProtectedPage permission="reports"><Reports /></ProtectedPage>} />
+            <Route path="/support" element={<ProtectedPage permission="support"><Support /></ProtectedPage>} />
+            <Route path="/users" element={<ProtectedPage permission="users"><UserManagement /></ProtectedPage>} />
+            <Route path="/settings" element={<ProtectedPage permission="settings"><Settings /></ProtectedPage>} />
+
             <Route path="*" element={<NotFound />} />
           </Routes>
         </AuthProvider>
