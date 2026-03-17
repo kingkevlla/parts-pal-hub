@@ -1,194 +1,628 @@
-import { useState, useEffect } from "react";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { supabase } from "@/integrations/supabase/client";
+import { useState, useEffect, useMemo } from "react";
+import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Badge } from "@/components/ui/badge";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { StatCard } from "@/components/dashboard/StatCard";
-import { DollarSign, Package, Users, TrendingUp, TrendingDown } from "lucide-react";
+import {
+  DollarSign, Package, Users, TrendingUp, TrendingDown, Calendar,
+  UserCheck, ShoppingCart, FileText, Download, Filter, Activity,
+} from "lucide-react";
+import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
 import { useCurrency } from "@/hooks/useCurrency";
 import { useSystemSettings } from "@/hooks/useSystemSettings";
+import { format, startOfDay, endOfDay, startOfWeek, endOfWeek, startOfMonth, endOfMonth, startOfYear, endOfYear, subDays } from "date-fns";
 
-interface ReportData {
-  totalTransactions: number;
-  totalProducts: number;
-  totalCustomers: number;
-  totalSuppliers: number;
-  totalIncome: number;
+// ─── Types ───────────────────────────────────────────────
+interface UserProfile {
+  user_id: string;
+  full_name: string | null;
+}
+
+interface TransactionRow {
+  id: string;
+  transaction_number: string | null;
+  total_amount: number;
+  payment_method: string | null;
+  status: string | null;
+  created_at: string;
+  created_by: string | null;
+  customer_id: string | null;
+  discount_amount: number | null;
+  tax_amount: number | null;
+  customers: { name: string } | null;
+}
+
+interface StockMovementRow {
+  id: string;
+  movement_type: string;
+  quantity: number;
+  created_at: string;
+  created_by: string | null;
+  notes: string | null;
+  products: { name: string } | null;
+  warehouses: { name: string } | null;
+}
+
+interface ExpenseRow {
+  id: string;
+  description: string;
+  amount: number;
+  expense_date: string;
+  status: string | null;
+  category_id: string | null;
+  created_by: string | null;
+  expense_categories: { name: string } | null;
+}
+
+interface UserActivity {
+  userId: string;
+  userName: string;
+  totalSales: number;
+  totalRevenue: number;
+  totalStockMoves: number;
   totalExpenses: number;
-  lowStockItems: number;
+  transactions: TransactionRow[];
+  stockMovements: StockMovementRow[];
+}
+
+// ─── Date range helpers ──────────────────────────────────
+function getDateRange(filter: string, customStart: string, customEnd: string) {
+  const now = new Date();
+  switch (filter) {
+    case "today": return { start: startOfDay(now), end: endOfDay(now) };
+    case "yesterday": { const y = subDays(now, 1); return { start: startOfDay(y), end: endOfDay(y) }; }
+    case "this_week": return { start: startOfWeek(now, { weekStartsOn: 1 }), end: endOfWeek(now, { weekStartsOn: 1 }) };
+    case "this_month": return { start: startOfMonth(now), end: endOfMonth(now) };
+    case "last_30": return { start: subDays(now, 30), end: now };
+    case "this_year": return { start: startOfYear(now), end: endOfYear(now) };
+    case "custom":
+      if (customStart && customEnd) return { start: new Date(customStart), end: endOfDay(new Date(customEnd)) };
+      return null;
+    default: return null; // "all"
+  }
 }
 
 export default function Reports() {
-  const [reportData, setReportData] = useState<ReportData>({
-    totalTransactions: 0,
-    totalProducts: 0,
-    totalCustomers: 0,
-    totalSuppliers: 0,
-    totalIncome: 0,
-    totalExpenses: 0,
-    lowStockItems: 0,
-  });
+  const [dateFilter, setDateFilter] = useState("this_month");
+  const [customStart, setCustomStart] = useState("");
+  const [customEnd, setCustomEnd] = useState("");
+  const [selectedUser, setSelectedUser] = useState("all");
+  const [activeTab, setActiveTab] = useState("overview");
+
+  const [profiles, setProfiles] = useState<UserProfile[]>([]);
+  const [transactions, setTransactions] = useState<TransactionRow[]>([]);
+  const [stockMovements, setStockMovements] = useState<StockMovementRow[]>([]);
+  const [expenses, setExpenses] = useState<ExpenseRow[]>([]);
+  const [productCount, setProductCount] = useState(0);
+  const [customerCount, setCustomerCount] = useState(0);
+  const [supplierCount, setSupplierCount] = useState(0);
   const [loading, setLoading] = useState(true);
+
   const { toast } = useToast();
   const { formatAmount } = useCurrency();
   const { settings } = useSystemSettings();
 
+  // Fetch profiles once
   useEffect(() => {
-    fetchReportData();
+    supabase.from("profiles").select("user_id, full_name").then(({ data }) => {
+      if (data) setProfiles(data);
+    });
   }, []);
 
-  const fetchReportData = async () => {
+  // Fetch report data when filters change
+  useEffect(() => {
+    fetchData();
+  }, [dateFilter, customStart, customEnd]);
+
+  const dateRange = getDateRange(dateFilter, customStart, customEnd);
+
+  const fetchData = async () => {
+    setLoading(true);
     try {
-      // Fetch transactions count
-      const { count: transactionsCount } = await supabase
-        .from("transactions")
-        .select("*", { count: "exact", head: true });
-
-      // Fetch products count
-      const { count: productsCount } = await supabase
-        .from("products")
-        .select("*", { count: "exact", head: true });
-
-      // Fetch customers count
-      const { count: customersCount } = await supabase
-        .from("customers")
-        .select("*", { count: "exact", head: true });
-
-      // Fetch suppliers count
-      const { count: suppliersCount } = await supabase
-        .from("suppliers")
-        .select("*", { count: "exact", head: true });
-
-      // Fetch transactions for income calculation
-      const { data: transactions } = await supabase
-        .from("transactions")
-        .select("total_amount, status");
-
-      const income = transactions
-        ?.filter((t) => t.status === "completed")
-        .reduce((sum, t) => sum + Number(t.total_amount || 0), 0) || 0;
-
-      // Fetch low stock items
-      const { data: products } = await supabase.from("products").select("id, min_stock_level");
-
-      let lowStockCount = 0;
-      if (products) {
-        for (const product of products) {
-          const { data: inventory } = await supabase
-            .from("inventory")
-            .select("quantity")
-            .eq("product_id", product.id);
-
-          const totalQuantity = inventory?.reduce((sum, inv) => sum + (inv.quantity || 0), 0) || 0;
-          if (totalQuantity <= (product.min_stock_level || settings.low_stock_threshold)) {
-            lowStockCount++;
-          }
+      // Build date filter
+      const applyDateFilter = (query: any, col = "created_at") => {
+        if (dateRange) {
+          query = query.gte(col, dateRange.start.toISOString()).lte(col, dateRange.end.toISOString());
         }
-      }
+        return query;
+      };
 
-      setReportData({
-        totalTransactions: transactionsCount || 0,
-        totalProducts: productsCount || 0,
-        totalCustomers: customersCount || 0,
-        totalSuppliers: suppliersCount || 0,
-        totalIncome: income,
-        totalExpenses: 0,
-        lowStockItems: lowStockCount,
-      });
-    } catch (error: any) {
-      toast({
-        title: "Error",
-        description: error.message,
-        variant: "destructive",
-      });
+      // Transactions
+      let txQuery = supabase.from("transactions").select("id, transaction_number, total_amount, payment_method, status, created_at, created_by, customer_id, discount_amount, tax_amount, customers(name)");
+      txQuery = applyDateFilter(txQuery);
+      const { data: txData } = await txQuery.order("created_at", { ascending: false });
+
+      // Stock movements
+      let smQuery = supabase.from("stock_movements").select("id, movement_type, quantity, created_at, created_by, notes, products(name), warehouses(name)");
+      smQuery = applyDateFilter(smQuery);
+      const { data: smData } = await smQuery.order("created_at", { ascending: false });
+
+      // Expenses
+      let exQuery = supabase.from("expenses").select("id, description, amount, expense_date, status, category_id, created_by, expense_categories(name)");
+      if (dateRange) {
+        exQuery = exQuery.gte("expense_date", format(dateRange.start, "yyyy-MM-dd")).lte("expense_date", format(dateRange.end, "yyyy-MM-dd"));
+      }
+      const { data: exData } = await exQuery.order("expense_date", { ascending: false });
+
+      // Counts
+      const [{ count: pc }, { count: cc }, { count: sc }] = await Promise.all([
+        supabase.from("products").select("*", { count: "exact", head: true }),
+        supabase.from("customers").select("*", { count: "exact", head: true }),
+        supabase.from("suppliers").select("*", { count: "exact", head: true }),
+      ]);
+
+      setTransactions(txData || []);
+      setStockMovements(smData || []);
+      setExpenses(exData || []);
+      setProductCount(pc || 0);
+      setCustomerCount(cc || 0);
+      setSupplierCount(sc || 0);
+    } catch (err: any) {
+      toast({ title: "Error loading reports", description: err.message, variant: "destructive" });
     } finally {
       setLoading(false);
     }
   };
 
-  const netProfit = reportData.totalIncome - reportData.totalExpenses;
+  // ─── Helpers ─────────────────────────────────────────────
+  const getUserName = (userId: string | null) => {
+    if (!userId) return "System";
+    const p = profiles.find((pr) => pr.user_id === userId);
+    return p?.full_name || userId.slice(0, 8) + "...";
+  };
+
+  // Filter by selected user
+  const filteredTransactions = useMemo(() =>
+    selectedUser === "all" ? transactions : transactions.filter((t) => t.created_by === selectedUser),
+    [transactions, selectedUser]
+  );
+  const filteredStockMovements = useMemo(() =>
+    selectedUser === "all" ? stockMovements : stockMovements.filter((s) => s.created_by === selectedUser),
+    [stockMovements, selectedUser]
+  );
+  const filteredExpenses = useMemo(() =>
+    selectedUser === "all" ? expenses : expenses.filter((e) => e.created_by === selectedUser),
+    [expenses, selectedUser]
+  );
+
+  // Summary stats
+  const totalRevenue = filteredTransactions.filter((t) => t.status === "completed").reduce((s, t) => s + Number(t.total_amount || 0), 0);
+  const totalExpenseAmount = filteredExpenses.reduce((s, e) => s + Number(e.amount || 0), 0);
+  const netProfit = totalRevenue - totalExpenseAmount;
+  const completedSales = filteredTransactions.filter((t) => t.status === "completed").length;
+  const stockInCount = filteredStockMovements.filter((s) => s.movement_type === "in").reduce((a, s) => a + s.quantity, 0);
+  const stockOutCount = filteredStockMovements.filter((s) => s.movement_type === "out" || s.movement_type === "sale").reduce((a, s) => a + s.quantity, 0);
+
+  // ─── User activity aggregation ──────────────────────────
+  const userActivities = useMemo(() => {
+    const map = new Map<string, UserActivity>();
+
+    const getOrCreate = (userId: string): UserActivity => {
+      if (!map.has(userId)) {
+        map.set(userId, {
+          userId,
+          userName: getUserName(userId),
+          totalSales: 0,
+          totalRevenue: 0,
+          totalStockMoves: 0,
+          totalExpenses: 0,
+          transactions: [],
+          stockMovements: [],
+        });
+      }
+      return map.get(userId)!;
+    };
+
+    transactions.forEach((t) => {
+      if (!t.created_by) return;
+      const u = getOrCreate(t.created_by);
+      u.transactions.push(t);
+      if (t.status === "completed") {
+        u.totalSales++;
+        u.totalRevenue += Number(t.total_amount || 0);
+      }
+    });
+
+    stockMovements.forEach((s) => {
+      if (!s.created_by) return;
+      const u = getOrCreate(s.created_by);
+      u.stockMovements.push(s);
+      u.totalStockMoves++;
+    });
+
+    expenses.forEach((e) => {
+      if (!e.created_by) return;
+      const u = getOrCreate(e.created_by);
+      u.totalExpenses += Number(e.amount || 0);
+    });
+
+    return Array.from(map.values()).sort((a, b) => b.totalRevenue - a.totalRevenue);
+  }, [transactions, stockMovements, expenses, profiles]);
+
+  // Unique users that had activity
+  const activeUsers = useMemo(() => {
+    const userIds = new Set<string>();
+    transactions.forEach((t) => t.created_by && userIds.add(t.created_by));
+    stockMovements.forEach((s) => s.created_by && userIds.add(s.created_by));
+    expenses.forEach((e) => e.created_by && userIds.add(e.created_by));
+    return Array.from(userIds).map((id) => ({ id, name: getUserName(id) }));
+  }, [transactions, stockMovements, expenses, profiles]);
+
+  // Selected user detail
+  const selectedUserActivity = selectedUser !== "all" ? userActivities.find((u) => u.userId === selectedUser) : null;
 
   return (
-    <div className="space-y-6 p-6">
-      <div>
-        <h1 className="text-3xl font-bold">Reports</h1>
-        <p className="text-muted-foreground">Business insights and analytics</p>
+    <div className="space-y-6">
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+        <div>
+          <h1 className="text-3xl font-bold">Reports</h1>
+          <p className="text-muted-foreground">Business insights, analytics & user activity</p>
+        </div>
       </div>
 
-      {loading ? (
-        <p className="text-muted-foreground">Loading report data...</p>
-      ) : (
-        <>
-          <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
-            <StatCard
-              title="Total Transactions"
-              value={reportData.totalTransactions}
-              icon={DollarSign}
-            />
-            <StatCard
-              title="Total Products"
-              value={reportData.totalProducts}
-              icon={Package}
-            />
-            <StatCard
-              title="Total Customers"
-              value={reportData.totalCustomers}
-              icon={Users}
-            />
-            <StatCard
-              title="Total Suppliers"
-              value={reportData.totalSuppliers}
-              icon={Users}
-            />
+      {/* ─── Filters ─────────────────────────────────────── */}
+      <Card>
+        <CardContent className="pt-6">
+          <div className="flex flex-wrap items-end gap-4">
+            <div className="space-y-1.5">
+              <label className="text-sm font-medium flex items-center gap-1"><Calendar className="h-3.5 w-3.5" /> Date Range</label>
+              <Select value={dateFilter} onValueChange={setDateFilter}>
+                <SelectTrigger className="w-[180px]"><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="today">Today</SelectItem>
+                  <SelectItem value="yesterday">Yesterday</SelectItem>
+                  <SelectItem value="this_week">This Week</SelectItem>
+                  <SelectItem value="this_month">This Month</SelectItem>
+                  <SelectItem value="last_30">Last 30 Days</SelectItem>
+                  <SelectItem value="this_year">This Year</SelectItem>
+                  <SelectItem value="all">All Time</SelectItem>
+                  <SelectItem value="custom">Custom Range</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+
+            {dateFilter === "custom" && (
+              <>
+                <div className="space-y-1.5">
+                  <label className="text-sm font-medium">From</label>
+                  <Input type="date" value={customStart} onChange={(e) => setCustomStart(e.target.value)} className="w-[160px]" />
+                </div>
+                <div className="space-y-1.5">
+                  <label className="text-sm font-medium">To</label>
+                  <Input type="date" value={customEnd} onChange={(e) => setCustomEnd(e.target.value)} className="w-[160px]" />
+                </div>
+              </>
+            )}
+
+            <div className="space-y-1.5">
+              <label className="text-sm font-medium flex items-center gap-1"><UserCheck className="h-3.5 w-3.5" /> User / Cashier</label>
+              <Select value={selectedUser} onValueChange={setSelectedUser}>
+                <SelectTrigger className="w-[200px]"><SelectValue placeholder="All Users" /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All Users</SelectItem>
+                  {activeUsers.map((u) => (
+                    <SelectItem key={u.id} value={u.id}>{u.name}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+
+            <Button variant="outline" size="sm" onClick={() => { setDateFilter("this_month"); setSelectedUser("all"); }}>
+              <Filter className="h-4 w-4 mr-1" /> Reset
+            </Button>
           </div>
+        </CardContent>
+      </Card>
 
-          <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
+      {loading ? (
+        <p className="text-muted-foreground text-center py-12">Loading report data...</p>
+      ) : (
+        <Tabs value={activeTab} onValueChange={setActiveTab}>
+          <TabsList className="grid w-full grid-cols-4">
+            <TabsTrigger value="overview">Overview</TabsTrigger>
+            <TabsTrigger value="sales">Sales</TabsTrigger>
+            <TabsTrigger value="inventory">Inventory</TabsTrigger>
+            <TabsTrigger value="user_activity">User Activity</TabsTrigger>
+          </TabsList>
+
+          {/* ═══ OVERVIEW TAB ════════════════════════════════ */}
+          <TabsContent value="overview" className="space-y-6">
+            {selectedUser !== "all" && selectedUserActivity && (
+              <Card className="border-primary/30 bg-primary/5">
+                <CardContent className="pt-6">
+                  <p className="text-sm text-muted-foreground">Showing results for</p>
+                  <p className="text-xl font-bold">{selectedUserActivity.userName}</p>
+                </CardContent>
+              </Card>
+            )}
+
+            <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
+              <StatCard title="Total Sales" value={completedSales} icon={ShoppingCart} />
+              <StatCard title="Revenue" value={formatAmount(totalRevenue)} icon={TrendingUp} variant="success" />
+              <StatCard title="Expenses" value={formatAmount(totalExpenseAmount)} icon={TrendingDown} variant="destructive" />
+              <StatCard title="Net Profit" value={formatAmount(netProfit)} icon={DollarSign} variant={netProfit >= 0 ? "success" : "destructive"} />
+            </div>
+
+            <div className="grid gap-4 md:grid-cols-3">
+              <Card>
+                <CardHeader className="pb-2"><CardTitle className="text-sm font-medium">Stock In</CardTitle></CardHeader>
+                <CardContent><p className="text-2xl font-bold text-success">+{stockInCount} units</p></CardContent>
+              </Card>
+              <Card>
+                <CardHeader className="pb-2"><CardTitle className="text-sm font-medium">Stock Out</CardTitle></CardHeader>
+                <CardContent><p className="text-2xl font-bold text-destructive">-{stockOutCount} units</p></CardContent>
+              </Card>
+              <Card>
+                <CardHeader className="pb-2"><CardTitle className="text-sm font-medium">Counts</CardTitle></CardHeader>
+                <CardContent>
+                  <div className="flex gap-4 text-sm">
+                    <span><strong>{productCount}</strong> Products</span>
+                    <span><strong>{customerCount}</strong> Customers</span>
+                    <span><strong>{supplierCount}</strong> Suppliers</span>
+                  </div>
+                </CardContent>
+              </Card>
+            </div>
+          </TabsContent>
+
+          {/* ═══ SALES TAB ═══════════════════════════════════ */}
+          <TabsContent value="sales" className="space-y-4">
             <Card>
-              <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                <CardTitle className="text-sm font-medium">Total Revenue</CardTitle>
-                <TrendingUp className="h-4 w-4 text-green-500" />
+              <CardHeader>
+                <CardTitle>Sales Transactions</CardTitle>
+                <CardDescription>{filteredTransactions.length} transactions found</CardDescription>
               </CardHeader>
               <CardContent>
-                <div className="text-2xl font-bold">{formatAmount(reportData.totalIncome)}</div>
-              </CardContent>
-            </Card>
-
-            <Card>
-              <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                <CardTitle className="text-sm font-medium">Total Expenses</CardTitle>
-                <TrendingDown className="h-4 w-4 text-red-500" />
-              </CardHeader>
-              <CardContent>
-                <div className="text-2xl font-bold">{formatAmount(reportData.totalExpenses)}</div>
-              </CardContent>
-            </Card>
-
-            <Card>
-              <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                <CardTitle className="text-sm font-medium">Net Profit</CardTitle>
-                <DollarSign className={`h-4 w-4 ${netProfit >= 0 ? "text-green-500" : "text-red-500"}`} />
-              </CardHeader>
-              <CardContent>
-                <div className={`text-2xl font-bold ${netProfit >= 0 ? "text-green-500" : "text-red-500"}`}>
-                  {formatAmount(netProfit)}
+                <div className="overflow-x-auto">
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead>Date</TableHead>
+                        <TableHead>Txn #</TableHead>
+                        <TableHead>Cashier</TableHead>
+                        <TableHead>Customer</TableHead>
+                        <TableHead>Payment</TableHead>
+                        <TableHead>Status</TableHead>
+                        <TableHead className="text-right">Amount</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {filteredTransactions.length === 0 ? (
+                        <TableRow><TableCell colSpan={7} className="text-center py-8 text-muted-foreground">No transactions found</TableCell></TableRow>
+                      ) : filteredTransactions.slice(0, 100).map((t) => (
+                        <TableRow key={t.id}>
+                          <TableCell className="whitespace-nowrap text-sm">{format(new Date(t.created_at), "MMM dd, HH:mm")}</TableCell>
+                          <TableCell className="font-mono text-sm">{t.transaction_number || "—"}</TableCell>
+                          <TableCell>
+                            <Badge variant="outline" className="text-xs">{getUserName(t.created_by)}</Badge>
+                          </TableCell>
+                          <TableCell>{t.customers?.name || "Walk-in"}</TableCell>
+                          <TableCell className="capitalize">{t.payment_method || "—"}</TableCell>
+                          <TableCell>
+                            <Badge variant={t.status === "completed" ? "default" : "secondary"} className="text-xs">
+                              {t.status}
+                            </Badge>
+                          </TableCell>
+                          <TableCell className="text-right font-medium">{formatAmount(t.total_amount)}</TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                  {filteredTransactions.length > 100 && (
+                    <p className="text-sm text-muted-foreground text-center mt-2">Showing first 100 of {filteredTransactions.length}</p>
+                  )}
                 </div>
               </CardContent>
             </Card>
-          </div>
+          </TabsContent>
 
-          <Card>
-            <CardHeader>
-              <CardTitle>Inventory Alerts</CardTitle>
-            </CardHeader>
-            <CardContent>
-              <div className="flex items-center gap-2">
-                <Package className="h-5 w-5 text-orange-500" />
-                <span className="text-lg">
-                  <span className="font-bold text-orange-500">{reportData.lowStockItems}</span> products are at or below reorder level
-                </span>
-              </div>
-            </CardContent>
-          </Card>
-        </>
+          {/* ═══ INVENTORY TAB ═══════════════════════════════ */}
+          <TabsContent value="inventory" className="space-y-4">
+            <Card>
+              <CardHeader>
+                <CardTitle>Stock Movements</CardTitle>
+                <CardDescription>{filteredStockMovements.length} movements found</CardDescription>
+              </CardHeader>
+              <CardContent>
+                <div className="overflow-x-auto">
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead>Date</TableHead>
+                        <TableHead>Type</TableHead>
+                        <TableHead>User</TableHead>
+                        <TableHead>Product</TableHead>
+                        <TableHead>Warehouse</TableHead>
+                        <TableHead className="text-right">Qty</TableHead>
+                        <TableHead>Notes</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {filteredStockMovements.length === 0 ? (
+                        <TableRow><TableCell colSpan={7} className="text-center py-8 text-muted-foreground">No stock movements found</TableCell></TableRow>
+                      ) : filteredStockMovements.slice(0, 100).map((s) => (
+                        <TableRow key={s.id}>
+                          <TableCell className="whitespace-nowrap text-sm">{format(new Date(s.created_at), "MMM dd, HH:mm")}</TableCell>
+                          <TableCell>
+                            <Badge variant={s.movement_type === "in" ? "default" : "destructive"} className="text-xs capitalize">
+                              {s.movement_type}
+                            </Badge>
+                          </TableCell>
+                          <TableCell>
+                            <Badge variant="outline" className="text-xs">{getUserName(s.created_by)}</Badge>
+                          </TableCell>
+                          <TableCell>{s.products?.name || "—"}</TableCell>
+                          <TableCell>{s.warehouses?.name || "—"}</TableCell>
+                          <TableCell className="text-right font-medium">{s.quantity}</TableCell>
+                          <TableCell className="max-w-[150px] truncate text-sm text-muted-foreground">{s.notes || "—"}</TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                </div>
+              </CardContent>
+            </Card>
+          </TabsContent>
+
+          {/* ═══ USER ACTIVITY TAB ═══════════════════════════ */}
+          <TabsContent value="user_activity" className="space-y-4">
+            {selectedUser === "all" ? (
+              /* Summary of all users */
+              <Card>
+                <CardHeader>
+                  <CardTitle className="flex items-center gap-2"><Activity className="h-5 w-5" /> User Activity Summary</CardTitle>
+                  <CardDescription>Performance breakdown per user during the selected period</CardDescription>
+                </CardHeader>
+                <CardContent>
+                  <div className="overflow-x-auto">
+                    <Table>
+                      <TableHeader>
+                        <TableRow>
+                          <TableHead>User</TableHead>
+                          <TableHead className="text-right">Sales</TableHead>
+                          <TableHead className="text-right">Revenue</TableHead>
+                          <TableHead className="text-right">Stock Moves</TableHead>
+                          <TableHead className="text-right">Expenses</TableHead>
+                          <TableHead></TableHead>
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
+                        {userActivities.length === 0 ? (
+                          <TableRow><TableCell colSpan={6} className="text-center py-8 text-muted-foreground">No user activity found</TableCell></TableRow>
+                        ) : userActivities.map((u) => (
+                          <TableRow key={u.userId}>
+                            <TableCell className="font-medium">{u.userName}</TableCell>
+                            <TableCell className="text-right">{u.totalSales}</TableCell>
+                            <TableCell className="text-right font-medium text-success">{formatAmount(u.totalRevenue)}</TableCell>
+                            <TableCell className="text-right">{u.totalStockMoves}</TableCell>
+                            <TableCell className="text-right text-destructive">{formatAmount(u.totalExpenses)}</TableCell>
+                            <TableCell>
+                              <Button size="sm" variant="ghost" onClick={() => { setSelectedUser(u.userId); setActiveTab("overview"); }}>
+                                View Details
+                              </Button>
+                            </TableCell>
+                          </TableRow>
+                        ))}
+                      </TableBody>
+                    </Table>
+                  </div>
+                </CardContent>
+              </Card>
+            ) : (
+              /* Detailed view for selected user */
+              selectedUserActivity && (
+                <div className="space-y-4">
+                  <Card className="border-primary/30">
+                    <CardHeader>
+                      <CardTitle className="flex items-center gap-2">
+                        <UserCheck className="h-5 w-5" />
+                        {selectedUserActivity.userName}'s Activity Report
+                      </CardTitle>
+                      <CardDescription>
+                        {dateFilter === "all" ? "All time" : dateRange ? `${format(dateRange.start, "MMM dd, yyyy")} — ${format(dateRange.end, "MMM dd, yyyy")}` : ""}
+                      </CardDescription>
+                    </CardHeader>
+                    <CardContent>
+                      <div className="grid gap-4 md:grid-cols-4">
+                        <div className="rounded-lg border p-4 text-center">
+                          <p className="text-2xl font-bold">{selectedUserActivity.totalSales}</p>
+                          <p className="text-sm text-muted-foreground">Completed Sales</p>
+                        </div>
+                        <div className="rounded-lg border p-4 text-center">
+                          <p className="text-2xl font-bold text-success">{formatAmount(selectedUserActivity.totalRevenue)}</p>
+                          <p className="text-sm text-muted-foreground">Revenue Generated</p>
+                        </div>
+                        <div className="rounded-lg border p-4 text-center">
+                          <p className="text-2xl font-bold">{selectedUserActivity.totalStockMoves}</p>
+                          <p className="text-sm text-muted-foreground">Stock Movements</p>
+                        </div>
+                        <div className="rounded-lg border p-4 text-center">
+                          <p className="text-2xl font-bold text-destructive">{formatAmount(selectedUserActivity.totalExpenses)}</p>
+                          <p className="text-sm text-muted-foreground">Expenses Recorded</p>
+                        </div>
+                      </div>
+                    </CardContent>
+                  </Card>
+
+                  {/* User's transactions */}
+                  <Card>
+                    <CardHeader><CardTitle className="text-base">Sales by {selectedUserActivity.userName}</CardTitle></CardHeader>
+                    <CardContent>
+                      <div className="overflow-x-auto">
+                        <Table>
+                          <TableHeader>
+                            <TableRow>
+                              <TableHead>Date</TableHead>
+                              <TableHead>Txn #</TableHead>
+                              <TableHead>Customer</TableHead>
+                              <TableHead>Payment</TableHead>
+                              <TableHead>Status</TableHead>
+                              <TableHead className="text-right">Amount</TableHead>
+                            </TableRow>
+                          </TableHeader>
+                          <TableBody>
+                            {selectedUserActivity.transactions.length === 0 ? (
+                              <TableRow><TableCell colSpan={6} className="text-center py-4 text-muted-foreground">No sales</TableCell></TableRow>
+                            ) : selectedUserActivity.transactions.map((t) => (
+                              <TableRow key={t.id}>
+                                <TableCell className="whitespace-nowrap text-sm">{format(new Date(t.created_at), "MMM dd, HH:mm")}</TableCell>
+                                <TableCell className="font-mono text-sm">{t.transaction_number || "—"}</TableCell>
+                                <TableCell>{t.customers?.name || "Walk-in"}</TableCell>
+                                <TableCell className="capitalize">{t.payment_method || "—"}</TableCell>
+                                <TableCell><Badge variant={t.status === "completed" ? "default" : "secondary"} className="text-xs">{t.status}</Badge></TableCell>
+                                <TableCell className="text-right font-medium">{formatAmount(t.total_amount)}</TableCell>
+                              </TableRow>
+                            ))}
+                          </TableBody>
+                        </Table>
+                      </div>
+                    </CardContent>
+                  </Card>
+
+                  {/* User's stock movements */}
+                  <Card>
+                    <CardHeader><CardTitle className="text-base">Stock Movements by {selectedUserActivity.userName}</CardTitle></CardHeader>
+                    <CardContent>
+                      <div className="overflow-x-auto">
+                        <Table>
+                          <TableHeader>
+                            <TableRow>
+                              <TableHead>Date</TableHead>
+                              <TableHead>Type</TableHead>
+                              <TableHead>Product</TableHead>
+                              <TableHead>Warehouse</TableHead>
+                              <TableHead className="text-right">Qty</TableHead>
+                            </TableRow>
+                          </TableHeader>
+                          <TableBody>
+                            {selectedUserActivity.stockMovements.length === 0 ? (
+                              <TableRow><TableCell colSpan={5} className="text-center py-4 text-muted-foreground">No stock movements</TableCell></TableRow>
+                            ) : selectedUserActivity.stockMovements.map((s) => (
+                              <TableRow key={s.id}>
+                                <TableCell className="whitespace-nowrap text-sm">{format(new Date(s.created_at), "MMM dd, HH:mm")}</TableCell>
+                                <TableCell>
+                                  <Badge variant={s.movement_type === "in" ? "default" : "destructive"} className="text-xs capitalize">{s.movement_type}</Badge>
+                                </TableCell>
+                                <TableCell>{s.products?.name || "—"}</TableCell>
+                                <TableCell>{s.warehouses?.name || "—"}</TableCell>
+                                <TableCell className="text-right font-medium">{s.quantity}</TableCell>
+                              </TableRow>
+                            ))}
+                          </TableBody>
+                        </Table>
+                      </div>
+                    </CardContent>
+                  </Card>
+                </div>
+              )
+            )}
+          </TabsContent>
+        </Tabs>
       )}
     </div>
   );
