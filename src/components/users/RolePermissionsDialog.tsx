@@ -60,15 +60,7 @@ export default function RolePermissionsDialog({
   const fetchRolePermissions = async () => {
     setLoading(true);
     try {
-      // Use the hardcoded ROLE_PERMISSIONS since there's no roles table
-      const ROLE_PERMISSIONS: Record<string, string[]> = {
-        admin: ["dashboard", "pos", "inventory", "stock_in", "stock_out", "products", "categories", "suppliers", "customers", "transactions", "reports", "loans", "warehouses", "settings", "users"],
-        owner: ["dashboard", "pos", "inventory", "stock_in", "stock_out", "products", "categories", "suppliers", "customers", "transactions", "reports", "loans", "warehouses", "settings", "users"],
-        manager: ["dashboard", "pos", "inventory", "stock_in", "stock_out", "products", "categories", "suppliers", "customers", "transactions", "reports", "loans", "warehouses"],
-        cashier: ["dashboard", "pos", "customers", "transactions"],
-        user: ["dashboard"],
-      };
-      const perms = ROLE_PERMISSIONS[roleName] || [];
+      const perms = ROLE_PERMISSIONS[roleName as AppRole] || [];
       setSelectedPermissions(new Set(perms));
     } finally {
       setLoading(false);
