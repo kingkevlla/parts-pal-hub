@@ -29,6 +29,7 @@ interface CartItem {
   price: number;
   subtotal: number;
   isManual?: boolean;
+  sellingUnit?: string;
 }
 
 interface Warehouse {
@@ -46,6 +47,10 @@ interface ProductWithStock {
   min_stock_level: number | null;
   image_url: string | null;
   stock?: number;
+  stock_unit: string;
+  selling_unit: string;
+  unit_conversion_factor: number;
+  availableInSellingUnit?: number;
 }
 
 interface SplitPayment {
@@ -159,7 +164,7 @@ export default function POS() {
   const fetchProductsWithStock = async () => {
     const { data: productsData, error: productsError } = await supabase
       .from('products')
-      .select('id, name, sku, barcode, selling_price, min_stock_level, image_url')
+      .select('id, name, sku, barcode, selling_price, min_stock_level, image_url, stock_unit, selling_unit, unit_conversion_factor')
       .eq('is_active', true)
       .order('name');
     
@@ -176,10 +181,21 @@ export default function POS() {
       stockMap.set(i.product_id, (stockMap.get(i.product_id) || 0) + (i.quantity || 0));
     });
     
-    const productsWithStock = (productsData || []).map(p => ({
-      ...p,
-      stock: stockMap.get(p.id) || 0
-    }));
+    const productsWithStock = (productsData || []).map(p => {
+      const rawStock = stockMap.get(p.id) || 0;
+      const stockUnit = (p as any).stock_unit || 'piece';
+      const sellingUnit = (p as any).selling_unit || 'piece';
+      const convFactor = (p as any).unit_conversion_factor || 1;
+      const availableInSellingUnit = stockUnit !== sellingUnit ? rawStock * convFactor : rawStock;
+      return {
+        ...p,
+        stock: rawStock,
+        stock_unit: stockUnit,
+        selling_unit: sellingUnit,
+        unit_conversion_factor: convFactor,
+        availableInSellingUnit,
+      };
+    });
 
     setProducts(productsWithStock);
   };
