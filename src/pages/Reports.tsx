@@ -124,7 +124,6 @@ export default function Reports() {
   const fetchData = async () => {
     setLoading(true);
     try {
-      // Build date filter
       const applyDateFilter = (query: any, col = "created_at") => {
         if (dateRange) {
           query = query.gte(col, dateRange.start.toISOString()).lte(col, dateRange.end.toISOString());
@@ -132,25 +131,29 @@ export default function Reports() {
         return query;
       };
 
-      // Transactions
+      // Run ALL queries in parallel
       let txQuery = supabase.from("transactions").select("id, transaction_number, total_amount, payment_method, status, created_at, created_by, customer_id, discount_amount, tax_amount, customers(name)");
       txQuery = applyDateFilter(txQuery);
-      const { data: txData } = await txQuery.order("created_at", { ascending: false });
 
-      // Stock movements
       let smQuery = supabase.from("stock_movements").select("id, movement_type, quantity, created_at, created_by, notes, products(name), warehouses(name)");
       smQuery = applyDateFilter(smQuery);
-      const { data: smData } = await smQuery.order("created_at", { ascending: false });
 
-      // Expenses
       let exQuery = supabase.from("expenses").select("id, description, amount, expense_date, status, category_id, created_by, expense_categories(name)");
       if (dateRange) {
         exQuery = exQuery.gte("expense_date", format(dateRange.start, "yyyy-MM-dd")).lte("expense_date", format(dateRange.end, "yyyy-MM-dd"));
       }
-      const { data: exData } = await exQuery.order("expense_date", { ascending: false });
 
-      // Counts
-      const [{ count: pc }, { count: cc }, { count: sc }] = await Promise.all([
+      const [
+        { data: txData },
+        { data: smData },
+        { data: exData },
+        { count: pc },
+        { count: cc },
+        { count: sc },
+      ] = await Promise.all([
+        txQuery.order("created_at", { ascending: false }),
+        smQuery.order("created_at", { ascending: false }),
+        exQuery.order("expense_date", { ascending: false }),
         supabase.from("products").select("*", { count: "exact", head: true }),
         supabase.from("customers").select("*", { count: "exact", head: true }),
         supabase.from("suppliers").select("*", { count: "exact", head: true }),
