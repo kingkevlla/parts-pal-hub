@@ -1,6 +1,10 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
+
+// Cache role globally so every hook instance shares it
+const roleCache = new Map<string, { role: AppRole; ts: number }>();
+const CACHE_TTL = 60_000; // 1 minute
 
 export type AppRole = "admin" | "owner" | "manager" | "cashier" | "user";
 
@@ -50,6 +54,14 @@ export function usePermissions(): UserPermissions {
 
   useEffect(() => {
     if (user) {
+      // Check cache first
+      const cached = roleCache.get(user.id);
+      if (cached && Date.now() - cached.ts < CACHE_TTL) {
+        setRole(cached.role);
+        setPermissions(ROLE_PERMISSIONS[cached.role] || ROLE_PERMISSIONS.user);
+        setLoading(false);
+        return;
+      }
       fetchUserRole();
     } else {
       setRole(null);
@@ -60,7 +72,6 @@ export function usePermissions(): UserPermissions {
 
   const fetchUserRole = async () => {
     if (!user) return;
-
     try {
       const { data, error } = await supabase
         .from("user_roles")
@@ -68,17 +79,11 @@ export function usePermissions(): UserPermissions {
         .eq("user_id", user.id)
         .single();
 
-      if (error) {
-        console.error("Error fetching user role:", error);
-        setRole("user");
-        setPermissions(ROLE_PERMISSIONS.user);
-      } else {
-        const userRole = (data?.role as AppRole) || "user";
-        setRole(userRole);
-        setPermissions(ROLE_PERMISSIONS[userRole] || ROLE_PERMISSIONS.user);
-      }
-    } catch (error) {
-      console.error("Error fetching user role:", error);
+      const userRole: AppRole = error ? "user" : ((data?.role as AppRole) || "user");
+      roleCache.set(user.id, { role: userRole, ts: Date.now() });
+      setRole(userRole);
+      setPermissions(ROLE_PERMISSIONS[userRole] || ROLE_PERMISSIONS.user);
+    } catch {
       setRole("user");
       setPermissions(ROLE_PERMISSIONS.user);
     } finally {
