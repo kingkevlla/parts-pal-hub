@@ -29,6 +29,7 @@ interface CartItem {
   price: number;
   subtotal: number;
   isManual?: boolean;
+  sellingUnit?: string;
 }
 
 interface Warehouse {
@@ -46,6 +47,10 @@ interface ProductWithStock {
   min_stock_level: number | null;
   image_url: string | null;
   stock?: number;
+  stock_unit: string;
+  selling_unit: string;
+  unit_conversion_factor: number;
+  availableInSellingUnit?: number;
 }
 
 interface SplitPayment {
@@ -159,7 +164,7 @@ export default function POS() {
   const fetchProductsWithStock = async () => {
     const { data: productsData, error: productsError } = await supabase
       .from('products')
-      .select('id, name, sku, barcode, selling_price, min_stock_level, image_url')
+      .select('id, name, sku, barcode, selling_price, min_stock_level, image_url, stock_unit, selling_unit, unit_conversion_factor')
       .eq('is_active', true)
       .order('name');
     
@@ -176,10 +181,21 @@ export default function POS() {
       stockMap.set(i.product_id, (stockMap.get(i.product_id) || 0) + (i.quantity || 0));
     });
     
-    const productsWithStock = (productsData || []).map(p => ({
-      ...p,
-      stock: stockMap.get(p.id) || 0
-    }));
+    const productsWithStock = (productsData || []).map(p => {
+      const rawStock = stockMap.get(p.id) || 0;
+      const stockUnit = (p as any).stock_unit || 'piece';
+      const sellingUnit = (p as any).selling_unit || 'piece';
+      const convFactor = (p as any).unit_conversion_factor || 1;
+      const availableInSellingUnit = stockUnit !== sellingUnit ? rawStock * convFactor : rawStock;
+      return {
+        ...p,
+        stock: rawStock,
+        stock_unit: stockUnit,
+        selling_unit: sellingUnit,
+        unit_conversion_factor: convFactor,
+        availableInSellingUnit,
+      };
+    });
 
     setProducts(productsWithStock);
   };
@@ -341,12 +357,12 @@ export default function POS() {
 
     const currentCartQty = cart.find(i => i.productId === product.id)?.quantity || 0;
     const totalQty = currentCartQty + qty;
-    const availableStock = product.stock || 0;
+    const available = product.availableInSellingUnit || product.stock || 0;
 
-    if (availableStock < totalQty) {
+    if (available < totalQty) {
       toast({ 
         title: 'Insufficient Stock', 
-        description: `Available: ${availableStock}`, 
+        description: `Available: ${available} ${product.selling_unit}`, 
         variant: 'destructive' 
       });
       return;
@@ -367,12 +383,13 @@ export default function POS() {
         quantity: qty,
         price: product.selling_price,
         subtotal: product.selling_price * qty,
+        sellingUnit: product.selling_unit,
       }];
     });
   };
 
   const updateCartQuantity = (productId: string, newQty: number) => {
-    if (newQty < 1) {
+    if (newQty < 0.01) {
       removeFromCart(productId);
       return;
     }
@@ -382,7 +399,6 @@ export default function POS() {
     if (!cartItem?.isManual) {
       const product = products.find(p => p.id === productId);
       if (!product) {
-        // Product not in inventory (e.g. loaded from pending bill) — allow free editing
         setCart(prev => prev.map(item => 
           item.productId === productId 
             ? { ...item, quantity: newQty, subtotal: newQty * item.price }
@@ -391,11 +407,11 @@ export default function POS() {
         return;
       }
 
-      const availableStock = product.stock || 0;
-      if (newQty > availableStock) {
+      const available = product.availableInSellingUnit || product.stock || 0;
+      if (newQty > available) {
         toast({ 
           title: 'Insufficient Stock', 
-          description: `Maximum available: ${availableStock}`, 
+          description: `Maximum available: ${available} ${product.selling_unit}`, 
           variant: 'destructive' 
         });
         return;
@@ -524,15 +540,23 @@ export default function POS() {
         }
       }
 
-      const stockMovements = cart.map(item => ({
-        product_id: item.productId,
-        warehouse_id: item.isManual && extraWarehouseId ? extraWarehouseId : selectedWarehouse,
-        quantity: item.quantity,
-        movement_type: 'out',
-        reference_number: transactionNumber,
-        notes: `POS Sale to ${customerName || 'Walk-in customer'}`,
-        created_by: user?.id,
-      }));
+      const stockMovements = cart.map(item => {
+        // Convert selling unit quantity to stock unit quantity for inventory
+        const product = products.find(p => p.id === item.productId);
+        const convFactor = product?.unit_conversion_factor || 1;
+        const stockUnitQty = product && product.stock_unit !== product.selling_unit
+          ? item.quantity / convFactor
+          : item.quantity;
+        return {
+          product_id: item.productId,
+          warehouse_id: item.isManual && extraWarehouseId ? extraWarehouseId : selectedWarehouse,
+          quantity: stockUnitQty,
+          movement_type: 'out',
+          reference_number: transactionNumber,
+          notes: `POS Sale: ${item.quantity} ${item.sellingUnit || 'pc'} to ${customerName || 'Walk-in customer'}`,
+          created_by: user?.id,
+        };
+      });
 
       const { error: movementError } = await supabase.from('stock_movements').insert(stockMovements);
       if (movementError) throw movementError;
@@ -671,16 +695,23 @@ export default function POS() {
         }
       }
 
-      // Create stock movements
-      const stockMovements = cart.map(item => ({
-        product_id: item.productId,
-        warehouse_id: item.isManual && extraWarehouseId ? extraWarehouseId : selectedWarehouse,
-        quantity: item.quantity,
-        movement_type: 'out',
-        reference_number: transactionNumber,
-        notes: `Credit Sale to ${selectedCustomer?.name || 'Customer'}`,
-        created_by: user?.id,
-      }));
+      // Create stock movements (convert selling units to stock units)
+      const stockMovements = cart.map(item => {
+        const product = products.find(p => p.id === item.productId);
+        const convFactor = product?.unit_conversion_factor || 1;
+        const stockUnitQty = product && product.stock_unit !== product.selling_unit
+          ? item.quantity / convFactor
+          : item.quantity;
+        return {
+          product_id: item.productId,
+          warehouse_id: item.isManual && extraWarehouseId ? extraWarehouseId : selectedWarehouse,
+          quantity: stockUnitQty,
+          movement_type: 'out',
+          reference_number: transactionNumber,
+          notes: `Credit Sale: ${item.quantity} ${item.sellingUnit || 'pc'} to ${selectedCustomer?.name || 'Customer'}`,
+          created_by: user?.id,
+        };
+      });
 
       const { error: movementError } = await supabase.from('stock_movements').insert(stockMovements);
       if (movementError) throw movementError;
@@ -844,7 +875,9 @@ export default function POS() {
                         </div>
                         <div className="space-y-1">
                           <p className="font-medium text-sm line-clamp-2 leading-tight">{product.name}</p>
-                          <p className="text-primary font-semibold text-sm">{formatAmount(product.selling_price)}</p>
+                          <p className="text-primary font-semibold text-sm">
+                            {formatAmount(product.selling_price)}/{product.selling_unit}
+                          </p>
                         </div>
                         <Badge 
                           className={`absolute top-1 right-1 text-xs ${
@@ -852,7 +885,10 @@ export default function POS() {
                             stockStatus === 'low' ? 'bg-orange-500' : 'bg-green-600'
                           }`}
                         >
-                          {product.stock}
+                          {product.stock_unit !== product.selling_unit 
+                            ? `${(product.availableInSellingUnit || 0).toFixed(0)} ${product.selling_unit}`
+                            : product.stock
+                          }
                         </Badge>
                         {stockStatus === 'low' && (
                           <AlertTriangle className="absolute top-1 left-1 h-4 w-4 text-orange-500" />
@@ -895,7 +931,9 @@ export default function POS() {
                       <div key={item.productId} className="flex items-center gap-2 p-2 bg-muted/50 rounded-lg">
                         <div className="flex-1 min-w-0">
                           <p className="font-medium text-sm truncate">{item.name}</p>
-                          <p className="text-xs text-muted-foreground">{formatAmount(item.price)} each</p>
+                          <p className="text-xs text-muted-foreground">
+                            {formatAmount(item.price)}/{item.sellingUnit || 'pc'}
+                          </p>
                         </div>
                         <div className="flex items-center gap-1">
                           <Button 
@@ -908,10 +946,11 @@ export default function POS() {
                           </Button>
                           <Input
                             type="number"
-                            min="1"
+                            min="0.01"
+                            step="0.1"
                             value={item.quantity}
-                            onChange={(e) => updateCartQuantity(item.productId, parseInt(e.target.value) || 1)}
-                            className="w-12 h-7 text-center text-sm"
+                            onChange={(e) => updateCartQuantity(item.productId, parseFloat(e.target.value) || 0.01)}
+                            className="w-14 h-7 text-center text-sm"
                           />
                           <Button 
                             variant="outline" 
