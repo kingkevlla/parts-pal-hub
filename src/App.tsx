@@ -8,30 +8,48 @@ import { Sidebar } from "@/components/layout/Sidebar";
 import { Header } from "@/components/layout/Header";
 import { AuthProvider, useAuth } from "@/contexts/AuthContext";
 import { usePermissions } from "@/hooks/usePermissions";
-import Dashboard from "./pages/Dashboard";
-import Inventory from "./pages/Inventory";
-import Categories from "./pages/Categories";
-import StockIn from "./pages/StockIn";
-import StockOut from "./pages/StockOut";
-import Suppliers from "./pages/Suppliers";
-import Customers from "./pages/Customers";
-import Reports from "./pages/Reports";
-import Settings from "./pages/Settings";
-import Auth from "./pages/Auth";
-import POS from "./pages/POS";
-import Loans from "./pages/Loans";
-import Warehouses from "./pages/Warehouses";
-import Support from "./pages/Support";
-import Transactions from "./pages/Transactions";
-import UserManagement from "./pages/UserManagement";
-import OwnerDashboard from "./pages/OwnerDashboard";
-import Expenses from "./pages/Expenses";
-import Employees from "./pages/Employees";
-import SalesHistory from "./pages/SalesHistory";
-import StockAdjustment from "./pages/StockAdjustment";
-import NotFound from "./pages/NotFound";
+import React, { Suspense } from "react";
 
-const queryClient = new QueryClient();
+// Lazy load all pages for faster initial load
+const Dashboard = React.lazy(() => import("./pages/Dashboard"));
+const Inventory = React.lazy(() => import("./pages/Inventory"));
+const Categories = React.lazy(() => import("./pages/Categories"));
+const StockIn = React.lazy(() => import("./pages/StockIn"));
+const StockOut = React.lazy(() => import("./pages/StockOut"));
+const Suppliers = React.lazy(() => import("./pages/Suppliers"));
+const Customers = React.lazy(() => import("./pages/Customers"));
+const Reports = React.lazy(() => import("./pages/Reports"));
+const Settings = React.lazy(() => import("./pages/Settings"));
+const Auth = React.lazy(() => import("./pages/Auth"));
+const POS = React.lazy(() => import("./pages/POS"));
+const Loans = React.lazy(() => import("./pages/Loans"));
+const Warehouses = React.lazy(() => import("./pages/Warehouses"));
+const Support = React.lazy(() => import("./pages/Support"));
+const Transactions = React.lazy(() => import("./pages/Transactions"));
+const UserManagement = React.lazy(() => import("./pages/UserManagement"));
+const OwnerDashboard = React.lazy(() => import("./pages/OwnerDashboard"));
+const Expenses = React.lazy(() => import("./pages/Expenses"));
+const Employees = React.lazy(() => import("./pages/Employees"));
+const SalesHistory = React.lazy(() => import("./pages/SalesHistory"));
+const StockAdjustment = React.lazy(() => import("./pages/StockAdjustment"));
+const NotFound = React.lazy(() => import("./pages/NotFound"));
+
+const PageLoader = () => (
+  <div className="flex items-center justify-center min-h-[60vh]">
+    <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
+  </div>
+);
+
+const queryClient = new QueryClient({
+  defaultOptions: {
+    queries: {
+      staleTime: 30 * 1000, // 30s before refetch
+      gcTime: 5 * 60 * 1000, // 5min cache
+      refetchOnWindowFocus: false,
+      retry: 1,
+    },
+  },
+});
 
 const ProtectedRoute = ({ children }: { children: React.ReactNode }) => {
   const { user, loading } = useAuth();
@@ -105,6 +123,7 @@ const App = () => (
       <Sonner />
       <BrowserRouter>
         <AuthProvider>
+          <Suspense fallback={<PageLoader />}>
           <Routes>
             <Route path="/auth" element={<Auth />} />
 
@@ -150,6 +169,7 @@ const App = () => (
 
             <Route path="*" element={<NotFound />} />
           </Routes>
+          </Suspense>
         </AuthProvider>
       </BrowserRouter>
     </TooltipProvider>

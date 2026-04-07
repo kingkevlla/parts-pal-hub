@@ -73,40 +73,28 @@ export default function Dashboard() {
 
   const fetchDashboardData = async () => {
     try {
-      // Fetch total products
-      const { count: productsCount } = await supabase
-        .from('products')
-        .select('*', { count: 'exact', head: true });
-
-      // Fetch stock movements for this month
-      const startOfMonth = new Date(new Date().getFullYear(), new Date().getMonth(), 1).toISOString();
-      const { data: stockMovements } = await supabase
-        .from('stock_movements')
-        .select('movement_type, quantity')
-        .gte('created_at', startOfMonth);
+      // Run all independent queries in parallel
+      const [
+        { count: productsCount },
+        { data: stockMovements },
+        { data: monthlyTransactions },
+        { count: customersCount },
+        { data: recentMovements },
+        { data: products },
+        { data: allInventory },
+      ] = await Promise.all([
+        supabase.from('products').select('*', { count: 'exact', head: true }),
+        supabase.from('stock_movements').select('movement_type, quantity').gte('created_at', new Date(new Date().getFullYear(), new Date().getMonth(), 1).toISOString()),
+        supabase.from('transactions').select('total_amount').gte('created_at', new Date(new Date().getFullYear(), new Date().getMonth(), 1).toISOString()),
+        supabase.from('customers').select('*', { count: 'exact', head: true }),
+        supabase.from('stock_movements').select('id, movement_type, quantity, created_at, products(name)').order('created_at', { ascending: false }).limit(5),
+        supabase.from('products').select('id, sku, name, min_stock_level, categories(name)'),
+        supabase.from('inventory').select('product_id, quantity'),
+      ]);
 
       const stockInMonth = stockMovements?.filter(m => m.movement_type === 'in').reduce((sum, m) => sum + (m.quantity || 0), 0) || 0;
       const stockOutMonth = stockMovements?.filter(m => m.movement_type === 'out' || m.movement_type === 'sale').reduce((sum, m) => sum + (m.quantity || 0), 0) || 0;
-
-      // Fetch monthly revenue from transactions
-      const { data: monthlyTransactions } = await supabase
-        .from('transactions')
-        .select('total_amount')
-        .gte('created_at', startOfMonth);
-
       const monthlyRevenue = monthlyTransactions?.reduce((sum, t) => sum + Number(t.total_amount || 0), 0) || 0;
-
-      // Fetch active customers count
-      const { count: customersCount } = await supabase
-        .from('customers')
-        .select('*', { count: 'exact', head: true });
-
-      // Fetch recent activity
-      const { data: recentMovements } = await supabase
-        .from('stock_movements')
-        .select('id, movement_type, quantity, created_at, products(name)')
-        .order('created_at', { ascending: false })
-        .limit(5);
 
       const activities: Activity[] = recentMovements?.map(m => ({
         id: m.id,
@@ -116,22 +104,17 @@ export default function Dashboard() {
         created_at: m.created_at || ''
       })) || [];
 
-      // Fetch low stock items
-      const { data: products } = await supabase
-        .from('products')
-        .select('id, sku, name, min_stock_level, categories(name)');
+      // Build inventory totals map (no N+1!)
+      const inventoryMap = new Map<string, number>();
+      allInventory?.forEach(inv => {
+        inventoryMap.set(inv.product_id, (inventoryMap.get(inv.product_id) || 0) + (inv.quantity || 0));
+      });
 
       const lowStock: LowStockProduct[] = [];
       if (products) {
         for (const product of products) {
-          const { data: inventory } = await supabase
-            .from('inventory')
-            .select('quantity')
-            .eq('product_id', product.id);
-
-          const totalStock = inventory?.reduce((sum, inv) => sum + (inv.quantity || 0), 0) || 0;
+          const totalStock = inventoryMap.get(product.id) || 0;
           const threshold = product.min_stock_level || settings.low_stock_threshold;
-          
           if (totalStock <= threshold) {
             lowStock.push({
               id: product.id,
