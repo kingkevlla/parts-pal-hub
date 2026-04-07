@@ -724,7 +724,10 @@ export type Database = {
           name: string
           purchase_price: number
           selling_price: number
+          selling_unit: string | null
           sku: string | null
+          stock_unit: string | null
+          unit_conversion_factor: number | null
           updated_at: string
         }
         Insert: {
@@ -740,7 +743,10 @@ export type Database = {
           name: string
           purchase_price?: number
           selling_price?: number
+          selling_unit?: string | null
           sku?: string | null
+          stock_unit?: string | null
+          unit_conversion_factor?: number | null
           updated_at?: string
         }
         Update: {
@@ -756,7 +762,10 @@ export type Database = {
           name?: string
           purchase_price?: number
           selling_price?: number
+          selling_unit?: string | null
           sku?: string | null
+          stock_unit?: string | null
+          unit_conversion_factor?: number | null
           updated_at?: string
         }
         Relationships: [
