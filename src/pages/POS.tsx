@@ -540,15 +540,23 @@ export default function POS() {
         }
       }
 
-      const stockMovements = cart.map(item => ({
-        product_id: item.productId,
-        warehouse_id: item.isManual && extraWarehouseId ? extraWarehouseId : selectedWarehouse,
-        quantity: item.quantity,
-        movement_type: 'out',
-        reference_number: transactionNumber,
-        notes: `POS Sale to ${customerName || 'Walk-in customer'}`,
-        created_by: user?.id,
-      }));
+      const stockMovements = cart.map(item => {
+        // Convert selling unit quantity to stock unit quantity for inventory
+        const product = products.find(p => p.id === item.productId);
+        const convFactor = product?.unit_conversion_factor || 1;
+        const stockUnitQty = product && product.stock_unit !== product.selling_unit
+          ? item.quantity / convFactor
+          : item.quantity;
+        return {
+          product_id: item.productId,
+          warehouse_id: item.isManual && extraWarehouseId ? extraWarehouseId : selectedWarehouse,
+          quantity: stockUnitQty,
+          movement_type: 'out',
+          reference_number: transactionNumber,
+          notes: `POS Sale: ${item.quantity} ${item.sellingUnit || 'pc'} to ${customerName || 'Walk-in customer'}`,
+          created_by: user?.id,
+        };
+      });
 
       const { error: movementError } = await supabase.from('stock_movements').insert(stockMovements);
       if (movementError) throw movementError;
