@@ -860,7 +860,9 @@ export default function POS() {
                         </div>
                         <div className="space-y-1">
                           <p className="font-medium text-sm line-clamp-2 leading-tight">{product.name}</p>
-                          <p className="text-primary font-semibold text-sm">{formatAmount(product.selling_price)}</p>
+                          <p className="text-primary font-semibold text-sm">
+                            {formatAmount(product.selling_price)}/{product.selling_unit}
+                          </p>
                         </div>
                         <Badge 
                           className={`absolute top-1 right-1 text-xs ${
@@ -868,7 +870,10 @@ export default function POS() {
                             stockStatus === 'low' ? 'bg-orange-500' : 'bg-green-600'
                           }`}
                         >
-                          {product.stock}
+                          {product.stock_unit !== product.selling_unit 
+                            ? `${(product.availableInSellingUnit || 0).toFixed(0)} ${product.selling_unit}`
+                            : product.stock
+                          }
                         </Badge>
                         {stockStatus === 'low' && (
                           <AlertTriangle className="absolute top-1 left-1 h-4 w-4 text-orange-500" />
