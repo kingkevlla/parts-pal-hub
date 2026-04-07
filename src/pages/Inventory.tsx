@@ -781,7 +781,13 @@ export default function Inventory() {
                         </td>
                         <td className="py-3 px-2">
                           <span className={product.total_stock < product.min_stock_level ? "font-medium text-destructive" : "text-green-600"}>
-                            {product.total_stock}
+                            {product.total_stock} {product.stock_unit !== product.selling_unit ? (
+                              <span className="text-xs text-muted-foreground block">
+                                = {(product.total_stock * product.unit_conversion_factor).toFixed(1)} {product.selling_unit}
+                              </span>
+                            ) : (
+                              <span className="text-xs text-muted-foreground">{product.selling_unit}</span>
+                            )}
                           </span>
                         </td>
                         <td className="py-3 px-2 font-medium">{formatAmount(product.selling_price)}</td>
