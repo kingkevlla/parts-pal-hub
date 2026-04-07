@@ -916,7 +916,9 @@ export default function POS() {
                       <div key={item.productId} className="flex items-center gap-2 p-2 bg-muted/50 rounded-lg">
                         <div className="flex-1 min-w-0">
                           <p className="font-medium text-sm truncate">{item.name}</p>
-                          <p className="text-xs text-muted-foreground">{formatAmount(item.price)} each</p>
+                          <p className="text-xs text-muted-foreground">
+                            {formatAmount(item.price)}/{item.sellingUnit || 'pc'}
+                          </p>
                         </div>
                         <div className="flex items-center gap-1">
                           <Button 
@@ -929,10 +931,11 @@ export default function POS() {
                           </Button>
                           <Input
                             type="number"
-                            min="1"
+                            min="0.01"
+                            step="0.1"
                             value={item.quantity}
-                            onChange={(e) => updateCartQuantity(item.productId, parseInt(e.target.value) || 1)}
-                            className="w-12 h-7 text-center text-sm"
+                            onChange={(e) => updateCartQuantity(item.productId, parseFloat(e.target.value) || 0.01)}
+                            className="w-14 h-7 text-center text-sm"
                           />
                           <Button 
                             variant="outline" 
