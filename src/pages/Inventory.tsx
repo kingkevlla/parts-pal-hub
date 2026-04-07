@@ -35,6 +35,9 @@ interface Product {
   categories: { name: string } | null;
   expiry_date: string | null;
   image_url: string | null;
+  stock_unit: string;
+  selling_unit: string;
+  unit_conversion_factor: number;
 }
 
 interface ProductWithStock extends Product {
@@ -248,6 +251,9 @@ export default function Inventory() {
           categories: product.categories,
           expiry_date: product.expiry_date,
           image_url: product.image_url,
+          stock_unit: (product as any).stock_unit || 'piece',
+          selling_unit: (product as any).selling_unit || 'piece',
+          unit_conversion_factor: (product as any).unit_conversion_factor || 1,
           total_stock,
           isExtra,
         };
@@ -342,6 +348,9 @@ export default function Inventory() {
         category_id: formData.get('category_id') as string || null,
         expiry_date: formData.get('expiry_date') as string || null,
         image_url: imageUrl,
+        stock_unit: formData.get('stock_unit') as string || 'piece',
+        selling_unit: formData.get('selling_unit') as string || 'piece',
+        unit_conversion_factor: parseFloat(formData.get('unit_conversion_factor') as string) || 1,
       };
 
       if (editingProduct) {
@@ -598,6 +607,67 @@ export default function Inventory() {
                     </SelectContent>
                   </Select>
                 </div>
+
+                {/* Unit Configuration */}
+                <div className="border rounded-lg p-4 space-y-3 bg-muted/30">
+                  <Label className="text-sm font-semibold">Unit Configuration</Label>
+                  <p className="text-xs text-muted-foreground">
+                    Example: Oil stored in "bido" (container), sold in "liter". 1 bido = 20 liters.
+                  </p>
+                  <div className="grid grid-cols-3 gap-3">
+                    <div className="space-y-1">
+                      <Label htmlFor="stock_unit" className="text-xs">Stock Unit</Label>
+                      <Select name="stock_unit" defaultValue={(editingProduct as any)?.stock_unit || 'piece'}>
+                        <SelectTrigger>
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="piece">Piece</SelectItem>
+                          <SelectItem value="bido">Bido (Container)</SelectItem>
+                          <SelectItem value="carton">Carton</SelectItem>
+                          <SelectItem value="box">Box</SelectItem>
+                          <SelectItem value="bag">Bag</SelectItem>
+                          <SelectItem value="bottle">Bottle</SelectItem>
+                          <SelectItem value="drum">Drum</SelectItem>
+                          <SelectItem value="kg">Kilogram</SelectItem>
+                          <SelectItem value="liter">Liter</SelectItem>
+                          <SelectItem value="meter">Meter</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <div className="space-y-1">
+                      <Label htmlFor="selling_unit" className="text-xs">Selling Unit</Label>
+                      <Select name="selling_unit" defaultValue={(editingProduct as any)?.selling_unit || 'piece'}>
+                        <SelectTrigger>
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="piece">Piece</SelectItem>
+                          <SelectItem value="liter">Liter</SelectItem>
+                          <SelectItem value="kg">Kilogram</SelectItem>
+                          <SelectItem value="gram">Gram</SelectItem>
+                          <SelectItem value="meter">Meter</SelectItem>
+                          <SelectItem value="cm">Centimeter</SelectItem>
+                          <SelectItem value="ml">Milliliter</SelectItem>
+                          <SelectItem value="unit">Unit</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <div className="space-y-1">
+                      <Label htmlFor="unit_conversion_factor" className="text-xs">Conversion Factor</Label>
+                      <Input 
+                        id="unit_conversion_factor" 
+                        name="unit_conversion_factor" 
+                        type="number" 
+                        step="0.01" 
+                        min="0.01" 
+                        defaultValue={(editingProduct as any)?.unit_conversion_factor || 1} 
+                        placeholder="e.g. 20"
+                      />
+                    </div>
+                  </div>
+                </div>
+
                 <Button type="submit" className="w-full" disabled={isLoading || isUploadingImage}>
                   {isLoading ? (isUploadingImage ? 'Uploading Image...' : 'Saving...') : editingProduct ? 'Update Product' : 'Create Product'}
                 </Button>
