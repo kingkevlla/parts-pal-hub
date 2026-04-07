@@ -357,12 +357,12 @@ export default function POS() {
 
     const currentCartQty = cart.find(i => i.productId === product.id)?.quantity || 0;
     const totalQty = currentCartQty + qty;
-    const availableStock = product.stock || 0;
+    const available = product.availableInSellingUnit || product.stock || 0;
 
-    if (availableStock < totalQty) {
+    if (available < totalQty) {
       toast({ 
         title: 'Insufficient Stock', 
-        description: `Available: ${availableStock}`, 
+        description: `Available: ${available} ${product.selling_unit}`, 
         variant: 'destructive' 
       });
       return;
@@ -383,6 +383,7 @@ export default function POS() {
         quantity: qty,
         price: product.selling_price,
         subtotal: product.selling_price * qty,
+        sellingUnit: product.selling_unit,
       }];
     });
   };
