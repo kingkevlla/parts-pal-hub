@@ -389,7 +389,7 @@ export default function POS() {
   };
 
   const updateCartQuantity = (productId: string, newQty: number) => {
-    if (newQty < 1) {
+    if (newQty < 0.01) {
       removeFromCart(productId);
       return;
     }
@@ -399,7 +399,6 @@ export default function POS() {
     if (!cartItem?.isManual) {
       const product = products.find(p => p.id === productId);
       if (!product) {
-        // Product not in inventory (e.g. loaded from pending bill) — allow free editing
         setCart(prev => prev.map(item => 
           item.productId === productId 
             ? { ...item, quantity: newQty, subtotal: newQty * item.price }
@@ -408,11 +407,11 @@ export default function POS() {
         return;
       }
 
-      const availableStock = product.stock || 0;
-      if (newQty > availableStock) {
+      const available = product.availableInSellingUnit || product.stock || 0;
+      if (newQty > available) {
         toast({ 
           title: 'Insufficient Stock', 
-          description: `Maximum available: ${availableStock}`, 
+          description: `Maximum available: ${available} ${product.selling_unit}`, 
           variant: 'destructive' 
         });
         return;
