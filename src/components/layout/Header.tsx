@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { Bell, LogOut, AlertTriangle, AlertCircle, Info, Check, RefreshCw } from 'lucide-react';
+import { ConnectionStatus } from './ConnectionStatus';
 import { Button } from '@/components/ui/button';
 import { SidebarTrigger } from '@/components/ui/sidebar';
 import { useAuth } from '@/contexts/AuthContext';
