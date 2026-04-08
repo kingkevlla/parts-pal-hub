@@ -607,12 +607,14 @@ export default function Inventory() {
                 </div>
                 <div className="grid grid-cols-3 gap-4">
                   <div className="space-y-2">
-                    <Label htmlFor="purchase_price">Purchase Price</Label>
-                    <Input id="purchase_price" name="purchase_price" type="number" step="0.01" min="0" required defaultValue={editingProduct?.purchase_price} />
+                    <Label htmlFor="purchase_price">Purchase Price (per stock unit)</Label>
+                    <Input id="purchase_price" name="purchase_price" type="number" step="0.01" min="0" required 
+                      value={formPurchasePrice} onChange={(e) => setFormPurchasePrice(e.target.value)} />
                   </div>
                   <div className="space-y-2">
-                    <Label htmlFor="selling_price">Selling Price</Label>
-                    <Input id="selling_price" name="selling_price" type="number" step="0.01" min="0" required defaultValue={editingProduct?.selling_price} />
+                    <Label htmlFor="selling_price">Selling Price (per stock unit)</Label>
+                    <Input id="selling_price" name="selling_price" type="number" step="0.01" min="0" required 
+                      value={formSellingPrice} onChange={(e) => setFormSellingPrice(e.target.value)} />
                   </div>
                   <div className="space-y-2">
                     <Label htmlFor="min_stock_level">Min Stock</Label>
@@ -688,11 +690,54 @@ export default function Inventory() {
                         type="number" 
                         step="0.01" 
                         min="0.01" 
-                        defaultValue={(editingProduct as any)?.unit_conversion_factor || 1} 
+                        value={formConversionFactor}
+                        onChange={(e) => setFormConversionFactor(e.target.value)}
                         placeholder="e.g. 20"
                       />
                     </div>
                   </div>
+                </div>
+
+                {/* Unit Price Calculator */}
+                {conversionNum > 1 && (
+                  <div className="border rounded-lg p-4 space-y-3 bg-accent/20">
+                    <div className="flex items-center gap-2">
+                      <Wand2 className="h-4 w-4 text-primary" />
+                      <Label className="text-sm font-semibold">Unit Price Calculator</Label>
+                    </div>
+                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-sm">
+                      <div className="bg-background rounded-md p-2 text-center">
+                        <p className="text-muted-foreground text-xs">Cost/Unit</p>
+                        <p className="font-semibold">{formatAmount(costPerUnit)}</p>
+                      </div>
+                      <div className="bg-background rounded-md p-2 text-center">
+                        <p className="text-muted-foreground text-xs">Sell/Unit</p>
+                        <p className="font-semibold">{formatAmount(sellingPricePerUnit)}</p>
+                      </div>
+                      <div className="bg-background rounded-md p-2 text-center">
+                        <p className="text-muted-foreground text-xs">Profit/Unit</p>
+                        <p className={`font-semibold ${profitPerUnit >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+                          {formatAmount(profitPerUnit)}
+                        </p>
+                      </div>
+                      <div className="bg-background rounded-md p-2 text-center">
+                        <p className="text-muted-foreground text-xs">Margin</p>
+                        <p className={`font-semibold ${profitMargin >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+                          {profitMargin.toFixed(1)}%
+                        </p>
+                      </div>
+                    </div>
+                    <div className="flex gap-2 flex-wrap">
+                      <p className="text-xs text-muted-foreground mr-auto self-center">Quick margin:</p>
+                      {[10, 20, 30, 50].map(m => (
+                        <Button key={m} type="button" variant="outline" size="sm" className="text-xs h-7"
+                          onClick={() => autoCalcSellingPrice(m)}>
+                          {m}% margin
+                        </Button>
+                      ))}
+                    </div>
+                  </div>
+                )}
                 </div>
 
                 <Button type="submit" className="w-full" disabled={isLoading || isUploadingImage}>
