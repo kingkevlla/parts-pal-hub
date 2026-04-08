@@ -514,16 +514,96 @@ export default function POS() {
         ? `Split: ${splitPayments.map(p => `${p.method}(${formatAmount(p.amount)})`).join(', ')}`
         : paymentMethod;
 
-      const { data: transaction, error: transactionError } = await supabase
-        .from('transactions')
-        .insert({
-          transaction_number: transactionNumber,
+      const transactionData = {
+        transaction_number: transactionNumber,
+        total_amount: getTotalAmount(),
+        payment_method: finalPaymentMethod,
+        status: 'completed',
+        notes: customerName ? `Customer: ${customerName}` : null,
+        created_by: user?.id,
+      };
+
+      // OFFLINE MODE: Queue everything for later sync
+      if (!navigator.onLine) {
+        const offlineId = `offline-${Date.now()}`;
+        await queueMutation('transactions', 'insert', { ...transactionData, id: offlineId });
+
+        const transactionItems = cart.map(item => ({
+          transaction_id: offlineId,
+          product_id: item.productId,
+          quantity: item.quantity,
+          unit_price: item.price,
+          total_price: item.subtotal,
+        }));
+        await queueMutation('transaction_items', 'insert', transactionItems);
+
+        const stockMovements = cart.map(item => {
+          const product = products.find(p => p.id === item.productId);
+          const convFactor = product?.unit_conversion_factor || 1;
+          const stockUnitQty = product && product.stock_unit !== product.selling_unit
+            ? item.quantity / convFactor
+            : item.quantity;
+          return {
+            product_id: item.productId,
+            warehouse_id: selectedWarehouse,
+            quantity: stockUnitQty,
+            movement_type: 'out',
+            reference_number: transactionNumber,
+            notes: `POS Sale (offline): ${item.quantity} ${item.sellingUnit || 'pc'} to ${customerName || 'Walk-in customer'}`,
+            created_by: user?.id,
+          };
+        });
+        await queueMutation('stock_movements', 'insert', stockMovements);
+
+        // Update local cached inventory
+        const cachedInventory = await getCachedData('inventory');
+        for (const item of cart) {
+          const product = products.find(p => p.id === item.productId);
+          const convFactor = product?.unit_conversion_factor || 1;
+          const stockUnitQty = product && product.stock_unit !== product.selling_unit
+            ? item.quantity / convFactor
+            : item.quantity;
+          const inv = cachedInventory.find((i: any) => 
+            i.product_id === item.productId && i.warehouse_id === selectedWarehouse
+          );
+          if (inv) {
+            inv.quantity = Math.max(0, (inv.quantity || 0) - stockUnitQty);
+          }
+        }
+        await cacheData('inventory', cachedInventory);
+
+        setLastSaleData({
+          id: offlineId,
+          items: cart.map(item => ({
+            name: item.name,
+            quantity: item.quantity,
+            unit_price: item.price,
+            subtotal: item.subtotal,
+          })),
           total_amount: getTotalAmount(),
           payment_method: finalPaymentMethod,
-          status: 'completed',
-          notes: customerName ? `Customer: ${customerName}` : null,
-          created_by: user?.id,
-        })
+          customer_name: customerName,
+          customer_phone: customerPhone,
+          sale_date: new Date().toISOString(),
+        });
+
+        setShowReceipt(true);
+        setShowSplitPayment(false);
+        setSplitPayments([]);
+        toast({ title: 'Sale Saved Offline', description: 'Will sync automatically when internet returns' });
+        setCart([]);
+        setCustomerName('');
+        setCustomerPhone('');
+        setPaymentMethod('cash');
+        fetchProductsWithStock();
+        setIsProcessing(false);
+        return;
+      }
+
+      // ONLINE MODE: Normal processing
+      const { data: transaction, error: transactionError } = await supabase
+        .from('transactions')
+        .insert(transactionData)
         .select()
         .single();
 
@@ -578,7 +658,6 @@ export default function POS() {
       }
 
       const stockMovements = cart.map(item => {
-        // Convert selling unit quantity to stock unit quantity for inventory
         const product = products.find(p => p.id === item.productId);
         const convFactor = product?.unit_conversion_factor || 1;
         const stockUnitQty = product && product.stock_unit !== product.selling_unit
