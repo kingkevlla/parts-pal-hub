@@ -1,4 +1,6 @@
 import { useState, useEffect } from 'react';
+import { useOnlineStatus } from '@/hooks/useOnlineStatus';
+import { getCachedData, queueMutation, cacheData } from '@/lib/offlineDb';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -162,30 +164,56 @@ export default function POS() {
   }, [selectedWarehouse]);
 
   const fetchProductsWithStock = async () => {
-    const { data: productsData, error: productsError } = await supabase
-      .from('products')
-      .select('id, name, sku, barcode, selling_price, min_stock_level, image_url, stock_unit, selling_unit, unit_conversion_factor')
-      .eq('is_active', true)
-      .order('name');
+    const isOnline = navigator.onLine;
     
-    if (productsError) return;
+    let productsData: any[] = [];
+    let inventoryData: any[] = [];
 
-    let inventoryQuery = supabase.from('inventory').select('product_id, quantity');
-    if (selectedWarehouse !== 'all') {
-      inventoryQuery = inventoryQuery.eq('warehouse_id', selectedWarehouse);
+    if (isOnline) {
+      const { data: pData, error: productsError } = await supabase
+        .from('products')
+        .select('id, name, sku, barcode, selling_price, min_stock_level, image_url, stock_unit, selling_unit, unit_conversion_factor')
+        .eq('is_active', true)
+        .order('name');
+      
+      if (productsError) {
+        // Fall back to cache on error
+        productsData = await getCachedData('products');
+        inventoryData = await getCachedData('inventory');
+      } else {
+        productsData = pData || [];
+        let inventoryQuery = supabase.from('inventory').select('product_id, quantity, warehouse_id');
+        if (selectedWarehouse !== 'all') {
+          inventoryQuery = inventoryQuery.eq('warehouse_id', selectedWarehouse);
+        }
+        const { data: iData } = await inventoryQuery;
+        inventoryData = iData || [];
+        
+        // Cache for offline use
+        await cacheData('products', productsData);
+        if (selectedWarehouse === 'all') {
+          await cacheData('inventory', inventoryData);
+        }
+      }
+    } else {
+      // Offline: use cached data
+      productsData = await getCachedData('products');
+      const allInventory = await getCachedData('inventory');
+      inventoryData = selectedWarehouse === 'all' 
+        ? allInventory 
+        : allInventory.filter((i: any) => i.warehouse_id === selectedWarehouse);
     }
-    const { data: inventoryData } = await inventoryQuery;
 
     const stockMap = new Map<string, number>();
-    (inventoryData || []).forEach(i => {
+    (inventoryData || []).forEach((i: any) => {
       stockMap.set(i.product_id, (stockMap.get(i.product_id) || 0) + (i.quantity || 0));
     });
     
-    const productsWithStock = (productsData || []).map(p => {
+    const productsWithStock = (productsData || []).map((p: any) => {
       const rawStock = stockMap.get(p.id) || 0;
-      const stockUnit = (p as any).stock_unit || 'piece';
-      const sellingUnit = (p as any).selling_unit || 'piece';
-      const convFactor = (p as any).unit_conversion_factor || 1;
+      const stockUnit = p.stock_unit || 'piece';
+      const sellingUnit = p.selling_unit || 'piece';
+      const convFactor = p.unit_conversion_factor || 1;
       const availableInSellingUnit = stockUnit !== sellingUnit ? rawStock * convFactor : rawStock;
       return {
         ...p,
@@ -201,9 +229,18 @@ export default function POS() {
   };
 
   const fetchWarehouses = async () => {
-    const { data, error } = await supabase.from('warehouses').select('*').eq('is_active', true).order('name');
-    if (!error) {
-      setWarehouses(data || []);
+    if (navigator.onLine) {
+      const { data, error } = await supabase.from('warehouses').select('*').eq('is_active', true).order('name');
+      if (!error && data) {
+        setWarehouses(data);
+        await cacheData('warehouses', data);
+      } else {
+        const cached = await getCachedData('warehouses');
+        setWarehouses(cached as any);
+      }
+    } else {
+      const cached = await getCachedData('warehouses');
+      setWarehouses(cached as any);
     }
   };
 
@@ -477,16 +514,96 @@ export default function POS() {
         ? `Split: ${splitPayments.map(p => `${p.method}(${formatAmount(p.amount)})`).join(', ')}`
         : paymentMethod;
 
-      const { data: transaction, error: transactionError } = await supabase
-        .from('transactions')
-        .insert({
-          transaction_number: transactionNumber,
+      const transactionData = {
+        transaction_number: transactionNumber,
+        total_amount: getTotalAmount(),
+        payment_method: finalPaymentMethod,
+        status: 'completed',
+        notes: customerName ? `Customer: ${customerName}` : null,
+        created_by: user?.id,
+      };
+
+      // OFFLINE MODE: Queue everything for later sync
+      if (!navigator.onLine) {
+        const offlineId = `offline-${Date.now()}`;
+        await queueMutation('transactions', 'insert', { ...transactionData, id: offlineId });
+
+        const transactionItems = cart.map(item => ({
+          transaction_id: offlineId,
+          product_id: item.productId,
+          quantity: item.quantity,
+          unit_price: item.price,
+          total_price: item.subtotal,
+        }));
+        await queueMutation('transaction_items', 'insert', transactionItems);
+
+        const stockMovements = cart.map(item => {
+          const product = products.find(p => p.id === item.productId);
+          const convFactor = product?.unit_conversion_factor || 1;
+          const stockUnitQty = product && product.stock_unit !== product.selling_unit
+            ? item.quantity / convFactor
+            : item.quantity;
+          return {
+            product_id: item.productId,
+            warehouse_id: selectedWarehouse,
+            quantity: stockUnitQty,
+            movement_type: 'out',
+            reference_number: transactionNumber,
+            notes: `POS Sale (offline): ${item.quantity} ${item.sellingUnit || 'pc'} to ${customerName || 'Walk-in customer'}`,
+            created_by: user?.id,
+          };
+        });
+        await queueMutation('stock_movements', 'insert', stockMovements);
+
+        // Update local cached inventory
+        const cachedInventory = await getCachedData('inventory');
+        for (const item of cart) {
+          const product = products.find(p => p.id === item.productId);
+          const convFactor = product?.unit_conversion_factor || 1;
+          const stockUnitQty = product && product.stock_unit !== product.selling_unit
+            ? item.quantity / convFactor
+            : item.quantity;
+          const inv = cachedInventory.find((i: any) => 
+            i.product_id === item.productId && i.warehouse_id === selectedWarehouse
+          );
+          if (inv) {
+            inv.quantity = Math.max(0, (inv.quantity || 0) - stockUnitQty);
+          }
+        }
+        await cacheData('inventory', cachedInventory);
+
+        setLastSaleData({
+          id: offlineId,
+          items: cart.map(item => ({
+            name: item.name,
+            quantity: item.quantity,
+            unit_price: item.price,
+            subtotal: item.subtotal,
+          })),
           total_amount: getTotalAmount(),
           payment_method: finalPaymentMethod,
-          status: 'completed',
-          notes: customerName ? `Customer: ${customerName}` : null,
-          created_by: user?.id,
-        })
+          customer_name: customerName,
+          customer_phone: customerPhone,
+          sale_date: new Date().toISOString(),
+        });
+
+        setShowReceipt(true);
+        setShowSplitPayment(false);
+        setSplitPayments([]);
+        toast({ title: 'Sale Saved Offline', description: 'Will sync automatically when internet returns' });
+        setCart([]);
+        setCustomerName('');
+        setCustomerPhone('');
+        setPaymentMethod('cash');
+        fetchProductsWithStock();
+        setIsProcessing(false);
+        return;
+      }
+
+      // ONLINE MODE: Normal processing
+      const { data: transaction, error: transactionError } = await supabase
+        .from('transactions')
+        .insert(transactionData)
         .select()
         .single();
 
@@ -541,7 +658,6 @@ export default function POS() {
       }
 
       const stockMovements = cart.map(item => {
-        // Convert selling unit quantity to stock unit quantity for inventory
         const product = products.find(p => p.id === item.productId);
         const convFactor = product?.unit_conversion_factor || 1;
         const stockUnitQty = product && product.stock_unit !== product.selling_unit

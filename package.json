@@ -51,6 +51,7 @@
     "electron": "^39.2.5",
     "electron-builder": "^26.0.12",
     "embla-carousel-react": "^8.6.0",
+    "idb": "8.0.2",
     "input-otp": "^1.4.2",
     "lucide-react": "^0.462.0",
     "next-themes": "^0.3.0",
