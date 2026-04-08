@@ -90,6 +90,25 @@ export default function Inventory() {
   const [imageFile, setImageFile] = useState<File | null>(null);
   const [imagePreview, setImagePreview] = useState<string | null>(null);
   const [isUploadingImage, setIsUploadingImage] = useState(false);
+  const [formPurchasePrice, setFormPurchasePrice] = useState<string>('0');
+  const [formSellingPrice, setFormSellingPrice] = useState<string>('0');
+  const [formConversionFactor, setFormConversionFactor] = useState<string>('1');
+
+  // Auto-calculated values
+  const purchaseNum = parseFloat(formPurchasePrice) || 0;
+  const conversionNum = parseFloat(formConversionFactor) || 1;
+  const sellingNum = parseFloat(formSellingPrice) || 0;
+  const costPerUnit = conversionNum > 0 ? purchaseNum / conversionNum : 0;
+  const sellingPricePerUnit = conversionNum > 0 ? sellingNum / conversionNum : 0;
+  const profitPerUnit = sellingPricePerUnit - costPerUnit;
+  const profitMargin = sellingPricePerUnit > 0 ? (profitPerUnit / sellingPricePerUnit) * 100 : 0;
+
+  const autoCalcSellingPrice = (margin: number) => {
+    if (costPerUnit > 0 && margin > 0) {
+      const newSellingPerUnit = costPerUnit / (1 - margin / 100);
+      setFormSellingPrice((newSellingPerUnit * conversionNum).toFixed(2));
+    }
+  };
   const fileInputRef = useRef<HTMLInputElement>(null);
   const { toast } = useToast();
   const { formatAmount } = useCurrency();
