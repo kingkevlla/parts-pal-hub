@@ -738,7 +738,6 @@ export default function Inventory() {
                     </div>
                   </div>
                 )}
-                </div>
 
                 <Button type="submit" className="w-full" disabled={isLoading || isUploadingImage}>
                   {isLoading ? (isUploadingImage ? 'Uploading Image...' : 'Saving...') : editingProduct ? 'Update Product' : 'Create Product'}
