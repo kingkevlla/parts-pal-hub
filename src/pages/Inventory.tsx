@@ -410,6 +410,9 @@ export default function Inventory() {
     setFormSku('');
     setImageFile(null);
     setImagePreview(null);
+    setFormPurchasePrice('0');
+    setFormSellingPrice('0');
+    setFormConversionFactor('1');
     if (fileInputRef.current) fileInputRef.current.value = '';
   };
 
