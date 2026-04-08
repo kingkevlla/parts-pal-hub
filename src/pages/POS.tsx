@@ -229,9 +229,18 @@ export default function POS() {
   };
 
   const fetchWarehouses = async () => {
-    const { data, error } = await supabase.from('warehouses').select('*').eq('is_active', true).order('name');
-    if (!error) {
-      setWarehouses(data || []);
+    if (navigator.onLine) {
+      const { data, error } = await supabase.from('warehouses').select('*').eq('is_active', true).order('name');
+      if (!error && data) {
+        setWarehouses(data);
+        await cacheData('warehouses', data);
+      } else {
+        const cached = await getCachedData('warehouses');
+        setWarehouses(cached as any);
+      }
+    } else {
+      const cached = await getCachedData('warehouses');
+      setWarehouses(cached as any);
     }
   };
 
