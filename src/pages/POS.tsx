@@ -164,30 +164,56 @@ export default function POS() {
   }, [selectedWarehouse]);
 
   const fetchProductsWithStock = async () => {
-    const { data: productsData, error: productsError } = await supabase
-      .from('products')
-      .select('id, name, sku, barcode, selling_price, min_stock_level, image_url, stock_unit, selling_unit, unit_conversion_factor')
-      .eq('is_active', true)
-      .order('name');
+    const isOnline = navigator.onLine;
     
-    if (productsError) return;
+    let productsData: any[] = [];
+    let inventoryData: any[] = [];
 
-    let inventoryQuery = supabase.from('inventory').select('product_id, quantity');
-    if (selectedWarehouse !== 'all') {
-      inventoryQuery = inventoryQuery.eq('warehouse_id', selectedWarehouse);
+    if (isOnline) {
+      const { data: pData, error: productsError } = await supabase
+        .from('products')
+        .select('id, name, sku, barcode, selling_price, min_stock_level, image_url, stock_unit, selling_unit, unit_conversion_factor')
+        .eq('is_active', true)
+        .order('name');
+      
+      if (productsError) {
+        // Fall back to cache on error
+        productsData = await getCachedData('products');
+        inventoryData = await getCachedData('inventory');
+      } else {
+        productsData = pData || [];
+        let inventoryQuery = supabase.from('inventory').select('product_id, quantity, warehouse_id');
+        if (selectedWarehouse !== 'all') {
+          inventoryQuery = inventoryQuery.eq('warehouse_id', selectedWarehouse);
+        }
+        const { data: iData } = await inventoryQuery;
+        inventoryData = iData || [];
+        
+        // Cache for offline use
+        await cacheData('products', productsData);
+        if (selectedWarehouse === 'all') {
+          await cacheData('inventory', inventoryData);
+        }
+      }
+    } else {
+      // Offline: use cached data
+      productsData = await getCachedData('products');
+      const allInventory = await getCachedData('inventory');
+      inventoryData = selectedWarehouse === 'all' 
+        ? allInventory 
+        : allInventory.filter((i: any) => i.warehouse_id === selectedWarehouse);
     }
-    const { data: inventoryData } = await inventoryQuery;
 
     const stockMap = new Map<string, number>();
-    (inventoryData || []).forEach(i => {
+    (inventoryData || []).forEach((i: any) => {
       stockMap.set(i.product_id, (stockMap.get(i.product_id) || 0) + (i.quantity || 0));
     });
     
-    const productsWithStock = (productsData || []).map(p => {
+    const productsWithStock = (productsData || []).map((p: any) => {
       const rawStock = stockMap.get(p.id) || 0;
-      const stockUnit = (p as any).stock_unit || 'piece';
-      const sellingUnit = (p as any).selling_unit || 'piece';
-      const convFactor = (p as any).unit_conversion_factor || 1;
+      const stockUnit = p.stock_unit || 'piece';
+      const sellingUnit = p.selling_unit || 'piece';
+      const convFactor = p.unit_conversion_factor || 1;
       const availableInSellingUnit = stockUnit !== sellingUnit ? rawStock * convFactor : rawStock;
       return {
         ...p,
