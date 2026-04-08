@@ -1,4 +1,6 @@
 import { useState, useEffect } from 'react';
+import { useOnlineStatus } from '@/hooks/useOnlineStatus';
+import { getCachedData, queueMutation, cacheData } from '@/lib/offlineDb';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
