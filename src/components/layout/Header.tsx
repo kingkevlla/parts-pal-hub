@@ -92,6 +92,9 @@ export function Header() {
         </p>
       </div>
 
+      {/* Connection Status */}
+      <ConnectionStatus />
+
       {/* Notifications */}
       <DropdownMenu>
         <DropdownMenuTrigger asChild>
