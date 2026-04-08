@@ -419,7 +419,12 @@ export default function Inventory() {
   const handleEdit = (product: ProductWithStock) => {
     setEditingProduct(product);
     setFormSku(product.sku || '');
+    setFormPurchasePrice(String(product.purchase_price || 0));
+    setFormSellingPrice(String(product.selling_price || 0));
+    setFormConversionFactor(String(product.unit_conversion_factor || 1));
     setImagePreview(product.image_url);
+    setIsOpen(true);
+  };
     setIsOpen(true);
   };
 
