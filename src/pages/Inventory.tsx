@@ -535,9 +535,17 @@ export default function Inventory() {
       )}
 
       <div className="flex items-center justify-between flex-wrap gap-4">
-        <div>
-          <h1 className="text-3xl font-bold">Inventory</h1>
-          <p className="text-muted-foreground">Manage all products in stock</p>
+        <div className="flex items-center gap-3">
+          <div>
+            <h1 className="text-3xl font-bold">Inventory</h1>
+            <p className="text-muted-foreground">Manage all products in stock</p>
+          </div>
+          {isOfflineData && (
+            <Badge variant="outline" className="gap-1 border-warning text-warning">
+              <WifiOff className="h-3 w-3" />
+              Offline
+            </Badge>
+          )}
         </div>
         <div className="flex gap-2 flex-wrap">
           <BarcodeScanner onProductFound={handleBarcodeFound} />
