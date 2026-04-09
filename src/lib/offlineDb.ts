@@ -103,7 +103,9 @@ export async function getOfflineDb() {
 }
 
 // Cache data locally
-export async function cacheData(table: keyof Omit<OfflineSchema, 'pending_mutations' | 'sync_meta'>, data: any[]) {
+type CacheTable = 'categories' | 'customers' | 'inventory' | 'products' | 'stock_movements' | 'transaction_items' | 'transactions' | 'warehouses';
+
+export async function cacheData(table: CacheTable, data: any[]) {
   const db = await getOfflineDb();
   const tx = db.transaction(table, 'readwrite');
   const store = tx.objectStore(table);
@@ -117,12 +119,12 @@ export async function cacheData(table: keyof Omit<OfflineSchema, 'pending_mutati
 
   // Update sync timestamp
   const metaTx = db.transaction('sync_meta', 'readwrite');
-  await metaTx.objectStore('sync_meta').put({ key: table, lastSync: Date.now() });
+  await metaTx.objectStore('sync_meta').put({ key: table as string, lastSync: Date.now() });
   await metaTx.done;
 }
 
 // Get cached data
-export async function getCachedData(table: keyof Omit<OfflineSchema, 'pending_mutations' | 'sync_meta'>) {
+export async function getCachedData(table: CacheTable) {
   const db = await getOfflineDb();
   return db.getAll(table);
 }
