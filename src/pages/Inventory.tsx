@@ -1,7 +1,8 @@
 import { useState, useEffect, useRef } from "react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Plus, Pencil, Trash2, AlertTriangle, Upload, X, RefreshCw, Image, Wand2, PackagePlus, ArrowRightLeft } from "lucide-react";
+import { Plus, Pencil, Trash2, AlertTriangle, Upload, X, RefreshCw, Image, Wand2, PackagePlus, ArrowRightLeft, WifiOff } from "lucide-react";
+import { getCachedData, cacheData } from "@/lib/offlineDb";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { compressImage, generateSKU } from "@/lib/imageCompression";
 import { Badge } from "@/components/ui/badge";
