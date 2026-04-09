@@ -94,6 +94,7 @@ export default function Inventory() {
   const [formPurchasePrice, setFormPurchasePrice] = useState<string>('0');
   const [formSellingPrice, setFormSellingPrice] = useState<string>('0');
   const [formConversionFactor, setFormConversionFactor] = useState<string>('1');
+  const [isOfflineData, setIsOfflineData] = useState(false);
 
   // Auto-calculated values
   const purchaseNum = parseFloat(formPurchasePrice) || 0;
