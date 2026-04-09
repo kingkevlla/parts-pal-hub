@@ -226,7 +226,49 @@ export default function Inventory() {
   };
 
   const fetchProducts = async () => {
-    // Fetch the Extra warehouse ID
+    const isOnline = navigator.onLine;
+
+    if (!isOnline) {
+      // Load from cache when offline
+      try {
+        const cachedProducts = await getCachedData('products');
+        const cachedInventory = await getCachedData('inventory');
+
+        const inventoryMap = new Map<string, number>();
+        (cachedInventory as any[]).forEach((inv: any) => {
+          inventoryMap.set(inv.product_id, (inventoryMap.get(inv.product_id) || 0) + (inv.quantity || 0));
+        });
+
+        const productsWithStock = (cachedProducts as any[]).map((product: any) => ({
+          id: product.id,
+          name: product.name,
+          sku: product.sku,
+          barcode: product.barcode,
+          description: product.description,
+          purchase_price: product.purchase_price || 0,
+          selling_price: product.selling_price || 0,
+          min_stock_level: product.min_stock_level || 0,
+          category_id: product.category_id,
+          categories: null,
+          expiry_date: product.expiry_date,
+          image_url: product.image_url,
+          stock_unit: product.stock_unit || 'piece',
+          selling_unit: product.selling_unit || 'piece',
+          unit_conversion_factor: product.unit_conversion_factor || 1,
+          total_stock: inventoryMap.get(product.id) || 0,
+          isExtra: false,
+        }));
+
+        setProducts(productsWithStock);
+        setIsOfflineData(true);
+      } catch (err) {
+        console.error('[Offline] Failed to load cached inventory:', err);
+        toast({ title: 'Offline', description: 'No cached inventory data available', variant: 'destructive' });
+      }
+      return;
+    }
+
+    // Online: fetch from Supabase
     const { data: extraWarehouse } = await supabase
       .from('warehouses')
       .select('id')
@@ -245,43 +287,52 @@ export default function Inventory() {
       return;
     }
 
-    const productsWithStock = await Promise.all(
-      (productsData || []).map(async (product) => {
-        const { data: inventoryData } = await supabase
-          .from('inventory')
-          .select('quantity, warehouse_id')
-          .eq('product_id', product.id);
+    // Cache products for offline use
+    if (productsData) await cacheData('products', productsData);
 
-        const total_stock = inventoryData?.reduce((sum, inv) => sum + (inv.quantity || 0), 0) || 0;
+    const { data: allInventory } = await supabase.from('inventory').select('product_id, quantity, warehouse_id');
+    if (allInventory) await cacheData('inventory', allInventory);
 
-        // A product is "extra" if it ONLY exists in the Extra warehouse
-        const isExtra = extraWarehouseId
-          ? (inventoryData || []).length > 0 && (inventoryData || []).every(inv => inv.warehouse_id === extraWarehouseId)
-          : false;
+    const inventoryMap = new Map<string, { total: number; entries: any[] }>();
+    (allInventory || []).forEach(inv => {
+      const existing = inventoryMap.get(inv.product_id) || { total: 0, entries: [] };
+      existing.total += inv.quantity || 0;
+      existing.entries.push(inv);
+      inventoryMap.set(inv.product_id, existing);
+    });
 
-        return {
-          id: product.id,
-          name: product.name,
-          sku: product.sku,
-          barcode: product.barcode,
-          description: product.description,
-          purchase_price: product.purchase_price || 0,
-          selling_price: product.selling_price || 0,
-          min_stock_level: product.min_stock_level || 0,
-          category_id: product.category_id,
-          categories: product.categories,
-          expiry_date: product.expiry_date,
-          image_url: product.image_url,
-          stock_unit: (product as any).stock_unit || 'piece',
-          selling_unit: (product as any).selling_unit || 'piece',
-          unit_conversion_factor: (product as any).unit_conversion_factor || 1,
-          total_stock,
-          isExtra,
-        };
-      })
-    );
+    const productsWithStock = (productsData || []).map((product) => {
+      const invData = inventoryMap.get(product.id);
+      const total_stock = invData?.total || 0;
+      const entries = invData?.entries || [];
+
+      const isExtra = extraWarehouseId
+        ? entries.length > 0 && entries.every((inv: any) => inv.warehouse_id === extraWarehouseId)
+        : false;
+
+      return {
+        id: product.id,
+        name: product.name,
+        sku: product.sku,
+        barcode: product.barcode,
+        description: product.description,
+        purchase_price: product.purchase_price || 0,
+        selling_price: product.selling_price || 0,
+        min_stock_level: product.min_stock_level || 0,
+        category_id: product.category_id,
+        categories: product.categories,
+        expiry_date: product.expiry_date,
+        image_url: product.image_url,
+        stock_unit: (product as any).stock_unit || 'piece',
+        selling_unit: (product as any).selling_unit || 'piece',
+        unit_conversion_factor: (product as any).unit_conversion_factor || 1,
+        total_stock,
+        isExtra,
+      };
+    });
 
     setProducts(productsWithStock);
+    setIsOfflineData(false);
   };
 
   const fetchCategories = async () => {
