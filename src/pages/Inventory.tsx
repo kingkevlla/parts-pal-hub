@@ -425,8 +425,6 @@ export default function Inventory() {
     setImagePreview(product.image_url);
     setIsOpen(true);
   };
-    setIsOpen(true);
-  };
 
   const handleDelete = async () => {
     if (!deleteProduct) return;
