@@ -7,7 +7,7 @@ import { cacheData, getCachedData, queueMutation, type CacheTable } from '@/lib/
  */
 export async function offlineQuery<T = any>(
   table: CacheTable,
-  queryFn?: () => Promise<{ data: T[] | null; error: any }>,
+  queryFn?: () => PromiseLike<{ data: T[] | null; error: any }>,
   options?: { cacheResult?: boolean }
 ): Promise<{ data: T[]; isOffline: boolean }> {
   const isOnline = navigator.onLine;
