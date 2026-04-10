@@ -40,20 +40,12 @@ export default function Transactions() {
   }, []);
 
   const fetchTransactions = async () => {
-    const { data, error } = await supabase
-      .from('transactions')
-      .select('*')
-      .order('created_at', { ascending: false });
-
-    if (error) {
-      toast({
-        title: 'Error',
-        description: error.message,
-        variant: 'destructive',
-      });
-    } else {
-      setTransactions(data || []);
-    }
+    const result = await offlineQuery('transactions', () =>
+      supabase.from('transactions').select('*').order('created_at', { ascending: false })
+    );
+    setTransactions(result.data || []);
+    setIsOffline(result.isOffline);
+  };
   };
 
   const getTotalSales = () => {
