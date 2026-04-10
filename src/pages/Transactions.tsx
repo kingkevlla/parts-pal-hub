@@ -46,7 +46,6 @@ export default function Transactions() {
     setTransactions(result.data || []);
     setIsOffline(result.isOffline);
   };
-  };
 
   const getTotalSales = () => {
     return transactions
