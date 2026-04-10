@@ -3,10 +3,11 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Badge } from '@/components/ui/badge';
 import { useToast } from '@/hooks/use-toast';
-import { TrendingUp, DollarSign, CreditCard } from 'lucide-react';
+import { TrendingUp, DollarSign, CreditCard, WifiOff } from 'lucide-react';
 import { supabase } from '@/integrations/supabase/client';
 import { useCurrency } from '@/hooks/useCurrency';
 import { Checkbox } from '@/components/ui/checkbox';
+import { offlineQuery } from '@/lib/offlineHelpers';
 import { useDataTable } from '@/hooks/useDataTable';
 import { DataTableSearch, DataTablePagination, SelectAllCheckbox } from '@/components/ui/data-table-controls';
 
@@ -24,6 +25,7 @@ interface Transaction {
 
 export default function Transactions() {
   const [transactions, setTransactions] = useState<Transaction[]>([]);
+  const [isOffline, setIsOffline] = useState(false);
   const { toast } = useToast();
   const { formatAmount } = useCurrency();
 
