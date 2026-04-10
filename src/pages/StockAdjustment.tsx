@@ -9,6 +9,8 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Badge } from "@/components/ui/badge";
 import { useToast } from "@/hooks/use-toast";
 import { supabase } from "@/integrations/supabase/client";
+import { offlineQuery } from "@/lib/offlineHelpers";
+import { getCachedData } from "@/lib/offlineDb";
 import { usePermissions } from "@/hooks/usePermissions";
 import { useAuth } from "@/contexts/AuthContext";
 import { useDataTable } from "@/hooks/useDataTable";
@@ -71,37 +73,48 @@ export default function StockAdjustment() {
   }, []);
 
   const fetchWarehouses = async () => {
-    const { data } = await supabase
-      .from("warehouses")
-      .select("id, name")
-      .eq("is_active", true)
-      .order("name");
-    setWarehouses(data || []);
+    const result = await offlineQuery('warehouses', () =>
+      supabase.from("warehouses").select("id, name").eq("is_active", true).order("name")
+    );
+    setWarehouses(result.data || []);
   };
 
   const fetchInventory = async () => {
     setLoadingData(true);
-    const { data, error } = await supabase
-      .from("inventory")
-      .select("id, product_id, quantity, warehouse_id, products(name), warehouses(name)")
-      .order("quantity", { ascending: true });
+    if (navigator.onLine) {
+      const { data, error } = await supabase
+        .from("inventory")
+        .select("id, product_id, quantity, warehouse_id, products(name), warehouses(name)")
+        .order("quantity", { ascending: true });
 
-    if (error) {
-      toast({ title: "Error", description: error.message, variant: "destructive" });
-      setLoadingData(false);
-      return;
+      if (error) {
+        toast({ title: "Error", description: error.message, variant: "destructive" });
+        setLoadingData(false);
+        return;
+      }
+
+      const rows: InventoryRow[] = (data || []).map((row: any) => ({
+        id: row.id, product_id: row.product_id,
+        product_name: row.products?.name || "Unknown",
+        warehouse_id: row.warehouse_id,
+        warehouse_name: row.warehouses?.name || "Unknown",
+        quantity: row.quantity,
+      }));
+      setInventoryRows(rows);
+    } else {
+      const [inventory, products, warehouses] = await Promise.all([
+        getCachedData('inventory'), getCachedData('products'), getCachedData('warehouses')
+      ]);
+      const pMap = new Map(products.map((p: any) => [p.id, p.name]));
+      const wMap = new Map(warehouses.map((w: any) => [w.id, w.name]));
+      setInventoryRows(inventory.map((row: any) => ({
+        id: row.id, product_id: row.product_id,
+        product_name: pMap.get(row.product_id) || "Unknown",
+        warehouse_id: row.warehouse_id,
+        warehouse_name: wMap.get(row.warehouse_id) || "Unknown",
+        quantity: row.quantity,
+      })));
     }
-
-    const rows: InventoryRow[] = (data || []).map((row: any) => ({
-      id: row.id,
-      product_id: row.product_id,
-      product_name: row.products?.name || "Unknown",
-      warehouse_id: row.warehouse_id,
-      warehouse_name: row.warehouses?.name || "Unknown",
-      quantity: row.quantity,
-    }));
-
-    setInventoryRows(rows);
     setLoadingData(false);
   };
 
