@@ -10,6 +10,8 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { useToast } from '@/hooks/use-toast';
 import { Plus, DollarSign } from 'lucide-react';
 import { supabase } from '@/integrations/supabase/client';
+import { offlineQuery } from '@/lib/offlineHelpers';
+import { getCachedData } from '@/lib/offlineDb';
 import { useAuth } from '@/contexts/AuthContext';
 import { useCurrency } from '@/hooks/useCurrency';
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog';
@@ -59,41 +61,42 @@ export default function Loans() {
   }, []);
 
   const fetchLoans = async () => {
-    const { data, error } = await supabase
-      .from('loans')
-      .select('*, customers(id, name, phone)')
-      .order('created_at', { ascending: false });
+    if (navigator.onLine) {
+      const { data, error } = await supabase
+        .from('loans')
+        .select('*, customers(id, name, phone)')
+        .order('created_at', { ascending: false });
 
-    if (error) {
-      toast({
-        title: 'Error',
-        description: error.message,
-        variant: 'destructive',
-      });
+      if (!error) {
+        const formattedLoans: Loan[] = (data || []).map(loan => ({
+          id: loan.id, customer_id: loan.customer_id, amount: loan.amount,
+          paid_amount: loan.paid_amount || 0, status: loan.status || 'pending',
+          due_date: loan.due_date, notes: loan.notes, created_at: loan.created_at || '',
+          customer: loan.customers as Customer | null,
+          customer_name: (loan.customers as Customer | null)?.name || 'Unknown'
+        }));
+        setLoans(formattedLoans);
+      }
     } else {
-      const formattedLoans: Loan[] = (data || []).map(loan => ({
-        id: loan.id,
-        customer_id: loan.customer_id,
-        amount: loan.amount,
-        paid_amount: loan.paid_amount || 0,
-        status: loan.status || 'pending',
-        due_date: loan.due_date,
-        notes: loan.notes,
-        created_at: loan.created_at || '',
-        customer: loan.customers as Customer | null,
-        customer_name: (loan.customers as Customer | null)?.name || 'Unknown'
+      const cached = await getCachedData('loans');
+      const customers = await getCachedData('customers');
+      const cMap = new Map(customers.map((c: any) => [c.id, c]));
+      const formattedLoans: Loan[] = (cached || []).map((loan: any) => ({
+        id: loan.id, customer_id: loan.customer_id, amount: loan.amount,
+        paid_amount: loan.paid_amount || 0, status: loan.status || 'pending',
+        due_date: loan.due_date, notes: loan.notes, created_at: loan.created_at || '',
+        customer: cMap.get(loan.customer_id) || null,
+        customer_name: cMap.get(loan.customer_id)?.name || 'Unknown'
       }));
       setLoans(formattedLoans);
     }
   };
 
   const fetchCustomers = async () => {
-    const { data, error } = await supabase
-      .from('customers')
-      .select('id, name, phone')
-      .order('name');
-
-    if (!error) setCustomers(data || []);
+    const result = await offlineQuery('customers', () =>
+      supabase.from('customers').select('id, name, phone').order('name')
+    );
+    setCustomers(result.data || []);
   };
 
   const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {

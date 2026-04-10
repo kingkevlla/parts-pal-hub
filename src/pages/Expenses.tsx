@@ -13,6 +13,7 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useToast } from "@/hooks/use-toast";
 import { supabase } from "@/integrations/supabase/client";
+import { offlineQuery } from "@/lib/offlineHelpers";
 import { useCurrency } from "@/hooks/useCurrency";
 import { useDataTable } from "@/hooks/useDataTable";
 import { DataTableSearch, DataTablePagination, DataTableBulkActions, SelectAllCheckbox } from "@/components/ui/data-table-controls";
@@ -93,27 +94,24 @@ export default function Expenses() {
   }, []);
 
   const fetchExpenses = async () => {
-    const { data, error } = await supabase
-      .from('expenses')
-      .select('*, expense_categories(name)')
-      .order('expense_date', { ascending: false });
-    if (!error) setExpenses(data || []);
+    const result = await offlineQuery('expenses', () =>
+      supabase.from('expenses').select('*, expense_categories(name)').order('expense_date', { ascending: false })
+    );
+    setExpenses(result.data || []);
   };
 
   const fetchCategories = async () => {
-    const { data, error } = await supabase
-      .from('expense_categories')
-      .select('*')
-      .order('name');
-    if (!error) setCategories(data || []);
+    const result = await offlineQuery('expense_categories', () =>
+      supabase.from('expense_categories').select('*').order('name')
+    );
+    setCategories(result.data || []);
   };
 
   const fetchBudgets = async () => {
-    const { data, error } = await supabase
-      .from('budgets')
-      .select('*, expense_categories(name)')
-      .order('period_start', { ascending: false });
-    if (!error) setBudgets(data || []);
+    const result = await offlineQuery('budgets', () =>
+      supabase.from('budgets').select('*, expense_categories(name)').order('period_start', { ascending: false })
+    );
+    setBudgets(result.data || []);
   };
 
   const handleReceiptChange = (e: React.ChangeEvent<HTMLInputElement>) => {

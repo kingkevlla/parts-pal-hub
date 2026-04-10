@@ -14,6 +14,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { useToast } from "@/hooks/use-toast";
 import { supabase } from "@/integrations/supabase/client";
+import { offlineQuery } from "@/lib/offlineHelpers";
 import { useCurrency } from "@/hooks/useCurrency";
 import { useDataTable } from "@/hooks/useDataTable";
 import { DataTableSearch, DataTablePagination, DataTableBulkActions, SelectAllCheckbox } from "@/components/ui/data-table-controls";
@@ -139,41 +140,38 @@ export default function Employees() {
   }, []);
 
   const fetchEmployees = async () => {
-    const { data, error } = await supabase.from('employees').select('*').order('first_name');
-    if (!error) setEmployees(data || []);
+    const result = await offlineQuery('employees', () =>
+      supabase.from('employees').select('*').order('first_name')
+    );
+    setEmployees(result.data || []);
   };
 
   const fetchAttendance = async () => {
-    const { data, error } = await supabase
-      .from('employee_attendance')
-      .select('*, employees(first_name, last_name)')
-      .order('date', { ascending: false })
-      .limit(100);
-    if (!error) setAttendance(data || []);
+    const result = await offlineQuery('employee_attendance', () =>
+      supabase.from('employee_attendance').select('*, employees(first_name, last_name)').order('date', { ascending: false }).limit(100)
+    );
+    setAttendance(result.data || []);
   };
 
   const fetchLeaves = async () => {
-    const { data, error } = await supabase
-      .from('employee_leave')
-      .select('*, employees(first_name, last_name)')
-      .order('created_at', { ascending: false });
-    if (!error) setLeaves(data || []);
+    const result = await offlineQuery('employee_leave', () =>
+      supabase.from('employee_leave').select('*, employees(first_name, last_name)').order('created_at', { ascending: false })
+    );
+    setLeaves(result.data || []);
   };
 
   const fetchPayrolls = async () => {
-    const { data, error } = await supabase
-      .from('employee_payroll')
-      .select('*, employees(first_name, last_name)')
-      .order('pay_period_start', { ascending: false });
-    if (!error) setPayrolls(data || []);
+    const result = await offlineQuery('employee_payroll', () =>
+      supabase.from('employee_payroll').select('*, employees(first_name, last_name)').order('pay_period_start', { ascending: false })
+    );
+    setPayrolls(result.data || []);
   };
 
   const fetchEmployeeLoans = async () => {
-    const { data, error } = await supabase
-      .from('employee_loans')
-      .select('*, employees(first_name, last_name)')
-      .order('created_at', { ascending: false });
-    if (!error) setEmployeeLoans((data as any) || []);
+    const result = await offlineQuery('employee_loans', () =>
+      supabase.from('employee_loans').select('*, employees(first_name, last_name)').order('created_at', { ascending: false })
+    );
+    setEmployeeLoans((result.data as any) || []);
   };
 
   const fetchLoanPayments = async (loanId: string) => {
