@@ -31,7 +31,7 @@ export default function Customers() {
 
   const fetchCustomers = async () => {
     try {
-      const result = await offlineQuery('customers', () =>
+      const result = await offlineQuery('customers', async () =>
         supabase.from("customers").select("*").order("created_at", { ascending: false })
       );
       setCustomers(result.data || []);
