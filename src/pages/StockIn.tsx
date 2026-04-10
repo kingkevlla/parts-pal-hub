@@ -8,6 +8,8 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { useToast } from "@/hooks/use-toast";
 import { Plus, Trash2 } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
+import { offlineQuery } from "@/lib/offlineHelpers";
+import { getCachedData } from "@/lib/offlineDb";
 import { useAuth } from "@/contexts/AuthContext";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -58,36 +60,49 @@ export default function StockIn() {
   }, []);
 
   const fetchStockMovements = async () => {
-    const { data, error } = await supabase
-      .from('stock_movements')
-      .select('id, created_at, reference_number, notes, quantity, movement_type, products(name), warehouses(name)')
-      .eq('movement_type', 'in')
-      .order('created_at', { ascending: false });
+    if (navigator.onLine) {
+      const { data, error } = await supabase
+        .from('stock_movements')
+        .select('id, created_at, reference_number, notes, quantity, movement_type, products(name), warehouses(name)')
+        .eq('movement_type', 'in')
+        .order('created_at', { ascending: false });
 
-    if (error) {
-      toast({ title: 'Error', description: error.message, variant: 'destructive' });
+      if (!error) {
+        const movements: StockMovement[] = (data || []).map(m => ({
+          id: m.id, created_at: m.created_at, reference_number: m.reference_number,
+          notes: m.notes, quantity: m.quantity,
+          product_name: (m.products as any)?.name || 'Unknown',
+          warehouse_name: (m.warehouses as any)?.name || 'Unknown'
+        }));
+        setStockMovements(movements);
+      }
     } else {
-      const movements: StockMovement[] = (data || []).map(m => ({
-        id: m.id,
-        created_at: m.created_at,
-        reference_number: m.reference_number,
-        notes: m.notes,
-        quantity: m.quantity,
-        product_name: (m.products as any)?.name || 'Unknown',
-        warehouse_name: (m.warehouses as any)?.name || 'Unknown'
-      }));
-      setStockMovements(movements);
+      const cached = await getCachedData('stock_movements');
+      const products = await getCachedData('products');
+      const warehouses = await getCachedData('warehouses');
+      const pMap = new Map(products.map((p: any) => [p.id, p.name]));
+      const wMap = new Map(warehouses.map((w: any) => [w.id, w.name]));
+      setStockMovements(cached.filter((m: any) => m.movement_type === 'in').map((m: any) => ({
+        id: m.id, created_at: m.created_at, reference_number: m.reference_number,
+        notes: m.notes, quantity: m.quantity,
+        product_name: pMap.get(m.product_id) || 'Unknown',
+        warehouse_name: wMap.get(m.warehouse_id) || 'Unknown',
+      })));
     }
   };
 
   const fetchProducts = async () => {
-    const { data, error } = await supabase.from('products').select('id, name, sku').order('name');
-    if (!error) setProducts(data || []);
+    const result = await offlineQuery('products', () =>
+      supabase.from('products').select('id, name, sku').order('name')
+    );
+    setProducts(result.data || []);
   };
 
   const fetchWarehouses = async () => {
-    const { data, error } = await supabase.from('warehouses').select('id, name').order('name');
-    if (!error) setWarehouses(data || []);
+    const result = await offlineQuery('warehouses', () =>
+      supabase.from('warehouses').select('id, name').order('name')
+    );
+    setWarehouses(result.data || []);
   };
 
   const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
