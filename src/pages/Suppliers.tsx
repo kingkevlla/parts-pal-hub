@@ -1,9 +1,11 @@
 import { useState, useEffect } from "react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Plus, Mail, Phone, Edit, Trash2 } from "lucide-react";
+import { Plus, Mail, Phone, Edit, Trash2, WifiOff } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
+import { Badge } from "@/components/ui/badge";
+import { offlineQuery } from "@/lib/offlineHelpers";
 import AddEditSupplierDialog from "@/components/suppliers/AddEditSupplierDialog";
 import DeleteSupplierDialog from "@/components/suppliers/DeleteSupplierDialog";
 
@@ -19,6 +21,7 @@ interface Supplier {
 export default function Suppliers() {
   const [suppliers, setSuppliers] = useState<Supplier[]>([]);
   const [loading, setLoading] = useState(true);
+  const [isOffline, setIsOffline] = useState(false);
   const [addDialogOpen, setAddDialogOpen] = useState(false);
   const [editDialogOpen, setEditDialogOpen] = useState(false);
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
@@ -27,19 +30,13 @@ export default function Suppliers() {
 
   const fetchSuppliers = async () => {
     try {
-      const { data, error } = await supabase
-        .from("suppliers")
-        .select("id, name, contact_person, email, phone, address")
-        .order("created_at", { ascending: false });
-
-      if (error) throw error;
-      setSuppliers(data || []);
+      const result = await offlineQuery('suppliers', () =>
+        supabase.from("suppliers").select("id, name, contact_person, email, phone, address").order("created_at", { ascending: false })
+      );
+      setSuppliers(result.data || []);
+      setIsOffline(result.isOffline);
     } catch (error: any) {
-      toast({
-        title: "Error",
-        description: error.message,
-        variant: "destructive",
-      });
+      toast({ title: "Error", description: error.message, variant: "destructive" });
     } finally {
       setLoading(false);
     }
@@ -66,10 +63,17 @@ export default function Suppliers() {
           <h1 className="text-3xl font-bold">Suppliers</h1>
           <p className="text-muted-foreground">Manage your supplier relationships</p>
         </div>
-        <Button className="gap-2" onClick={() => setAddDialogOpen(true)}>
-          <Plus className="h-4 w-4" />
-          Add Supplier
-        </Button>
+        <div className="flex items-center gap-2">
+          {isOffline && (
+            <Badge variant="outline" className="gap-1 border-warning text-warning">
+              <WifiOff className="h-3 w-3" /> Offline
+            </Badge>
+          )}
+          <Button className="gap-2" onClick={() => setAddDialogOpen(true)}>
+            <Plus className="h-4 w-4" />
+            Add Supplier
+          </Button>
+        </div>
       </div>
 
       {loading ? (
