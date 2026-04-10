@@ -6,8 +6,10 @@ import { Label } from '@/components/ui/label';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { useToast } from '@/hooks/use-toast';
-import { Plus, Warehouse } from 'lucide-react';
+import { Plus, Warehouse, WifiOff } from 'lucide-react';
 import { supabase } from '@/integrations/supabase/client';
+import { Badge } from '@/components/ui/badge';
+import { offlineQuery } from '@/lib/offlineHelpers';
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog';
 
 interface WarehouseData {
@@ -21,6 +23,7 @@ export default function Warehouses() {
   const [warehouses, setWarehouses] = useState<WarehouseData[]>([]);
   const [isOpen, setIsOpen] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
+  const [isOffline, setIsOffline] = useState(false);
   const [editingWarehouse, setEditingWarehouse] = useState<WarehouseData | null>(null);
   const [deleteWarehouse, setDeleteWarehouse] = useState<WarehouseData | null>(null);
   const { toast } = useToast();
@@ -30,20 +33,11 @@ export default function Warehouses() {
   }, []);
 
   const fetchWarehouses = async () => {
-    const { data, error } = await supabase
-      .from('warehouses')
-      .select('*')
-      .order('created_at', { ascending: false });
-
-    if (error) {
-      toast({
-        title: 'Error',
-        description: error.message,
-        variant: 'destructive',
-      });
-    } else {
-      setWarehouses(data || []);
-    }
+    const result = await offlineQuery('warehouses', () =>
+      supabase.from('warehouses').select('*').order('created_at', { ascending: false })
+    );
+    setWarehouses(result.data || []);
+    setIsOffline(result.isOffline);
   };
 
   const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
