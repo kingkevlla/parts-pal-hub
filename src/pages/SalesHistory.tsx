@@ -9,6 +9,7 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { ShoppingCart, DollarSign, TrendingUp, Calendar, Eye, Receipt } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { supabase } from "@/integrations/supabase/client";
+import { getCachedData } from "@/lib/offlineDb";
 import { useCurrency } from "@/hooks/useCurrency";
 import { useDataTable } from "@/hooks/useDataTable";
 import { DataTableSearch, DataTablePagination, SelectAllCheckbox } from "@/components/ui/data-table-controls";
@@ -90,23 +91,34 @@ export default function SalesHistory() {
   };
 
   const fetchTransactions = async () => {
-    let query = supabase
-      .from('transactions')
-      .select('*, customers(name, phone)')
-      .order('created_at', { ascending: false });
+    if (navigator.onLine) {
+      let query = supabase
+        .from('transactions')
+        .select('*, customers(name, phone)')
+        .order('created_at', { ascending: false });
 
-    const dateRange = getDateRange();
-    if (dateRange) {
-      query = query
-        .gte('created_at', dateRange.start.toISOString())
-        .lte('created_at', dateRange.end.toISOString());
-    }
+      const dateRange = getDateRange();
+      if (dateRange) {
+        query = query
+          .gte('created_at', dateRange.start.toISOString())
+          .lte('created_at', dateRange.end.toISOString());
+      }
 
-    const { data, error } = await query;
-    if (error) {
-      toast({ title: 'Error', description: error.message, variant: 'destructive' });
+      const { data, error } = await query;
+      if (!error) setTransactions(data || []);
     } else {
-      setTransactions(data || []);
+      const cached = await getCachedData('transactions');
+      const dateRange = getDateRange();
+      let filtered = cached;
+      if (dateRange) {
+        filtered = cached.filter((t: any) => {
+          const d = new Date(t.created_at);
+          return d >= dateRange.start && d <= dateRange.end;
+        });
+      }
+      setTransactions(filtered.sort((a: any, b: any) => 
+        new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
+      ));
     }
   };
 

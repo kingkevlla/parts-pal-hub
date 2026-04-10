@@ -1,10 +1,12 @@
 import { useState, useEffect } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { Plus, Mail, Phone, Edit, Trash2 } from "lucide-react";
+import { Plus, Mail, Phone, Edit, Trash2, WifiOff } from "lucide-react";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
+import { Badge } from "@/components/ui/badge";
+import { offlineQuery } from "@/lib/offlineHelpers";
 import AddEditCustomerDialog from "@/components/customers/AddEditCustomerDialog";
 import DeleteCustomerDialog from "@/components/customers/DeleteCustomerDialog";
 
@@ -20,6 +22,7 @@ interface Customer {
 export default function Customers() {
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [loading, setLoading] = useState(true);
+  const [isOffline, setIsOffline] = useState(false);
   const [addDialogOpen, setAddDialogOpen] = useState(false);
   const [editDialogOpen, setEditDialogOpen] = useState(false);
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
@@ -28,19 +31,13 @@ export default function Customers() {
 
   const fetchCustomers = async () => {
     try {
-      const { data, error } = await supabase
-        .from("customers")
-        .select("*")
-        .order("created_at", { ascending: false });
-
-      if (error) throw error;
-      setCustomers(data || []);
+      const result = await offlineQuery('customers', async () =>
+        supabase.from("customers").select("*").order("created_at", { ascending: false })
+      );
+      setCustomers(result.data || []);
+      setIsOffline(result.isOffline);
     } catch (error: any) {
-      toast({
-        title: "Error",
-        description: error.message,
-        variant: "destructive",
-      });
+      toast({ title: "Error", description: error.message, variant: "destructive" });
     } finally {
       setLoading(false);
     }
@@ -67,10 +64,17 @@ export default function Customers() {
           <h1 className="text-3xl font-bold">Customers</h1>
           <p className="text-muted-foreground">Manage customer information and purchase history</p>
         </div>
-        <Button className="gap-2" onClick={() => setAddDialogOpen(true)}>
-          <Plus className="h-4 w-4" />
-          Add Customer
-        </Button>
+        <div className="flex items-center gap-2">
+          {isOffline && (
+            <Badge variant="outline" className="gap-1 border-warning text-warning">
+              <WifiOff className="h-3 w-3" /> Offline
+            </Badge>
+          )}
+          <Button className="gap-2" onClick={() => setAddDialogOpen(true)}>
+            <Plus className="h-4 w-4" />
+            Add Customer
+          </Button>
+        </div>
       </div>
 
       <Card>

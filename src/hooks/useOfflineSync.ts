@@ -9,10 +9,20 @@ import {
   markMutationSynced,
   clearSyncedMutations,
   getPendingCount,
+  type CacheTable,
 } from '@/lib/offlineDb';
 import { toast } from 'sonner';
 
-const CACHE_TABLES = ['products', 'inventory', 'categories', 'warehouses', 'customers'] as const;
+const CACHE_TABLES: CacheTable[] = [
+  'products', 'inventory', 'categories', 'warehouses', 'customers',
+  'suppliers', 'transactions', 'transaction_items', 'stock_movements',
+  'employees', 'employee_attendance', 'employee_leave',
+  'employee_loans', 'employee_loan_payments', 'employee_payroll',
+  'expenses', 'expense_categories', 'budgets',
+  'loans', 'loan_payments',
+  'pending_bills', 'pending_bill_items',
+  'profiles', 'user_roles', 'system_settings',
+];
 
 export function useOfflineSync() {
   const isOnline = useOnlineStatus();
@@ -20,7 +30,6 @@ export function useOfflineSync() {
   const [isSyncing, setIsSyncing] = useState(false);
   const syncIntervalRef = useRef<NodeJS.Timeout | null>(null);
 
-  // Refresh pending count
   const refreshPendingCount = useCallback(async () => {
     const count = await getPendingCount();
     setPendingCount(count);
@@ -31,13 +40,21 @@ export function useOfflineSync() {
     if (!isOnline) return;
 
     try {
-      const promises = CACHE_TABLES.map(async (table) => {
-        const { data, error } = await supabase.from(table).select('*');
-        if (!error && data) {
-          await cacheData(table, data);
-        }
-      });
-      await Promise.all(promises);
+      // Batch in groups of 5 to avoid overwhelming the connection
+      for (let i = 0; i < CACHE_TABLES.length; i += 5) {
+        const batch = CACHE_TABLES.slice(i, i + 5);
+        const promises = batch.map(async (table) => {
+          try {
+            const { data, error } = await supabase.from(table as any).select('*');
+            if (!error && data) {
+              await cacheData(table, data);
+            }
+          } catch {
+            // Skip individual table errors
+          }
+        });
+        await Promise.all(promises);
+      }
       console.log('[Offline] All data cached successfully');
     } catch (err) {
       console.error('[Offline] Cache error:', err);
@@ -47,7 +64,7 @@ export function useOfflineSync() {
   // Sync pending mutations to Supabase
   const syncPendingMutations = useCallback(async () => {
     if (!isOnline || isSyncing) return;
-    
+
     const mutations = await getPendingMutations();
     if (mutations.length === 0) return;
 
@@ -59,7 +76,7 @@ export function useOfflineSync() {
       try {
         let result;
         const table = mutation.table as any;
-        
+
         switch (mutation.operation) {
           case 'insert':
             result = await supabase.from(table).insert(mutation.data);
@@ -94,7 +111,6 @@ export function useOfflineSync() {
 
     if (syncedCount > 0) {
       toast.success(`Synced ${syncedCount} offline changes`);
-      // Re-cache fresh data after sync
       await cacheAllData();
     }
     if (failedCount > 0) {

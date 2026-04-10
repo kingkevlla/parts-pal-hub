@@ -6,11 +6,13 @@ import { Label } from '@/components/ui/label';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { useToast } from '@/hooks/use-toast';
-import { Plus, Pencil, Trash2, FolderOpen } from 'lucide-react';
+import { Plus, Pencil, Trash2, FolderOpen, WifiOff } from 'lucide-react';
 import { supabase } from '@/integrations/supabase/client';
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog';
 import { Textarea } from '@/components/ui/textarea';
 import { Checkbox } from '@/components/ui/checkbox';
+import { Badge } from '@/components/ui/badge';
+import { offlineQuery } from '@/lib/offlineHelpers';
 import { useDataTable } from '@/hooks/useDataTable';
 import { DataTableSearch, DataTablePagination, DataTableBulkActions, SelectAllCheckbox } from '@/components/ui/data-table-controls';
 
@@ -25,6 +27,7 @@ export default function Categories() {
   const [categories, setCategories] = useState<Category[]>([]);
   const [isOpen, setIsOpen] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
+  const [isOffline, setIsOffline] = useState(false);
   const [editingCategory, setEditingCategory] = useState<Category | null>(null);
   const [deleteCategory, setDeleteCategory] = useState<Category | null>(null);
   const { toast } = useToast();
@@ -40,16 +43,11 @@ export default function Categories() {
   }, []);
 
   const fetchCategories = async () => {
-    const { data, error } = await supabase
-      .from('categories')
-      .select('*')
-      .order('name');
-
-    if (error) {
-      toast({ title: 'Error', description: error.message, variant: 'destructive' });
-    } else {
-      setCategories(data || []);
-    }
+    const result = await offlineQuery('categories', () =>
+      supabase.from('categories').select('*').order('name')
+    );
+    setCategories(result.data || []);
+    setIsOffline(result.isOffline);
   };
 
   const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {

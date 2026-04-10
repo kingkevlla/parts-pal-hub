@@ -245,20 +245,33 @@ export default function POS() {
   };
 
   const fetchLoans = async () => {
-    const { data, error } = await supabase
-      .from('loans')
-      .select('*, customers(name, phone)')
-      .in('status', ['pending', 'partial'])
-      .order('due_date', { ascending: true });
-    if (!error) setLoans(data || []);
+    if (navigator.onLine) {
+      const { data, error } = await supabase
+        .from('loans')
+        .select('*, customers(name, phone)')
+        .in('status', ['pending', 'partial'])
+        .order('due_date', { ascending: true });
+      if (!error) setLoans(data || []);
+    } else {
+      const cached = await getCachedData('loans');
+      setLoans(cached.filter((l: any) => l.status === 'pending' || l.status === 'partial') as any);
+    }
   };
 
   const fetchCustomers = async () => {
-    const { data, error } = await supabase
-      .from('customers')
-      .select('id, name, phone')
-      .order('name');
-    if (!error) setCustomers(data || []);
+    if (navigator.onLine) {
+      const { data, error } = await supabase
+        .from('customers')
+        .select('id, name, phone')
+        .order('name');
+      if (!error) {
+        setCustomers(data || []);
+        await cacheData('customers', data || []);
+      }
+    } else {
+      const cached = await getCachedData('customers');
+      setCustomers(cached as any);
+    }
   };
 
   const fetchLoanPayments = async (loanId: string) => {

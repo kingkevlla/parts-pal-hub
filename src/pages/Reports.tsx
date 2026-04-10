@@ -12,6 +12,7 @@ import {
   UserCheck, ShoppingCart, FileText, Download, Filter, Activity,
 } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
+import { getCachedData } from "@/lib/offlineDb";
 import { useToast } from "@/hooks/use-toast";
 import { useCurrency } from "@/hooks/useCurrency";
 import { useSystemSettings } from "@/hooks/useSystemSettings";
@@ -109,9 +110,13 @@ export default function Reports() {
 
   // Fetch profiles once
   useEffect(() => {
-    supabase.from("profiles").select("user_id, full_name").then(({ data }) => {
-      if (data) setProfiles(data);
-    });
+    if (navigator.onLine) {
+      supabase.from("profiles").select("user_id, full_name").then(({ data }) => {
+        if (data) setProfiles(data);
+      });
+    } else {
+      getCachedData('profiles').then(data => setProfiles(data as any));
+    }
   }, []);
 
   // Fetch report data when filters change
@@ -124,47 +129,80 @@ export default function Reports() {
   const fetchData = async () => {
     setLoading(true);
     try {
-      const applyDateFilter = (query: any, col = "created_at") => {
+      if (navigator.onLine) {
+        const applyDateFilter = (query: any, col = "created_at") => {
+          if (dateRange) {
+            query = query.gte(col, dateRange.start.toISOString()).lte(col, dateRange.end.toISOString());
+          }
+          return query;
+        };
+
+        let txQuery = supabase.from("transactions").select("id, transaction_number, total_amount, payment_method, status, created_at, created_by, customer_id, discount_amount, tax_amount, customers(name)");
+        txQuery = applyDateFilter(txQuery);
+
+        let smQuery = supabase.from("stock_movements").select("id, movement_type, quantity, created_at, created_by, notes, products(name), warehouses(name)");
+        smQuery = applyDateFilter(smQuery);
+
+        let exQuery = supabase.from("expenses").select("id, description, amount, expense_date, status, category_id, created_by, expense_categories(name)");
         if (dateRange) {
-          query = query.gte(col, dateRange.start.toISOString()).lte(col, dateRange.end.toISOString());
+          exQuery = exQuery.gte("expense_date", format(dateRange.start, "yyyy-MM-dd")).lte("expense_date", format(dateRange.end, "yyyy-MM-dd"));
         }
-        return query;
-      };
 
-      // Run ALL queries in parallel
-      let txQuery = supabase.from("transactions").select("id, transaction_number, total_amount, payment_method, status, created_at, created_by, customer_id, discount_amount, tax_amount, customers(name)");
-      txQuery = applyDateFilter(txQuery);
+        const [
+          { data: txData }, { data: smData }, { data: exData },
+          { count: pc }, { count: cc }, { count: sc },
+        ] = await Promise.all([
+          txQuery.order("created_at", { ascending: false }),
+          smQuery.order("created_at", { ascending: false }),
+          exQuery.order("expense_date", { ascending: false }),
+          supabase.from("products").select("*", { count: "exact", head: true }),
+          supabase.from("customers").select("*", { count: "exact", head: true }),
+          supabase.from("suppliers").select("*", { count: "exact", head: true }),
+        ]);
 
-      let smQuery = supabase.from("stock_movements").select("id, movement_type, quantity, created_at, created_by, notes, products(name), warehouses(name)");
-      smQuery = applyDateFilter(smQuery);
+        setTransactions(txData || []);
+        setStockMovements(smData || []);
+        setExpenses(exData || []);
+        setProductCount(pc || 0);
+        setCustomerCount(cc || 0);
+        setSupplierCount(sc || 0);
+      } else {
+        // Offline: use cached data
+        const [txData, smData, exData, products, customers, suppliers] = await Promise.all([
+          getCachedData('transactions'),
+          getCachedData('stock_movements'),
+          getCachedData('expenses'),
+          getCachedData('products'),
+          getCachedData('customers'),
+          getCachedData('suppliers'),
+        ]);
 
-      let exQuery = supabase.from("expenses").select("id, description, amount, expense_date, status, category_id, created_by, expense_categories(name)");
-      if (dateRange) {
-        exQuery = exQuery.gte("expense_date", format(dateRange.start, "yyyy-MM-dd")).lte("expense_date", format(dateRange.end, "yyyy-MM-dd"));
+        let filteredTx = txData;
+        let filteredSm = smData;
+        let filteredEx = exData;
+
+        if (dateRange) {
+          filteredTx = txData.filter((t: any) => {
+            const d = new Date(t.created_at);
+            return d >= dateRange.start && d <= dateRange.end;
+          });
+          filteredSm = smData.filter((m: any) => {
+            const d = new Date(m.created_at);
+            return d >= dateRange.start && d <= dateRange.end;
+          });
+          filteredEx = exData.filter((e: any) => {
+            const d = new Date(e.expense_date);
+            return d >= dateRange.start && d <= dateRange.end;
+          });
+        }
+
+        setTransactions(filteredTx as any);
+        setStockMovements(filteredSm as any);
+        setExpenses(filteredEx as any);
+        setProductCount(products.length);
+        setCustomerCount(customers.length);
+        setSupplierCount(suppliers.length);
       }
-
-      const [
-        { data: txData },
-        { data: smData },
-        { data: exData },
-        { count: pc },
-        { count: cc },
-        { count: sc },
-      ] = await Promise.all([
-        txQuery.order("created_at", { ascending: false }),
-        smQuery.order("created_at", { ascending: false }),
-        exQuery.order("expense_date", { ascending: false }),
-        supabase.from("products").select("*", { count: "exact", head: true }),
-        supabase.from("customers").select("*", { count: "exact", head: true }),
-        supabase.from("suppliers").select("*", { count: "exact", head: true }),
-      ]);
-
-      setTransactions(txData || []);
-      setStockMovements(smData || []);
-      setExpenses(exData || []);
-      setProductCount(pc || 0);
-      setCustomerCount(cc || 0);
-      setSupplierCount(sc || 0);
     } catch (err: any) {
       toast({ title: "Error loading reports", description: err.message, variant: "destructive" });
     } finally {
