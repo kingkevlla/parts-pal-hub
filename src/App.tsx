@@ -8,6 +8,7 @@ import { Sidebar } from "@/components/layout/Sidebar";
 import { Header } from "@/components/layout/Header";
 import { AuthProvider, useAuth } from "@/contexts/AuthContext";
 import { usePermissions } from "@/hooks/usePermissions";
+import { OfflineBanner } from "@/components/layout/OfflineBanner";
 import React, { Suspense } from "react";
 
 // Lazy load all pages for faster initial load
