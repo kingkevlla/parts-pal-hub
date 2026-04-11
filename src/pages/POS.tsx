@@ -6,9 +6,8 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { useToast } from '@/hooks/use-toast';
-import { Trash2, AlertTriangle, Minus, Plus, Package, CreditCard, Banknote, Smartphone, Building2, X, Split, Wallet, Calendar, CheckCircle, UserPlus, Percent, ClipboardList } from 'lucide-react';
+import { Trash2, AlertTriangle, Minus, Plus, Package, CreditCard, Banknote, Smartphone, Building2, X, Split, Wallet, Calendar, CheckCircle, UserPlus, Percent, ClipboardList, ShoppingCart, ChevronUp, Search } from 'lucide-react';
 import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from '@/contexts/AuthContext';
 import { useCurrency } from '@/hooks/useCurrency';
@@ -23,6 +22,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { format, addDays } from 'date-fns';
 import PendingBills from '@/components/pos/PendingBills';
 import ManualItemEntry from '@/components/pos/ManualItemEntry';
+import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetTrigger } from '@/components/ui/sheet';
 
 interface CartItem {
   productId: string;
@@ -86,20 +86,13 @@ interface Customer {
   phone: string | null;
 }
 
-// Fuzzy search function
 const fuzzySearch = (text: string, query: string): boolean => {
   const textLower = text.toLowerCase();
   const queryLower = query.toLowerCase();
-  
-  // Direct includes
   if (textLower.includes(queryLower)) return true;
-  
-  // Fuzzy match - check if all characters appear in order
   let queryIndex = 0;
   for (let i = 0; i < textLower.length && queryIndex < queryLower.length; i++) {
-    if (textLower[i] === queryLower[queryIndex]) {
-      queryIndex++;
-    }
+    if (textLower[i] === queryLower[queryIndex]) queryIndex++;
   }
   return queryIndex === queryLower.length;
 };
@@ -127,19 +120,17 @@ export default function POS() {
   const [loanPaymentAmount, setLoanPaymentAmount] = useState('');
   const [loanPaymentMethod, setLoanPaymentMethod] = useState('cash');
   const [loanPayments, setLoanPayments] = useState<LoanPayment[]>([]);
-  // Credit sale state
   const [showCreditDialog, setShowCreditDialog] = useState(false);
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [selectedCustomerId, setSelectedCustomerId] = useState('');
   const [creditDueDays, setCreditDueDays] = useState('30');
   const [creditInterestRate, setCreditInterestRate] = useState('0');
   const [customerSearchQuery, setCustomerSearchQuery] = useState('');
-  // Quick customer creation
   const [showNewCustomerForm, setShowNewCustomerForm] = useState(false);
   const [newCustomerName, setNewCustomerName] = useState('');
   const [newCustomerPhone, setNewCustomerPhone] = useState('');
-  // Pending bill tracking
   const [activePendingBillId, setActivePendingBillId] = useState<string | null>(null);
+  const [mobileCartOpen, setMobileCartOpen] = useState(false);
   const { toast } = useToast();
   const { user } = useAuth();
   const { formatAmount } = useCurrency();
@@ -148,8 +139,8 @@ export default function POS() {
   const paymentMethods = [
     { value: 'cash', label: 'Cash', icon: Banknote },
     { value: 'card', label: 'Card', icon: CreditCard },
-    { value: 'mobile_money', label: 'Mobile Money', icon: Smartphone },
-    { value: 'bank_transfer', label: 'Bank Transfer', icon: Building2 },
+    { value: 'mobile_money', label: 'M-Money', icon: Smartphone },
+    { value: 'bank_transfer', label: 'Bank', icon: Building2 },
     { value: 'credit', label: 'Credit', icon: Wallet },
   ];
 
@@ -165,7 +156,6 @@ export default function POS() {
 
   const fetchProductsWithStock = async () => {
     const isOnline = navigator.onLine;
-    
     let productsData: any[] = [];
     let inventoryData: any[] = [];
 
@@ -175,82 +165,50 @@ export default function POS() {
         .select('id, name, sku, barcode, selling_price, min_stock_level, image_url, stock_unit, selling_unit, unit_conversion_factor')
         .eq('is_active', true)
         .order('name');
-      
       if (productsError) {
-        // Fall back to cache on error
         productsData = await getCachedData('products');
         inventoryData = await getCachedData('inventory');
       } else {
         productsData = pData || [];
         let inventoryQuery = supabase.from('inventory').select('product_id, quantity, warehouse_id');
-        if (selectedWarehouse !== 'all') {
-          inventoryQuery = inventoryQuery.eq('warehouse_id', selectedWarehouse);
-        }
+        if (selectedWarehouse !== 'all') inventoryQuery = inventoryQuery.eq('warehouse_id', selectedWarehouse);
         const { data: iData } = await inventoryQuery;
         inventoryData = iData || [];
-        
-        // Cache for offline use
         await cacheData('products', productsData);
-        if (selectedWarehouse === 'all') {
-          await cacheData('inventory', inventoryData);
-        }
+        if (selectedWarehouse === 'all') await cacheData('inventory', inventoryData);
       }
     } else {
-      // Offline: use cached data
       productsData = await getCachedData('products');
       const allInventory = await getCachedData('inventory');
-      inventoryData = selectedWarehouse === 'all' 
-        ? allInventory 
-        : allInventory.filter((i: any) => i.warehouse_id === selectedWarehouse);
+      inventoryData = selectedWarehouse === 'all' ? allInventory : allInventory.filter((i: any) => i.warehouse_id === selectedWarehouse);
     }
 
     const stockMap = new Map<string, number>();
     (inventoryData || []).forEach((i: any) => {
       stockMap.set(i.product_id, (stockMap.get(i.product_id) || 0) + (i.quantity || 0));
     });
-    
     const productsWithStock = (productsData || []).map((p: any) => {
       const rawStock = stockMap.get(p.id) || 0;
       const stockUnit = p.stock_unit || 'piece';
       const sellingUnit = p.selling_unit || 'piece';
       const convFactor = p.unit_conversion_factor || 1;
       const availableInSellingUnit = stockUnit !== sellingUnit ? rawStock * convFactor : rawStock;
-      return {
-        ...p,
-        stock: rawStock,
-        stock_unit: stockUnit,
-        selling_unit: sellingUnit,
-        unit_conversion_factor: convFactor,
-        availableInSellingUnit,
-      };
+      return { ...p, stock: rawStock, stock_unit: stockUnit, selling_unit: sellingUnit, unit_conversion_factor: convFactor, availableInSellingUnit };
     });
-
     setProducts(productsWithStock);
   };
 
   const fetchWarehouses = async () => {
     if (navigator.onLine) {
       const { data, error } = await supabase.from('warehouses').select('*').eq('is_active', true).order('name');
-      if (!error && data) {
-        setWarehouses(data);
-        await cacheData('warehouses', data);
-      } else {
-        const cached = await getCachedData('warehouses');
-        setWarehouses(cached as any);
-      }
-    } else {
-      const cached = await getCachedData('warehouses');
-      setWarehouses(cached as any);
-    }
+      if (!error && data) { setWarehouses(data); await cacheData('warehouses', data); }
+      else { setWarehouses(await getCachedData('warehouses') as any); }
+    } else { setWarehouses(await getCachedData('warehouses') as any); }
   };
 
   const fetchLoans = async () => {
     if (navigator.onLine) {
-      const { data, error } = await supabase
-        .from('loans')
-        .select('*, customers(name, phone)')
-        .in('status', ['pending', 'partial'])
-        .order('due_date', { ascending: true });
+      const { data, error } = await supabase.from('loans').select('*, customers(name, phone)').in('status', ['pending', 'partial']).order('due_date', { ascending: true });
       if (!error) setLoans(data || []);
     } else {
       const cached = await getCachedData('loans');
@@ -260,133 +218,56 @@ export default function POS() {
 
   const fetchCustomers = async () => {
     if (navigator.onLine) {
-      const { data, error } = await supabase
-        .from('customers')
-        .select('id, name, phone')
-        .order('name');
-      if (!error) {
-        setCustomers(data || []);
-        await cacheData('customers', data || []);
-      }
-    } else {
-      const cached = await getCachedData('customers');
-      setCustomers(cached as any);
-    }
+      const { data, error } = await supabase.from('customers').select('id, name, phone').order('name');
+      if (!error) { setCustomers(data || []); await cacheData('customers', data || []); }
+    } else { setCustomers(await getCachedData('customers') as any); }
   };
 
   const fetchLoanPayments = async (loanId: string) => {
-    const { data, error } = await supabase
-      .from('loan_payments')
-      .select('*')
-      .eq('loan_id', loanId)
-      .order('created_at', { ascending: false });
+    const { data, error } = await supabase.from('loan_payments').select('*').eq('loan_id', loanId).order('created_at', { ascending: false });
     if (!error) setLoanPayments(data || []);
   };
 
   const createQuickCustomer = async () => {
-    if (!newCustomerName.trim()) {
-      toast({ title: 'Error', description: 'Customer name is required', variant: 'destructive' });
-      return;
-    }
-
+    if (!newCustomerName.trim()) { toast({ title: 'Error', description: 'Customer name is required', variant: 'destructive' }); return; }
     try {
-      const { data, error } = await supabase
-        .from('customers')
-        .insert({
-          name: newCustomerName.trim(),
-          phone: newCustomerPhone.trim() || null,
-        })
-        .select()
-        .single();
-
+      const { data, error } = await supabase.from('customers').insert({ name: newCustomerName.trim(), phone: newCustomerPhone.trim() || null }).select().single();
       if (error) throw error;
-
       setCustomers(prev => [...prev, data].sort((a, b) => a.name.localeCompare(b.name)));
       setSelectedCustomerId(data.id);
       setShowNewCustomerForm(false);
-      setNewCustomerName('');
-      setNewCustomerPhone('');
+      setNewCustomerName(''); setNewCustomerPhone('');
       toast({ title: 'Success', description: `Customer "${data.name}" created` });
-    } catch (error: any) {
-      toast({ title: 'Error', description: error.message, variant: 'destructive' });
-    }
+    } catch (error: any) { toast({ title: 'Error', description: error.message, variant: 'destructive' }); }
   };
 
   const handleBarcodeProduct = (product: any) => {
-    const productWithStock = products.find(p => p.id === product.id);
-    if (productWithStock) {
-      addToCart(productWithStock);
-    } else {
-      // Product not in current warehouse inventory
-      toast({ 
-        title: 'Product Found', 
-        description: `${product.name} - Not available in selected warehouse`,
-        variant: 'destructive'
-      });
-    }
+    const p = products.find(pr => pr.id === product.id);
+    if (p) addToCart(p);
+    else toast({ title: 'Product Found', description: `${product.name} - Not available in selected warehouse`, variant: 'destructive' });
   };
 
   const processLoanPayment = async () => {
     if (!selectedLoan) return;
-    
     const amount = parseFloat(loanPaymentAmount);
-    if (isNaN(amount) || amount <= 0) {
-      toast({ title: 'Error', description: 'Enter a valid payment amount', variant: 'destructive' });
-      return;
-    }
-
+    if (isNaN(amount) || amount <= 0) { toast({ title: 'Error', description: 'Enter a valid payment amount', variant: 'destructive' }); return; }
     const remaining = selectedLoan.amount - (selectedLoan.paid_amount || 0);
-    if (amount > remaining) {
-      toast({ title: 'Error', description: `Maximum payable: ${formatAmount(remaining)}`, variant: 'destructive' });
-      return;
-    }
-
+    if (amount > remaining) { toast({ title: 'Error', description: `Maximum payable: ${formatAmount(remaining)}`, variant: 'destructive' }); return; }
     setIsProcessing(true);
     try {
       const newPaidAmount = (selectedLoan.paid_amount || 0) + amount;
       const newStatus = newPaidAmount >= selectedLoan.amount ? 'paid' : 'partial';
-
-      // Create loan payment record
-      const { error: paymentError } = await supabase
-        .from('loan_payments')
-        .insert({
-          loan_id: selectedLoan.id,
-          amount,
-          payment_method: loanPaymentMethod,
-          notes: `Payment via POS`,
-          created_by: user?.id,
-        });
-
+      const { error: paymentError } = await supabase.from('loan_payments').insert({ loan_id: selectedLoan.id, amount, payment_method: loanPaymentMethod, notes: 'Payment via POS', created_by: user?.id });
       if (paymentError) throw paymentError;
-
-      // Update loan
-      const { error } = await supabase
-        .from('loans')
-        .update({ 
-          paid_amount: newPaidAmount, 
-          status: newStatus,
-        })
-        .eq('id', selectedLoan.id);
-
+      const { error } = await supabase.from('loans').update({ paid_amount: newPaidAmount, status: newStatus }).eq('id', selectedLoan.id);
       if (error) throw error;
-
-      toast({ 
-        title: 'Payment Successful', 
-        description: newStatus === 'paid' ? 'Loan fully paid!' : `${formatAmount(amount)} paid. Remaining: ${formatAmount(selectedLoan.amount - newPaidAmount)}`
-      });
-
-      // Refresh payment history
+      toast({ title: 'Payment Successful', description: newStatus === 'paid' ? 'Loan fully paid!' : `${formatAmount(amount)} paid. Remaining: ${formatAmount(selectedLoan.amount - newPaidAmount)}` });
       fetchLoanPayments(selectedLoan.id);
       setLoanPaymentAmount('');
       fetchLoans();
-      
-      // Update selected loan state
       setSelectedLoan(prev => prev ? { ...prev, paid_amount: newPaidAmount, status: newStatus } : null);
-    } catch (error: any) {
-      toast({ title: 'Error', description: error.message, variant: 'destructive' });
-    } finally {
-      setIsProcessing(false);
-    }
+    } catch (error: any) { toast({ title: 'Error', description: error.message, variant: 'destructive' }); }
+    finally { setIsProcessing(false); }
   };
 
   const handleSelectLoan = (loan: Loan) => {
@@ -404,268 +285,111 @@ export default function POS() {
   };
 
   const addToCart = (product: ProductWithStock, qty: number = 1) => {
-
     const currentCartQty = cart.find(i => i.productId === product.id)?.quantity || 0;
     const totalQty = currentCartQty + qty;
     const available = product.availableInSellingUnit || product.stock || 0;
-
     if (available < totalQty) {
-      toast({ 
-        title: 'Insufficient Stock', 
-        description: `Available: ${available} ${product.selling_unit}`, 
-        variant: 'destructive' 
-      });
+      toast({ title: 'Insufficient Stock', description: `Available: ${available} ${product.selling_unit}`, variant: 'destructive' });
       return;
     }
-
     setCart(prev => {
       const existing = prev.find(i => i.productId === product.id);
       if (existing) {
-        return prev.map(i => 
-          i.productId === product.id 
-            ? { ...i, quantity: totalQty, subtotal: totalQty * i.price }
-            : i
-        );
+        return prev.map(i => i.productId === product.id ? { ...i, quantity: totalQty, subtotal: totalQty * i.price } : i);
       }
-      return [...prev, {
-        productId: product.id,
-        name: product.name,
-        quantity: qty,
-        price: product.selling_price,
-        subtotal: product.selling_price * qty,
-        sellingUnit: product.selling_unit,
-      }];
+      return [...prev, { productId: product.id, name: product.name, quantity: qty, price: product.selling_price, subtotal: product.selling_price * qty, sellingUnit: product.selling_unit }];
     });
   };
 
   const updateCartQuantity = (productId: string, newQty: number) => {
-    if (newQty < 0.01) {
-      removeFromCart(productId);
-      return;
-    }
-
-    // Skip stock validation for manually added items
+    if (newQty < 0.01) { removeFromCart(productId); return; }
     const cartItem = cart.find(i => i.productId === productId);
     if (!cartItem?.isManual) {
       const product = products.find(p => p.id === productId);
-      if (!product) {
-        setCart(prev => prev.map(item => 
-          item.productId === productId 
-            ? { ...item, quantity: newQty, subtotal: newQty * item.price }
-            : item
-        ));
-        return;
-      }
-
-      const available = product.availableInSellingUnit || product.stock || 0;
-      if (newQty > available) {
-        toast({ 
-          title: 'Insufficient Stock', 
-          description: `Maximum available: ${available} ${product.selling_unit}`, 
-          variant: 'destructive' 
-        });
-        return;
+      if (product) {
+        const available = product.availableInSellingUnit || product.stock || 0;
+        if (newQty > available) {
+          toast({ title: 'Insufficient Stock', description: `Maximum available: ${available} ${product.selling_unit}`, variant: 'destructive' });
+          return;
+        }
       }
     }
-
-    setCart(prev => prev.map(item => 
-      item.productId === productId 
-        ? { ...item, quantity: newQty, subtotal: newQty * item.price }
-        : item
-    ));
+    setCart(prev => prev.map(item => item.productId === productId ? { ...item, quantity: newQty, subtotal: newQty * item.price } : item));
   };
 
-  const removeFromCart = (productId: string) => {
-    setCart(prev => prev.filter(i => i.productId !== productId));
-  };
-
+  const removeFromCart = (productId: string) => setCart(prev => prev.filter(i => i.productId !== productId));
   const getTotalAmount = () => cart.reduce((sum, item) => sum + item.subtotal, 0);
-
   const getSplitTotal = () => splitPayments.reduce((sum, p) => sum + p.amount, 0);
   const getRemainingAmount = () => getTotalAmount() - getSplitTotal();
 
   const addSplitPayment = () => {
     const amount = parseFloat(newSplitAmount);
-    if (isNaN(amount) || amount <= 0) {
-      toast({ title: 'Error', description: 'Enter a valid amount', variant: 'destructive' });
-      return;
-    }
-    if (amount > getRemainingAmount()) {
-      toast({ title: 'Error', description: 'Amount exceeds remaining balance', variant: 'destructive' });
-      return;
-    }
+    if (isNaN(amount) || amount <= 0) { toast({ title: 'Error', description: 'Enter a valid amount', variant: 'destructive' }); return; }
+    if (amount > getRemainingAmount()) { toast({ title: 'Error', description: 'Amount exceeds remaining balance', variant: 'destructive' }); return; }
     setSplitPayments(prev => [...prev, { method: newSplitMethod, amount }]);
     setNewSplitAmount('');
   };
 
-  const removeSplitPayment = (index: number) => {
-    setSplitPayments(prev => prev.filter((_, i) => i !== index));
-  };
+  const removeSplitPayment = (index: number) => setSplitPayments(prev => prev.filter((_, i) => i !== index));
 
   const processSale = async (useSplit: boolean = false) => {
-    if (cart.length === 0) {
-      toast({ title: 'Error', description: 'Cart is empty', variant: 'destructive' });
-      return;
-    }
-
+    if (cart.length === 0) { toast({ title: 'Error', description: 'Cart is empty', variant: 'destructive' }); return; }
     const hasRegularItems = cart.some(item => !item.isManual);
     if (hasRegularItems && (!selectedWarehouse || selectedWarehouse === 'all')) {
-      toast({ title: 'Error', description: 'Please select a specific warehouse before checkout', variant: 'destructive' });
-      return;
+      toast({ title: 'Error', description: 'Please select a specific warehouse before checkout', variant: 'destructive' }); return;
     }
-
     if (useSplit && getRemainingAmount() > 0.01) {
-      toast({ title: 'Error', description: 'Split payments must cover full amount', variant: 'destructive' });
-      return;
+      toast({ title: 'Error', description: 'Split payments must cover full amount', variant: 'destructive' }); return;
     }
-
     setIsProcessing(true);
-
     try {
       const transactionNumber = `TXN-${Date.now()}`;
-      const finalPaymentMethod = useSplit 
-        ? `Split: ${splitPayments.map(p => `${p.method}(${formatAmount(p.amount)})`).join(', ')}`
-        : paymentMethod;
+      const finalPaymentMethod = useSplit ? `Split: ${splitPayments.map(p => `${p.method}(${formatAmount(p.amount)})`).join(', ')}` : paymentMethod;
+      const transactionData = { transaction_number: transactionNumber, total_amount: getTotalAmount(), payment_method: finalPaymentMethod, status: 'completed', notes: customerName ? `Customer: ${customerName}` : null, created_by: user?.id };
 
-      const transactionData = {
-        transaction_number: transactionNumber,
-        total_amount: getTotalAmount(),
-        payment_method: finalPaymentMethod,
-        status: 'completed',
-        notes: customerName ? `Customer: ${customerName}` : null,
-        created_by: user?.id,
-      };
-
-      // OFFLINE MODE: Queue everything for later sync
       if (!navigator.onLine) {
         const offlineId = `offline-${Date.now()}`;
         await queueMutation('transactions', 'insert', { ...transactionData, id: offlineId });
-
-        const transactionItems = cart.map(item => ({
-          transaction_id: offlineId,
-          product_id: item.productId,
-          quantity: item.quantity,
-          unit_price: item.price,
-          total_price: item.subtotal,
-        }));
-        await queueMutation('transaction_items', 'insert', transactionItems);
-
+        await queueMutation('transaction_items', 'insert', cart.map(item => ({ transaction_id: offlineId, product_id: item.productId, quantity: item.quantity, unit_price: item.price, total_price: item.subtotal })));
         const stockMovements = cart.map(item => {
           const product = products.find(p => p.id === item.productId);
           const convFactor = product?.unit_conversion_factor || 1;
-          const stockUnitQty = product && product.stock_unit !== product.selling_unit
-            ? item.quantity / convFactor
-            : item.quantity;
-          return {
-            product_id: item.productId,
-            warehouse_id: selectedWarehouse,
-            quantity: stockUnitQty,
-            movement_type: 'out',
-            reference_number: transactionNumber,
-            notes: `POS Sale (offline): ${item.quantity} ${item.sellingUnit || 'pc'} to ${customerName || 'Walk-in customer'}`,
-            created_by: user?.id,
-          };
+          const stockUnitQty = product && product.stock_unit !== product.selling_unit ? item.quantity / convFactor : item.quantity;
+          return { product_id: item.productId, warehouse_id: selectedWarehouse, quantity: stockUnitQty, movement_type: 'out', reference_number: transactionNumber, notes: `POS Sale (offline): ${item.quantity} ${item.sellingUnit || 'pc'} to ${customerName || 'Walk-in customer'}`, created_by: user?.id };
         });
         await queueMutation('stock_movements', 'insert', stockMovements);
-
-        // Update local cached inventory
         const cachedInventory = await getCachedData('inventory');
         for (const item of cart) {
           const product = products.find(p => p.id === item.productId);
           const convFactor = product?.unit_conversion_factor || 1;
-          const stockUnitQty = product && product.stock_unit !== product.selling_unit
-            ? item.quantity / convFactor
-            : item.quantity;
-          const inv = cachedInventory.find((i: any) => 
-            i.product_id === item.productId && i.warehouse_id === selectedWarehouse
-          );
-          if (inv) {
-            inv.quantity = Math.max(0, (inv.quantity || 0) - stockUnitQty);
-          }
+          const stockUnitQty = product && product.stock_unit !== product.selling_unit ? item.quantity / convFactor : item.quantity;
+          const inv = cachedInventory.find((i: any) => i.product_id === item.productId && i.warehouse_id === selectedWarehouse);
+          if (inv) inv.quantity = Math.max(0, (inv.quantity || 0) - stockUnitQty);
         }
         await cacheData('inventory', cachedInventory);
-
-        setLastSaleData({
-          id: offlineId,
-          items: cart.map(item => ({
-            name: item.name,
-            quantity: item.quantity,
-            unit_price: item.price,
-            subtotal: item.subtotal,
-          })),
-          total_amount: getTotalAmount(),
-          payment_method: finalPaymentMethod,
-          customer_name: customerName,
-          customer_phone: customerPhone,
-          sale_date: new Date().toISOString(),
-        });
-
-        setShowReceipt(true);
-        setShowSplitPayment(false);
-        setSplitPayments([]);
+        setLastSaleData({ id: offlineId, items: cart.map(item => ({ name: item.name, quantity: item.quantity, unit_price: item.price, subtotal: item.subtotal })), total_amount: getTotalAmount(), payment_method: finalPaymentMethod, customer_name: customerName, customer_phone: customerPhone, sale_date: new Date().toISOString() });
+        setShowReceipt(true); setShowSplitPayment(false); setSplitPayments([]); setMobileCartOpen(false);
         toast({ title: 'Sale Saved Offline', description: 'Will sync automatically when internet returns' });
-        setCart([]);
-        setCustomerName('');
-        setCustomerPhone('');
-        setPaymentMethod('cash');
-        fetchProductsWithStock();
-        setIsProcessing(false);
-        return;
+        setCart([]); setCustomerName(''); setCustomerPhone(''); setPaymentMethod('cash');
+        fetchProductsWithStock(); setIsProcessing(false); return;
       }
 
-      // ONLINE MODE: Normal processing
-      const { data: transaction, error: transactionError } = await supabase
-        .from('transactions')
-        .insert(transactionData)
-        .select()
-        .single();
-
+      const { data: transaction, error: transactionError } = await supabase.from('transactions').insert(transactionData).select().single();
       if (transactionError) throw transactionError;
-
-      const transactionItems = cart.map(item => ({
-        transaction_id: transaction.id,
-        product_id: item.productId,
-        quantity: item.quantity,
-        unit_price: item.price,
-        total_price: item.subtotal,
-      }));
-
-      const { error: itemsError } = await supabase.from('transaction_items').insert(transactionItems);
+      const { error: itemsError } = await supabase.from('transaction_items').insert(cart.map(item => ({ transaction_id: transaction.id, product_id: item.productId, quantity: item.quantity, unit_price: item.price, total_price: item.subtotal })));
       if (itemsError) throw itemsError;
 
-      // Get Extra warehouse id for manual items if needed
       let extraWarehouseId: string | null = null;
-      const hasManualItems = cart.some(item => item.isManual);
-      if (hasManualItems) {
-        const { data: extraWh } = await supabase
-          .from('warehouses')
-          .select('id')
-          .eq('name', 'Extra')
-          .limit(1);
+      if (cart.some(item => item.isManual)) {
+        const { data: extraWh } = await supabase.from('warehouses').select('id').eq('name', 'Extra').limit(1);
         extraWarehouseId = extraWh?.[0]?.id || null;
       }
-
-      // For manual items, top up stock if cart qty exceeds current inventory to prevent negative stock
       for (const item of cart) {
         if (item.isManual && extraWarehouseId) {
-          const { data: inv } = await supabase
-            .from('inventory')
-            .select('quantity')
-            .eq('product_id', item.productId)
-            .eq('warehouse_id', extraWarehouseId)
-            .maybeSingle();
-
+          const { data: inv } = await supabase.from('inventory').select('quantity').eq('product_id', item.productId).eq('warehouse_id', extraWarehouseId).maybeSingle();
           const currentStock = inv?.quantity ?? 0;
           if (currentStock < item.quantity) {
-            const topUp = item.quantity - currentStock;
-            await supabase.from('stock_movements').insert({
-              product_id: item.productId,
-              warehouse_id: extraWarehouseId,
-              quantity: topUp,
-              movement_type: 'in',
-              notes: 'Auto top-up for manual POS item',
-              created_by: user?.id,
-            });
+            await supabase.from('stock_movements').insert({ product_id: item.productId, warehouse_id: extraWarehouseId, quantity: item.quantity - currentStock, movement_type: 'in', notes: 'Auto top-up for manual POS item', created_by: user?.id });
           }
         }
       }
@@ -673,81 +397,28 @@ export default function POS() {
       const stockMovements = cart.map(item => {
         const product = products.find(p => p.id === item.productId);
         const convFactor = product?.unit_conversion_factor || 1;
-        const stockUnitQty = product && product.stock_unit !== product.selling_unit
-          ? item.quantity / convFactor
-          : item.quantity;
-        return {
-          product_id: item.productId,
-          warehouse_id: item.isManual && extraWarehouseId ? extraWarehouseId : selectedWarehouse,
-          quantity: stockUnitQty,
-          movement_type: 'out',
-          reference_number: transactionNumber,
-          notes: `POS Sale: ${item.quantity} ${item.sellingUnit || 'pc'} to ${customerName || 'Walk-in customer'}`,
-          created_by: user?.id,
-        };
+        const stockUnitQty = product && product.stock_unit !== product.selling_unit ? item.quantity / convFactor : item.quantity;
+        return { product_id: item.productId, warehouse_id: item.isManual && extraWarehouseId ? extraWarehouseId : selectedWarehouse, quantity: stockUnitQty, movement_type: 'out', reference_number: transactionNumber, notes: `POS Sale: ${item.quantity} ${item.sellingUnit || 'pc'} to ${customerName || 'Walk-in customer'}`, created_by: user?.id };
       });
-
       const { error: movementError } = await supabase.from('stock_movements').insert(stockMovements);
       if (movementError) throw movementError;
 
-      setLastSaleData({
-        id: transaction.id,
-        items: cart.map(item => ({
-          name: item.name,
-          quantity: item.quantity,
-          unit_price: item.price,
-          subtotal: item.subtotal,
-        })),
-        total_amount: getTotalAmount(),
-        payment_method: finalPaymentMethod,
-        customer_name: customerName,
-        customer_phone: customerPhone,
-        sale_date: new Date().toISOString(),
-      });
-
-      setShowReceipt(true);
-      setShowSplitPayment(false);
-      setSplitPayments([]);
+      setLastSaleData({ id: transaction.id, items: cart.map(item => ({ name: item.name, quantity: item.quantity, unit_price: item.price, subtotal: item.subtotal })), total_amount: getTotalAmount(), payment_method: finalPaymentMethod, customer_name: customerName, customer_phone: customerPhone, sale_date: new Date().toISOString() });
+      setShowReceipt(true); setShowSplitPayment(false); setSplitPayments([]); setMobileCartOpen(false);
       toast({ title: 'Success', description: 'Sale completed successfully' });
-
-      // Close pending bill if this sale was loaded from one
-      if (activePendingBillId) {
-        await supabase.from('pending_bills').update({ status: 'closed' }).eq('id', activePendingBillId);
-        setActivePendingBillId(null);
-      }
-
-      setCart([]);
-      setCustomerName('');
-      setCustomerPhone('');
-      setPaymentMethod('cash');
+      if (activePendingBillId) { await supabase.from('pending_bills').update({ status: 'closed' }).eq('id', activePendingBillId); setActivePendingBillId(null); }
+      setCart([]); setCustomerName(''); setCustomerPhone(''); setPaymentMethod('cash');
       fetchProductsWithStock();
-
-    } catch (error: any) {
-      toast({ title: 'Error', description: error.message, variant: 'destructive' });
-    } finally {
-      setIsProcessing(false);
-    }
+    } catch (error: any) { toast({ title: 'Error', description: error.message, variant: 'destructive' }); }
+    finally { setIsProcessing(false); }
   };
 
   const processCreditSale = async () => {
-    if (cart.length === 0) {
-      toast({ title: 'Error', description: 'Cart is empty', variant: 'destructive' });
-      return;
-    }
-
-    if (!selectedCustomerId) {
-      toast({ title: 'Error', description: 'Please select a customer for credit sale', variant: 'destructive' });
-      return;
-    }
-
+    if (cart.length === 0) { toast({ title: 'Error', description: 'Cart is empty', variant: 'destructive' }); return; }
+    if (!selectedCustomerId) { toast({ title: 'Error', description: 'Please select a customer for credit sale', variant: 'destructive' }); return; }
     const hasRegularItems = cart.some(item => !item.isManual);
-    if (hasRegularItems && (!selectedWarehouse || selectedWarehouse === 'all')) {
-      toast({ title: 'Error', description: 'Please select a specific warehouse before checkout', variant: 'destructive' });
-      return;
-    }
-
+    if (hasRegularItems && (!selectedWarehouse || selectedWarehouse === 'all')) { toast({ title: 'Error', description: 'Please select a specific warehouse before checkout', variant: 'destructive' }); return; }
     setIsProcessing(true);
-
     try {
       const transactionNumber = `TXN-${Date.now()}`;
       const baseAmount = getTotalAmount();
@@ -758,613 +429,416 @@ export default function POS() {
       const dueDate = addDays(new Date(), dueDays);
       const selectedCustomer = customers.find(c => c.id === selectedCustomerId);
 
-      // Create transaction
-      const { data: transaction, error: transactionError } = await supabase
-        .from('transactions')
-        .insert({
-          transaction_number: transactionNumber,
-          total_amount: baseAmount,
-          payment_method: 'credit',
-          status: 'completed',
-          customer_id: selectedCustomerId,
-          notes: `Credit Sale - Loan Amount: ${formatAmount(totalLoanAmount)} (includes ${interestRate}% interest)`,
-          created_by: user?.id,
-        })
-        .select()
-        .single();
-
+      const { data: transaction, error: transactionError } = await supabase.from('transactions').insert({ transaction_number: transactionNumber, total_amount: baseAmount, payment_method: 'credit', status: 'completed', customer_id: selectedCustomerId, notes: `Credit Sale - Loan Amount: ${formatAmount(totalLoanAmount)} (includes ${interestRate}% interest)`, created_by: user?.id }).select().single();
       if (transactionError) throw transactionError;
-
-      // Create transaction items
-      const transactionItems = cart.map(item => ({
-        transaction_id: transaction.id,
-        product_id: item.productId,
-        quantity: item.quantity,
-        unit_price: item.price,
-        total_price: item.subtotal,
-      }));
-
-      const { error: itemsError } = await supabase.from('transaction_items').insert(transactionItems);
+      const { error: itemsError } = await supabase.from('transaction_items').insert(cart.map(item => ({ transaction_id: transaction.id, product_id: item.productId, quantity: item.quantity, unit_price: item.price, total_price: item.subtotal })));
       if (itemsError) throw itemsError;
 
-      // Get Extra warehouse id for manual items if needed
       let extraWarehouseId: string | null = null;
-      const hasManualItems = cart.some(item => item.isManual);
-      if (hasManualItems) {
-        const { data: extraWh } = await supabase
-          .from('warehouses')
-          .select('id')
-          .eq('name', 'Extra')
-          .limit(1);
+      if (cart.some(item => item.isManual)) {
+        const { data: extraWh } = await supabase.from('warehouses').select('id').eq('name', 'Extra').limit(1);
         extraWarehouseId = extraWh?.[0]?.id || null;
       }
-
-      // For manual items, top up stock if cart qty exceeds current inventory to prevent negative stock
       for (const item of cart) {
         if (item.isManual && extraWarehouseId) {
-          const { data: inv } = await supabase
-            .from('inventory')
-            .select('quantity')
-            .eq('product_id', item.productId)
-            .eq('warehouse_id', extraWarehouseId)
-            .maybeSingle();
-
-          const currentStock = inv?.quantity ?? 0;
-          if (currentStock < item.quantity) {
-            const topUp = item.quantity - currentStock;
-            await supabase.from('stock_movements').insert({
-              product_id: item.productId,
-              warehouse_id: extraWarehouseId,
-              quantity: topUp,
-              movement_type: 'in',
-              notes: 'Auto top-up for manual POS item (credit)',
-              created_by: user?.id,
-            });
+          const { data: inv } = await supabase.from('inventory').select('quantity').eq('product_id', item.productId).eq('warehouse_id', extraWarehouseId).maybeSingle();
+          if ((inv?.quantity ?? 0) < item.quantity) {
+            await supabase.from('stock_movements').insert({ product_id: item.productId, warehouse_id: extraWarehouseId, quantity: item.quantity - (inv?.quantity ?? 0), movement_type: 'in', notes: 'Auto top-up for manual POS item (credit)', created_by: user?.id });
           }
         }
       }
 
-      // Create stock movements (convert selling units to stock units)
       const stockMovements = cart.map(item => {
         const product = products.find(p => p.id === item.productId);
         const convFactor = product?.unit_conversion_factor || 1;
-        const stockUnitQty = product && product.stock_unit !== product.selling_unit
-          ? item.quantity / convFactor
-          : item.quantity;
-        return {
-          product_id: item.productId,
-          warehouse_id: item.isManual && extraWarehouseId ? extraWarehouseId : selectedWarehouse,
-          quantity: stockUnitQty,
-          movement_type: 'out',
-          reference_number: transactionNumber,
-          notes: `Credit Sale: ${item.quantity} ${item.sellingUnit || 'pc'} to ${selectedCustomer?.name || 'Customer'}`,
-          created_by: user?.id,
-        };
+        const stockUnitQty = product && product.stock_unit !== product.selling_unit ? item.quantity / convFactor : item.quantity;
+        return { product_id: item.productId, warehouse_id: item.isManual && extraWarehouseId ? extraWarehouseId : selectedWarehouse, quantity: stockUnitQty, movement_type: 'out', reference_number: transactionNumber, notes: `Credit Sale: ${item.quantity} ${item.sellingUnit || 'pc'} to ${selectedCustomer?.name || 'Customer'}`, created_by: user?.id };
       });
-
       const { error: movementError } = await supabase.from('stock_movements').insert(stockMovements);
       if (movementError) throw movementError;
 
-      // Create loan record
-      const { error: loanError } = await supabase.from('loans').insert({
-        customer_id: selectedCustomerId,
-        amount: totalLoanAmount,
-        paid_amount: 0,
-        due_date: format(dueDate, 'yyyy-MM-dd'),
-        status: 'pending',
-        notes: `Credit sale - TXN: ${transactionNumber}\nBase: ${formatAmount(baseAmount)}, Interest: ${interestRate}%`,
-        created_by: user?.id,
-      });
-
+      const { error: loanError } = await supabase.from('loans').insert({ customer_id: selectedCustomerId, amount: totalLoanAmount, paid_amount: 0, due_date: format(dueDate, 'yyyy-MM-dd'), status: 'pending', notes: `Credit sale - TXN: ${transactionNumber}\nBase: ${formatAmount(baseAmount)}, Interest: ${interestRate}%`, created_by: user?.id });
       if (loanError) throw loanError;
 
-      setLastSaleData({
-        id: transaction.id,
-        items: cart.map(item => ({
-          name: item.name,
-          quantity: item.quantity,
-          unit_price: item.price,
-          subtotal: item.subtotal,
-        })),
-        total_amount: baseAmount,
-        payment_method: `Credit (Due: ${format(dueDate, 'PP')})`,
-        customer_name: selectedCustomer?.name,
-        customer_phone: selectedCustomer?.phone,
-        sale_date: new Date().toISOString(),
-      });
-
-      setShowReceipt(true);
-      setShowCreditDialog(false);
-      toast({ 
-        title: 'Credit Sale Completed', 
-        description: `Loan of ${formatAmount(totalLoanAmount)} created for ${selectedCustomer?.name}` 
-      });
-
-      // Close pending bill if loaded from one
-      if (activePendingBillId) {
-        await supabase.from('pending_bills').update({ status: 'closed' }).eq('id', activePendingBillId);
-        setActivePendingBillId(null);
-      }
-
-      // Reset state
-      setCart([]);
-      setCustomerName('');
-      setCustomerPhone('');
-      setPaymentMethod('cash');
-      setSelectedCustomerId('');
-      setCreditDueDays('30');
-      setCreditInterestRate('0');
-      fetchProductsWithStock();
-      fetchLoans();
-
-    } catch (error: any) {
-      toast({ title: 'Error', description: error.message, variant: 'destructive' });
-    } finally {
-      setIsProcessing(false);
-    }
+      setLastSaleData({ id: transaction.id, items: cart.map(item => ({ name: item.name, quantity: item.quantity, unit_price: item.price, subtotal: item.subtotal })), total_amount: baseAmount, payment_method: `Credit (Due: ${format(dueDate, 'PP')})`, customer_name: selectedCustomer?.name, customer_phone: selectedCustomer?.phone, sale_date: new Date().toISOString() });
+      setShowReceipt(true); setShowCreditDialog(false); setMobileCartOpen(false);
+      toast({ title: 'Credit Sale Completed', description: `Loan of ${formatAmount(totalLoanAmount)} created for ${selectedCustomer?.name}` });
+      if (activePendingBillId) { await supabase.from('pending_bills').update({ status: 'closed' }).eq('id', activePendingBillId); setActivePendingBillId(null); }
+      setCart([]); setCustomerName(''); setCustomerPhone(''); setPaymentMethod('cash'); setSelectedCustomerId(''); setCreditDueDays('30'); setCreditInterestRate('0');
+      fetchProductsWithStock(); fetchLoans();
+    } catch (error: any) { toast({ title: 'Error', description: error.message, variant: 'destructive' }); }
+    finally { setIsProcessing(false); }
   };
 
   const handlePayNow = () => {
-    if (paymentMethod === 'credit') {
-      setShowCreditDialog(true);
-    } else {
-      processSale(false);
-    }
+    if (paymentMethod === 'credit') setShowCreditDialog(true);
+    else processSale(false);
   };
 
   const filteredProducts = products.filter(p =>
-    fuzzySearch(p.name, searchQuery) ||
-    (p.sku && fuzzySearch(p.sku, searchQuery)) ||
-    (p.barcode && fuzzySearch(p.barcode, searchQuery))
+    fuzzySearch(p.name, searchQuery) || (p.sku && fuzzySearch(p.sku, searchQuery)) || (p.barcode && fuzzySearch(p.barcode, searchQuery))
   );
 
-  const filteredLoans = loans.filter(l => 
-    (l.customers?.name && fuzzySearch(l.customers.name, loanSearchQuery)) ||
-    (l.customers?.phone && fuzzySearch(l.customers.phone, loanSearchQuery))
+  const filteredLoans = loans.filter(l =>
+    (l.customers?.name && fuzzySearch(l.customers.name, loanSearchQuery)) || (l.customers?.phone && fuzzySearch(l.customers.phone, loanSearchQuery))
   );
 
   const handleRefresh = () => {
-    fetchProductsWithStock();
-    fetchWarehouses();
-    fetchLoans();
+    fetchProductsWithStock(); fetchWarehouses(); fetchLoans();
     toast({ title: 'Refreshed', description: 'Data updated' });
   };
 
+  const CartContent = () => (
+    <div className="flex flex-col h-full">
+      {/* Customer Info */}
+      <div className="grid grid-cols-2 gap-2 mb-3">
+        <Input value={customerName} onChange={(e) => setCustomerName(e.target.value)} placeholder="Customer name" className="h-9 text-sm" />
+        <Input value={customerPhone} onChange={(e) => setCustomerPhone(e.target.value)} placeholder="Phone" className="h-9 text-sm" />
+      </div>
+
+      {/* Cart Items */}
+      <ScrollArea className="flex-1 min-h-0">
+        {cart.length === 0 ? (
+          <div className="flex flex-col items-center justify-center py-12 text-muted-foreground">
+            <ShoppingCart className="h-12 w-12 mb-3 opacity-30" />
+            <p className="text-sm font-medium">Your cart is empty</p>
+            <p className="text-xs mt-1">Tap products to add them</p>
+          </div>
+        ) : (
+          <div className="space-y-2 pr-2">
+            {cart.map((item) => (
+              <div key={item.productId} className="flex items-center gap-2 p-2.5 bg-muted/50 rounded-xl border border-border/50">
+                <div className="flex-1 min-w-0">
+                  <p className="font-medium text-sm truncate">{item.name}</p>
+                  <p className="text-xs text-muted-foreground">{formatAmount(item.price)}/{item.sellingUnit || 'pc'}</p>
+                </div>
+                <div className="flex items-center gap-1 shrink-0">
+                  <Button variant="outline" size="icon" className="h-7 w-7 rounded-full" onClick={() => updateCartQuantity(item.productId, item.quantity - 1)}>
+                    <Minus className="h-3 w-3" />
+                  </Button>
+                  <Input type="number" min="0.01" step="0.1" value={item.quantity} onChange={(e) => updateCartQuantity(item.productId, parseFloat(e.target.value) || 0.01)} className="w-12 h-7 text-center text-sm px-1" />
+                  <Button variant="outline" size="icon" className="h-7 w-7 rounded-full" onClick={() => updateCartQuantity(item.productId, item.quantity + 1)}>
+                    <Plus className="h-3 w-3" />
+                  </Button>
+                </div>
+                <p className="font-semibold text-sm w-16 text-right shrink-0">{formatAmount(item.subtotal)}</p>
+                <Button variant="ghost" size="icon" className="h-7 w-7 text-destructive hover:text-destructive shrink-0" onClick={() => removeFromCart(item.productId)}>
+                  <Trash2 className="h-3.5 w-3.5" />
+                </Button>
+              </div>
+            ))}
+          </div>
+        )}
+      </ScrollArea>
+
+      {/* Manual Entry */}
+      <ManualItemEntry onItemAdded={(item) => setCart(prev => [...prev, { ...item, isManual: true }])} />
+
+      {/* Checkout Section */}
+      <div className="border-t pt-3 mt-3 space-y-3">
+        <div className="flex justify-between items-center text-lg font-bold">
+          <span>Total</span>
+          <span className="text-primary">{formatAmount(getTotalAmount())}</span>
+        </div>
+
+        <div className="space-y-2">
+          <Label className="text-xs font-medium">Payment Method</Label>
+          <div className="grid grid-cols-5 gap-1">
+            {paymentMethods.map(pm => (
+              <Button key={pm.value} variant={paymentMethod === pm.value ? 'default' : 'outline'} size="sm" className="h-9 text-[10px] sm:text-xs flex-col gap-0.5 px-1" onClick={() => setPaymentMethod(pm.value)}>
+                <pm.icon className="h-3.5 w-3.5" />
+                <span className="truncate leading-tight">{pm.label}</span>
+              </Button>
+            ))}
+          </div>
+        </div>
+
+        <div className="grid grid-cols-2 gap-2">
+          <Button variant="outline" onClick={() => setShowSplitPayment(true)} disabled={cart.length === 0} className="gap-1 text-sm">
+            <Split className="h-4 w-4" /> Split
+          </Button>
+          <Button onClick={handlePayNow} disabled={isProcessing || cart.length === 0} className="text-sm font-semibold">
+            {isProcessing ? 'Processing...' : paymentMethod === 'credit' ? 'Credit Sale' : 'Pay Now'}
+          </Button>
+        </div>
+      </div>
+    </div>
+  );
+
   return (
     <div className="h-screen flex flex-col bg-muted/30">
-      <POSHeader 
-        cartItemCount={cart.length}
-        cartTotal={getTotalAmount()}
-        onRefresh={handleRefresh}
-      />
+      <POSHeader cartItemCount={cart.length} cartTotal={getTotalAmount()} onRefresh={handleRefresh} />
 
-      <div className="flex-1 overflow-hidden p-4">
+      <div className="flex-1 overflow-hidden">
         <Tabs value={activeTab} onValueChange={setActiveTab} className="h-full flex flex-col">
-          <TabsList className="mb-4 w-fit">
-            <TabsTrigger value="sales" className="gap-2">
-              <Package className="h-4 w-4" /> Sales
-            </TabsTrigger>
-            <TabsTrigger value="pending" className="gap-2">
-              <ClipboardList className="h-4 w-4" /> Pending Bills
-            </TabsTrigger>
-            <TabsTrigger value="loans" className="gap-2">
-              <Wallet className="h-4 w-4" /> Loan Payments
-            </TabsTrigger>
-          </TabsList>
-
-          <TabsContent value="sales" className="flex-1 overflow-hidden mt-0">
-            <div className="grid gap-4 lg:grid-cols-3 h-full">
-              {/* Products Grid */}
-              <Card className="lg:col-span-2 flex flex-col overflow-hidden">
-                <CardContent className="p-4 flex flex-col flex-1 overflow-hidden">
-                  <div className="flex gap-3 mb-4">
-                    <Select value={selectedWarehouse} onValueChange={setSelectedWarehouse}>
-                      <SelectTrigger className="w-48">
-                        <SelectValue placeholder="Select Warehouse" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="all">All Warehouses</SelectItem>
-                        {warehouses.map((w) => (
-                          <SelectItem key={w.id} value={w.id}>{w.name}</SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                    <Input
-                      placeholder="Search by name, SKU, or barcode..."
-                      value={searchQuery}
-                      onChange={(e) => setSearchQuery(e.target.value)}
-                      className="flex-1"
-                      autoFocus
-                    />
-                    <BarcodeScanner onProductFound={handleBarcodeProduct} />
-                  </div>
-
-              <ScrollArea className="flex-1">
-                <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 xl:grid-cols-5 gap-3">
-                  {filteredProducts.map(product => {
-                    const stockStatus = getStockStatus(product);
-                    return (
-                      <button
-                        key={product.id}
-                        type="button"
-                        disabled={stockStatus === 'out'}
-                        className="group relative bg-card border rounded-lg p-2 text-left hover:border-primary hover:shadow-md transition-all disabled:opacity-50 disabled:cursor-not-allowed"
-                        onClick={() => addToCart(product)}
-                      >
-                        <div className="aspect-square rounded-md bg-muted mb-2 overflow-hidden flex items-center justify-center">
-                          {product.image_url ? (
-                            <img 
-                              src={product.image_url} 
-                              alt={product.name}
-                              className="w-full h-full object-cover group-hover:scale-105 transition-transform"
-                            />
-                          ) : (
-                            <Package className="h-8 w-8 text-muted-foreground" />
-                          )}
-                        </div>
-                        <div className="space-y-1">
-                          <p className="font-medium text-sm line-clamp-2 leading-tight">{product.name}</p>
-                          <p className="text-primary font-semibold text-sm">
-                            {formatAmount(product.selling_price)}/{product.selling_unit}
-                          </p>
-                        </div>
-                        <Badge 
-                          className={`absolute top-1 right-1 text-xs ${
-                            stockStatus === 'out' ? 'bg-destructive' : 
-                            stockStatus === 'low' ? 'bg-orange-500' : 'bg-green-600'
-                          }`}
-                        >
-                          {product.stock_unit !== product.selling_unit 
-                            ? `${(product.availableInSellingUnit || 0).toFixed(0)} ${product.selling_unit}`
-                            : product.stock
-                          }
-                        </Badge>
-                        {stockStatus === 'low' && (
-                          <AlertTriangle className="absolute top-1 left-1 h-4 w-4 text-orange-500" />
-                        )}
-                      </button>
-                    );
-                  })}
-                </div>
-              </ScrollArea>
-            </CardContent>
-          </Card>
-
-          {/* Cart & Checkout */}
-          <Card className="flex flex-col overflow-hidden">
-            <CardContent className="p-4 flex flex-col flex-1 overflow-hidden">
-              <div className="grid grid-cols-2 gap-2 mb-3">
-                <Input 
-                  value={customerName} 
-                  onChange={(e) => setCustomerName(e.target.value)} 
-                  placeholder="Customer name" 
-                  className="h-9"
-                />
-                <Input 
-                  value={customerPhone} 
-                  onChange={(e) => setCustomerPhone(e.target.value)} 
-                  placeholder="Phone" 
-                  className="h-9"
-                />
-              </div>
-
-              <ScrollArea className="flex-1 -mx-4 px-4">
-                {cart.length === 0 ? (
-                  <div className="flex flex-col items-center justify-center h-40 text-muted-foreground">
-                    <Package className="h-10 w-10 mb-2 opacity-50" />
-                    <p className="text-sm">Cart is empty</p>
-                  </div>
-                ) : (
-                  <div className="space-y-2">
-                    {cart.map((item) => (
-                      <div key={item.productId} className="flex items-center gap-2 p-2 bg-muted/50 rounded-lg">
-                        <div className="flex-1 min-w-0">
-                          <p className="font-medium text-sm truncate">{item.name}</p>
-                          <p className="text-xs text-muted-foreground">
-                            {formatAmount(item.price)}/{item.sellingUnit || 'pc'}
-                          </p>
-                        </div>
-                        <div className="flex items-center gap-1">
-                          <Button 
-                            variant="outline" 
-                            size="icon" 
-                            className="h-7 w-7"
-                            onClick={() => updateCartQuantity(item.productId, item.quantity - 1)}
-                          >
-                            <Minus className="h-3 w-3" />
-                          </Button>
-                          <Input
-                            type="number"
-                            min="0.01"
-                            step="0.1"
-                            value={item.quantity}
-                            onChange={(e) => updateCartQuantity(item.productId, parseFloat(e.target.value) || 0.01)}
-                            className="w-14 h-7 text-center text-sm"
-                          />
-                          <Button 
-                            variant="outline" 
-                            size="icon" 
-                            className="h-7 w-7"
-                            onClick={() => updateCartQuantity(item.productId, item.quantity + 1)}
-                          >
-                            <Plus className="h-3 w-3" />
-                          </Button>
-                        </div>
-                        <div className="text-right w-20">
-                          <p className="font-medium text-sm">{formatAmount(item.subtotal)}</p>
-                        </div>
-                        <Button 
-                          variant="ghost" 
-                          size="icon" 
-                          className="h-7 w-7 text-destructive hover:text-destructive"
-                          onClick={() => removeFromCart(item.productId)}
-                        >
-                          <Trash2 className="h-4 w-4" />
-                        </Button>
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </ScrollArea>
-
-              <ManualItemEntry
-                onItemAdded={(item) => {
-                  setCart(prev => [...prev, { ...item, isManual: true }]);
-                }}
-              />
-
-              <div className="border-t pt-3 mt-3 space-y-3">
-                <div className="flex justify-between text-lg font-bold">
-                  <span>Total:</span>
-                  <span>{formatAmount(getTotalAmount())}</span>
-                </div>
-
-                <div className="space-y-2">
-                  <Label className="text-xs">Payment Method</Label>
-                  <div className="grid grid-cols-5 gap-1">
-                    {paymentMethods.map(pm => (
-                      <Button
-                        key={pm.value}
-                        variant={paymentMethod === pm.value ? 'default' : 'outline'}
-                        size="sm"
-                        className="h-9 text-xs flex-col gap-0.5 px-1"
-                        onClick={() => setPaymentMethod(pm.value)}
-                      >
-                        <pm.icon className="h-4 w-4" />
-                        <span className="truncate">{pm.label}</span>
-                      </Button>
-                    ))}
-                  </div>
-                </div>
-
-                <div className="grid grid-cols-2 gap-2">
-                  <Button 
-                    variant="outline" 
-                    onClick={() => setShowSplitPayment(true)} 
-                    disabled={cart.length === 0}
-                    className="gap-1"
-                  >
-                    <Split className="h-4 w-4" />
-                    Split Pay
-                  </Button>
-                  <Button 
-                    onClick={handlePayNow} 
-                    disabled={isProcessing || cart.length === 0}
-                  >
-                    {isProcessing ? 'Processing...' : paymentMethod === 'credit' ? 'Credit Sale' : 'Pay Now'}
-                  </Button>
-                </div>
-              </div>
-              </CardContent>
-            </Card>
+          <div className="px-3 pt-3 sm:px-4 sm:pt-4">
+            <TabsList className="w-full sm:w-fit">
+              <TabsTrigger value="sales" className="gap-1.5 flex-1 sm:flex-none text-xs sm:text-sm">
+                <Package className="h-4 w-4" /> Sales
+              </TabsTrigger>
+              <TabsTrigger value="pending" className="gap-1.5 flex-1 sm:flex-none text-xs sm:text-sm">
+                <ClipboardList className="h-4 w-4" /> Pending
+              </TabsTrigger>
+              <TabsTrigger value="loans" className="gap-1.5 flex-1 sm:flex-none text-xs sm:text-sm">
+                <Wallet className="h-4 w-4" /> Loans
+              </TabsTrigger>
+            </TabsList>
           </div>
-        </TabsContent>
 
-        {/* Pending Bills Tab */}
-        <TabsContent value="pending" className="flex-1 overflow-hidden mt-0">
-          <PendingBills
-            selectedWarehouse={selectedWarehouse}
-            warehouses={warehouses}
-            cart={cart}
-            onLoadBill={(items, billId, name, phone, warehouseId) => {
-              setCart(items);
-              setCustomerName(name);
-              setCustomerPhone(phone);
-              setActivePendingBillId(billId);
-              setSelectedWarehouse(warehouseId);
-              setActiveTab('sales');
-            }}
-            onBillSaved={() => {
-              setCart([]);
-              setCustomerName('');
-              setCustomerPhone('');
-            }}
-          />
-        </TabsContent>
-
-        {/* Loan Payments Tab */}
-        <TabsContent value="loans" className="flex-1 overflow-hidden mt-0">
-          <div className="grid gap-4 lg:grid-cols-2 h-full">
-            {/* Loans List */}
-            <Card className="flex flex-col overflow-hidden">
-              <CardContent className="p-4 flex flex-col flex-1 overflow-hidden">
-                <div className="mb-4">
-                  <Input
-                    placeholder="Search by customer name or phone..."
-                    value={loanSearchQuery}
-                    onChange={(e) => setLoanSearchQuery(e.target.value)}
-                  />
+          <TabsContent value="sales" className="flex-1 overflow-hidden mt-0 px-3 pb-3 sm:px-4 sm:pb-4">
+            <div className="flex gap-4 h-full">
+              {/* Products Area */}
+              <div className="flex-1 flex flex-col min-w-0 overflow-hidden">
+                {/* Search & Filters */}
+                <div className="flex flex-col sm:flex-row gap-2 mb-3 mt-3">
+                  <Select value={selectedWarehouse} onValueChange={setSelectedWarehouse}>
+                    <SelectTrigger className="w-full sm:w-44 h-10">
+                      <SelectValue placeholder="Warehouse" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="all">All Warehouses</SelectItem>
+                      {warehouses.map((w) => (<SelectItem key={w.id} value={w.id}>{w.name}</SelectItem>))}
+                    </SelectContent>
+                  </Select>
+                  <div className="relative flex-1">
+                    <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                    <Input placeholder="Search products..." value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} className="pl-9 h-10" />
+                    {searchQuery && (
+                      <Button variant="ghost" size="icon" className="absolute right-1 top-1/2 -translate-y-1/2 h-7 w-7" onClick={() => setSearchQuery('')}>
+                        <X className="h-3.5 w-3.5" />
+                      </Button>
+                    )}
+                  </div>
+                  <BarcodeScanner onProductFound={handleBarcodeProduct} />
                 </div>
+
+                {/* Product Grid */}
                 <ScrollArea className="flex-1">
-                  {filteredLoans.length === 0 ? (
-                    <div className="flex flex-col items-center justify-center h-40 text-muted-foreground">
-                      <Wallet className="h-10 w-10 mb-2 opacity-50" />
-                      <p className="text-sm">No pending loans</p>
-                    </div>
-                  ) : (
-                    <div className="space-y-2">
-                      {filteredLoans.map((loan) => {
-                        const remaining = loan.amount - (loan.paid_amount || 0);
-                        const isOverdue = loan.due_date && new Date(loan.due_date) < new Date();
-                        return (
-                          <button
-                            key={loan.id}
-                            type="button"
-                            className={`w-full text-left p-3 rounded-lg border transition-all ${
-                              selectedLoan?.id === loan.id ? 'border-primary bg-primary/5' : 'hover:border-primary/50'
-                            }`}
-                            onClick={() => handleSelectLoan(loan)}
-                          >
-                            <div className="flex justify-between items-start mb-1">
-                              <span className="font-medium">{loan.customers?.name || 'Unknown'}</span>
-                              <Badge variant={isOverdue ? 'destructive' : loan.status === 'partial' ? 'secondary' : 'outline'}>
-                                {isOverdue ? 'Overdue' : loan.status}
-                              </Badge>
-                            </div>
-                            {loan.customers?.phone && (
-                              <p className="text-xs text-muted-foreground">{loan.customers.phone}</p>
+                  <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 2xl:grid-cols-6 gap-2 sm:gap-3 pb-20 lg:pb-4">
+                    {filteredProducts.map((product) => {
+                      const stockStatus = getStockStatus(product);
+                      const inCart = cart.find(i => i.productId === product.id);
+                      return (
+                        <button
+                          key={product.id}
+                          type="button"
+                          className={`relative flex flex-col p-2.5 sm:p-3 rounded-xl border text-left transition-all active:scale-[0.97] ${
+                            stockStatus === 'out'
+                              ? 'opacity-50 cursor-not-allowed border-border'
+                              : inCart
+                              ? 'border-primary bg-primary/5 shadow-sm ring-1 ring-primary/20'
+                              : 'hover:border-primary/50 hover:shadow-sm border-border bg-card'
+                          }`}
+                          onClick={() => stockStatus !== 'out' && addToCart(product)}
+                          disabled={stockStatus === 'out'}
+                        >
+                          {/* Product Image */}
+                          <div className="w-full aspect-square rounded-lg bg-muted/50 flex items-center justify-center mb-2 overflow-hidden">
+                            {product.image_url ? (
+                              <img src={product.image_url} alt={product.name} className="w-full h-full object-cover rounded-lg" loading="lazy" />
+                            ) : (
+                              <Package className="h-8 w-8 text-muted-foreground/50" />
                             )}
-                            <div className="flex justify-between mt-2 text-sm">
-                              <span>Remaining:</span>
-                              <span className="font-semibold text-destructive">{formatAmount(remaining)}</span>
-                            </div>
-                            {loan.due_date && (
-                              <div className="flex items-center gap-1 mt-1 text-xs text-muted-foreground">
-                                <Calendar className="h-3 w-3" />
-                                Due: {format(new Date(loan.due_date), 'PP')}
-                              </div>
-                            )}
-                          </button>
-                        );
-                      })}
-                    </div>
-                  )}
-                </ScrollArea>
-              </CardContent>
-            </Card>
-
-            {/* Loan Payment Form */}
-            <Card className="flex flex-col">
-              <CardContent className="p-4 flex flex-col flex-1">
-                {selectedLoan ? (
-                  <div className="space-y-4">
-                    <div className="p-4 bg-muted rounded-lg">
-                      <h3 className="font-semibold text-lg mb-2">{selectedLoan.customers?.name}</h3>
-                      <div className="grid grid-cols-2 gap-2 text-sm">
-                        <div>
-                          <span className="text-muted-foreground">Total Loan:</span>
-                          <p className="font-medium">{formatAmount(selectedLoan.amount)}</p>
-                        </div>
-                        <div>
-                          <span className="text-muted-foreground">Paid:</span>
-                          <p className="font-medium text-green-600">{formatAmount(selectedLoan.paid_amount || 0)}</p>
-                        </div>
-                        <div className="col-span-2">
-                          <span className="text-muted-foreground">Remaining:</span>
-                          <p className="font-semibold text-lg text-destructive">
-                            {formatAmount(selectedLoan.amount - (selectedLoan.paid_amount || 0))}
-                          </p>
-                        </div>
-                      </div>
-                    </div>
-
-                    <div className="space-y-2">
-                      <Label>Payment Amount</Label>
-                      <Input
-                        type="number"
-                        placeholder="Enter amount"
-                        value={loanPaymentAmount}
-                        onChange={(e) => setLoanPaymentAmount(e.target.value)}
-                      />
-                    </div>
-
-                    <div className="space-y-2">
-                      <Label>Payment Method</Label>
-                      <div className="grid grid-cols-4 gap-2">
-                        {paymentMethods.filter(pm => pm.value !== 'credit').map(pm => (
-                          <Button
-                            key={pm.value}
-                            variant={loanPaymentMethod === pm.value ? 'default' : 'outline'}
-                            size="sm"
-                            className="h-10 text-xs flex-col gap-0.5"
-                            onClick={() => setLoanPaymentMethod(pm.value)}
-                          >
-                            <pm.icon className="h-4 w-4" />
-                            <span>{pm.label}</span>
-                          </Button>
-                        ))}
-                      </div>
-                    </div>
-
-                    {/* Payment History */}
-                    {loanPayments.length > 0 && (
-                      <div className="space-y-2">
-                        <Label className="text-sm">Payment History</Label>
-                        <ScrollArea className="h-32 border rounded-lg">
-                          <div className="p-2 space-y-2">
-                            {loanPayments.map(payment => (
-                              <div key={payment.id} className="flex justify-between items-center text-sm p-2 bg-muted/50 rounded">
-                                <div>
-                                  <p className="font-medium text-green-600">+{formatAmount(payment.amount)}</p>
-                                  <p className="text-xs text-muted-foreground capitalize">
-                                    {payment.payment_method.replace('_', ' ')}
-                                  </p>
-                                </div>
-                                <div className="text-right text-xs text-muted-foreground">
-                                  {format(new Date(payment.created_at), 'PP')}
-                                  <br />
-                                  {format(new Date(payment.created_at), 'p')}
-                                </div>
-                              </div>
-                            ))}
                           </div>
-                        </ScrollArea>
+
+                          {/* Product Info */}
+                          <p className="font-medium text-xs sm:text-sm line-clamp-2 leading-tight mb-1">{product.name}</p>
+                          <p className="text-primary font-bold text-sm sm:text-base">{formatAmount(product.selling_price)}</p>
+                          <p className="text-[10px] text-muted-foreground">per {product.selling_unit}</p>
+
+                          {/* Stock Badge */}
+                          <Badge className={`absolute top-1.5 right-1.5 text-[10px] px-1.5 py-0 h-5 ${
+                            stockStatus === 'out' ? 'bg-destructive' : stockStatus === 'low' ? 'bg-orange-500' : 'bg-green-600'
+                          }`}>
+                            {product.stock_unit !== product.selling_unit
+                              ? `${(product.availableInSellingUnit || 0).toFixed(0)} ${product.selling_unit}`
+                              : product.stock}
+                          </Badge>
+
+                          {/* In-Cart Indicator */}
+                          {inCart && (
+                            <Badge className="absolute top-1.5 left-1.5 text-[10px] px-1.5 py-0 h-5 bg-primary">
+                              {inCart.quantity} in cart
+                            </Badge>
+                          )}
+
+                          {stockStatus === 'low' && <AlertTriangle className="absolute bottom-1.5 left-1.5 h-3.5 w-3.5 text-orange-500" />}
+                        </button>
+                      );
+                    })}
+                    {filteredProducts.length === 0 && (
+                      <div className="col-span-full flex flex-col items-center justify-center py-16 text-muted-foreground">
+                        <Package className="h-12 w-12 mb-3 opacity-30" />
+                        <p className="font-medium">No products found</p>
+                        <p className="text-sm mt-1">Try a different search or warehouse</p>
                       </div>
                     )}
-
-                    <Button
-                      className="w-full gap-2" 
-                      size="lg"
-                      onClick={processLoanPayment}
-                      disabled={isProcessing}
-                    >
-                      <CheckCircle className="h-5 w-5" />
-                      {isProcessing ? 'Processing...' : 'Process Payment'}
-                    </Button>
-
-                    <Button 
-                      variant="outline" 
-                      className="w-full"
-                      onClick={() => setSelectedLoan(null)}
-                    >
-                      Cancel
-                    </Button>
                   </div>
-                ) : (
-                  <div className="flex flex-col items-center justify-center h-full text-muted-foreground">
-                    <Wallet className="h-12 w-12 mb-3 opacity-50" />
-                    <p>Select a loan to process payment</p>
-                  </div>
-                )}
-              </CardContent>
-            </Card>
-          </div>
-        </TabsContent>
-      </Tabs>
+                </ScrollArea>
+              </div>
+
+              {/* Desktop Cart Sidebar - hidden on mobile */}
+              <Card className="hidden lg:flex w-[380px] xl:w-[420px] flex-col overflow-hidden shrink-0">
+                <CardContent className="p-4 flex flex-col flex-1 overflow-hidden">
+                  <h2 className="font-bold text-base mb-3 flex items-center gap-2">
+                    <ShoppingCart className="h-4 w-4" />
+                    Cart
+                    {cart.length > 0 && <Badge variant="secondary" className="text-xs">{cart.length}</Badge>}
+                  </h2>
+                  <CartContent />
+                </CardContent>
+              </Card>
+            </div>
+          </TabsContent>
+
+          {/* PENDING BILLS TAB */}
+          <TabsContent value="pending" className="flex-1 overflow-hidden mt-0 px-3 pb-3 sm:px-4 sm:pb-4">
+            <PendingBills
+              selectedWarehouse={selectedWarehouse}
+              warehouses={warehouses}
+              cart={cart}
+              onLoadBill={(items, billId, name, phone, warehouseId) => {
+                setCart(items); setCustomerName(name); setCustomerPhone(phone);
+                setActivePendingBillId(billId); setSelectedWarehouse(warehouseId); setActiveTab('sales');
+              }}
+              onBillSaved={() => { setCart([]); setCustomerName(''); setCustomerPhone(''); }}
+            />
+          </TabsContent>
+
+          {/* LOAN PAYMENTS TAB */}
+          <TabsContent value="loans" className="flex-1 overflow-hidden mt-0 px-3 pb-3 sm:px-4 sm:pb-4">
+            <div className="grid gap-4 md:grid-cols-2 h-full pt-3">
+              <Card className="flex flex-col overflow-hidden">
+                <CardContent className="p-4 flex flex-col flex-1 overflow-hidden">
+                  <Input placeholder="Search by customer name or phone..." value={loanSearchQuery} onChange={(e) => setLoanSearchQuery(e.target.value)} className="mb-3" />
+                  <ScrollArea className="flex-1">
+                    {filteredLoans.length === 0 ? (
+                      <div className="flex flex-col items-center justify-center py-12 text-muted-foreground">
+                        <Wallet className="h-10 w-10 mb-2 opacity-50" />
+                        <p className="text-sm">No pending loans</p>
+                      </div>
+                    ) : (
+                      <div className="space-y-2">
+                        {filteredLoans.map((loan) => {
+                          const remaining = loan.amount - (loan.paid_amount || 0);
+                          const isOverdue = loan.due_date && new Date(loan.due_date) < new Date();
+                          return (
+                            <button key={loan.id} type="button" className={`w-full text-left p-3 rounded-xl border transition-all ${selectedLoan?.id === loan.id ? 'border-primary bg-primary/5' : 'hover:border-primary/50'}`} onClick={() => handleSelectLoan(loan)}>
+                              <div className="flex justify-between items-start mb-1">
+                                <span className="font-medium text-sm">{loan.customers?.name || 'Unknown'}</span>
+                                <Badge variant={isOverdue ? 'destructive' : loan.status === 'partial' ? 'secondary' : 'outline'} className="text-[10px]">{isOverdue ? 'Overdue' : loan.status}</Badge>
+                              </div>
+                              {loan.customers?.phone && <p className="text-xs text-muted-foreground">{loan.customers.phone}</p>}
+                              <div className="flex justify-between mt-2 text-sm">
+                                <span>Remaining:</span>
+                                <span className="font-semibold text-destructive">{formatAmount(remaining)}</span>
+                              </div>
+                              {loan.due_date && (<div className="flex items-center gap-1 mt-1 text-xs text-muted-foreground"><Calendar className="h-3 w-3" />Due: {format(new Date(loan.due_date), 'PP')}</div>)}
+                            </button>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </ScrollArea>
+                </CardContent>
+              </Card>
+
+              <Card className="flex flex-col">
+                <CardContent className="p-4 flex flex-col flex-1">
+                  {selectedLoan ? (
+                    <div className="space-y-4">
+                      <div className="p-4 bg-muted rounded-xl">
+                        <h3 className="font-semibold text-lg mb-2">{selectedLoan.customers?.name}</h3>
+                        <div className="grid grid-cols-2 gap-2 text-sm">
+                          <div><span className="text-muted-foreground">Total Loan:</span><p className="font-medium">{formatAmount(selectedLoan.amount)}</p></div>
+                          <div><span className="text-muted-foreground">Paid:</span><p className="font-medium text-green-600">{formatAmount(selectedLoan.paid_amount || 0)}</p></div>
+                          <div className="col-span-2"><span className="text-muted-foreground">Remaining:</span><p className="font-semibold text-lg text-destructive">{formatAmount(selectedLoan.amount - (selectedLoan.paid_amount || 0))}</p></div>
+                        </div>
+                      </div>
+                      <div className="space-y-2"><Label>Payment Amount</Label><Input type="number" placeholder="Enter amount" value={loanPaymentAmount} onChange={(e) => setLoanPaymentAmount(e.target.value)} /></div>
+                      <div className="space-y-2">
+                        <Label>Payment Method</Label>
+                        <div className="grid grid-cols-4 gap-2">
+                          {paymentMethods.filter(pm => pm.value !== 'credit').map(pm => (
+                            <Button key={pm.value} variant={loanPaymentMethod === pm.value ? 'default' : 'outline'} size="sm" className="h-10 text-xs flex-col gap-0.5" onClick={() => setLoanPaymentMethod(pm.value)}>
+                              <pm.icon className="h-4 w-4" /><span>{pm.label}</span>
+                            </Button>
+                          ))}
+                        </div>
+                      </div>
+                      {loanPayments.length > 0 && (
+                        <div className="space-y-2">
+                          <Label className="text-sm">Payment History</Label>
+                          <ScrollArea className="h-32 border rounded-lg">
+                            <div className="p-2 space-y-2">
+                              {loanPayments.map(payment => (
+                                <div key={payment.id} className="flex justify-between items-center text-sm p-2 bg-muted/50 rounded">
+                                  <div><p className="font-medium text-green-600">+{formatAmount(payment.amount)}</p><p className="text-xs text-muted-foreground capitalize">{payment.payment_method.replace('_', ' ')}</p></div>
+                                  <div className="text-right text-xs text-muted-foreground">{format(new Date(payment.created_at), 'PP')}<br />{format(new Date(payment.created_at), 'p')}</div>
+                                </div>
+                              ))}
+                            </div>
+                          </ScrollArea>
+                        </div>
+                      )}
+                      <Button className="w-full gap-2" size="lg" onClick={processLoanPayment} disabled={isProcessing}><CheckCircle className="h-5 w-5" />{isProcessing ? 'Processing...' : 'Process Payment'}</Button>
+                      <Button variant="outline" className="w-full" onClick={() => setSelectedLoan(null)}>Cancel</Button>
+                    </div>
+                  ) : (
+                    <div className="flex flex-col items-center justify-center h-full text-muted-foreground">
+                      <Wallet className="h-12 w-12 mb-3 opacity-50" />
+                      <p>Select a loan to process payment</p>
+                    </div>
+                  )}
+                </CardContent>
+              </Card>
+            </div>
+          </TabsContent>
+        </Tabs>
       </div>
+
+      {/* Mobile Floating Cart Button - shown only on mobile when in sales tab */}
+      {activeTab === 'sales' && (
+        <Sheet open={mobileCartOpen} onOpenChange={setMobileCartOpen}>
+          <SheetTrigger asChild>
+            <button
+              className="lg:hidden fixed bottom-4 left-1/2 -translate-x-1/2 z-50 flex items-center gap-3 bg-primary text-primary-foreground px-5 py-3 rounded-2xl shadow-lg shadow-primary/30 active:scale-95 transition-transform"
+            >
+              <ShoppingCart className="h-5 w-5" />
+              <span className="font-bold text-sm">
+                {cart.length > 0 ? `${cart.length} items` : 'Cart'}
+              </span>
+              {cart.length > 0 && (
+                <>
+                  <span className="w-px h-5 bg-primary-foreground/30" />
+                  <span className="font-bold text-sm">{formatAmount(getTotalAmount())}</span>
+                </>
+              )}
+              <ChevronUp className="h-4 w-4" />
+            </button>
+          </SheetTrigger>
+          <SheetContent side="bottom" className="h-[85vh] rounded-t-2xl px-4 pb-4 pt-2 flex flex-col">
+            <div className="w-10 h-1 bg-muted-foreground/30 rounded-full mx-auto mb-3 shrink-0" />
+            <SheetHeader className="pb-2 shrink-0">
+              <SheetTitle className="flex items-center gap-2 text-base">
+                <ShoppingCart className="h-4 w-4" />
+                Cart
+                {cart.length > 0 && <Badge variant="secondary" className="text-xs">{cart.length}</Badge>}
+              </SheetTitle>
+            </SheetHeader>
+            <div className="flex-1 min-h-0 overflow-hidden">
+              <CartContent />
+            </div>
+          </SheetContent>
+        </Sheet>
+      )}
 
       {/* Split Payment Dialog */}
       <Dialog open={showSplitPayment} onOpenChange={setShowSplitPayment}>
         <DialogContent className="max-w-md">
-          <DialogHeader>
-            <DialogTitle>Split Payment</DialogTitle>
-          </DialogHeader>
+          <DialogHeader><DialogTitle>Split Payment</DialogTitle></DialogHeader>
           <div className="space-y-4">
-            <div className="flex justify-between text-lg font-semibold">
-              <span>Total:</span>
-              <span>{formatAmount(getTotalAmount())}</span>
-            </div>
-
+            <div className="flex justify-between text-lg font-semibold"><span>Total:</span><span>{formatAmount(getTotalAmount())}</span></div>
             {splitPayments.length > 0 && (
               <div className="space-y-2">
                 {splitPayments.map((payment, index) => (
@@ -1372,49 +846,24 @@ export default function POS() {
                     <span className="capitalize">{payment.method.replace('_', ' ')}</span>
                     <div className="flex items-center gap-2">
                       <span className="font-medium">{formatAmount(payment.amount)}</span>
-                      <Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => removeSplitPayment(index)}>
-                        <X className="h-4 w-4" />
-                      </Button>
+                      <Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => removeSplitPayment(index)}><X className="h-4 w-4" /></Button>
                     </div>
                   </div>
                 ))}
               </div>
             )}
-
             <div className="p-3 bg-primary/10 rounded-lg">
-              <div className="flex justify-between font-semibold">
-                <span>Remaining:</span>
-                <span className={getRemainingAmount() <= 0 ? 'text-green-600' : ''}>{formatAmount(getRemainingAmount())}</span>
-              </div>
+              <div className="flex justify-between font-semibold"><span>Remaining:</span><span className={getRemainingAmount() <= 0 ? 'text-green-600' : ''}>{formatAmount(getRemainingAmount())}</span></div>
             </div>
-
             <div className="flex gap-2">
               <Select value={newSplitMethod} onValueChange={setNewSplitMethod}>
-                <SelectTrigger className="w-40">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  {paymentMethods.map(pm => (
-                    <SelectItem key={pm.value} value={pm.value}>{pm.label}</SelectItem>
-                  ))}
-                </SelectContent>
+                <SelectTrigger className="w-40"><SelectValue /></SelectTrigger>
+                <SelectContent>{paymentMethods.map(pm => (<SelectItem key={pm.value} value={pm.value}>{pm.label}</SelectItem>))}</SelectContent>
               </Select>
-              <Input
-                type="number"
-                placeholder="Amount"
-                value={newSplitAmount}
-                onChange={(e) => setNewSplitAmount(e.target.value)}
-                className="flex-1"
-              />
+              <Input type="number" placeholder="Amount" value={newSplitAmount} onChange={(e) => setNewSplitAmount(e.target.value)} className="flex-1" />
               <Button onClick={addSplitPayment}>Add</Button>
             </div>
-
-            <Button 
-              className="w-full" 
-              size="lg"
-              onClick={() => processSale(true)} 
-              disabled={isProcessing || getRemainingAmount() > 0.01}
-            >
+            <Button className="w-full" size="lg" onClick={() => processSale(true)} disabled={isProcessing || getRemainingAmount() > 0.01}>
               {isProcessing ? 'Processing...' : 'Complete Split Payment'}
             </Button>
           </div>
@@ -1423,188 +872,74 @@ export default function POS() {
 
       {/* Credit Sale Dialog */}
       <Dialog open={showCreditDialog} onOpenChange={setShowCreditDialog}>
-        <DialogContent className="max-w-md">
-          <DialogHeader>
-            <DialogTitle className="flex items-center gap-2">
-              <Wallet className="h-5 w-5" />
-              Credit Sale
-            </DialogTitle>
-          </DialogHeader>
+        <DialogContent className="max-w-md max-h-[90vh] overflow-y-auto">
+          <DialogHeader><DialogTitle className="flex items-center gap-2"><Wallet className="h-5 w-5" />Credit Sale</DialogTitle></DialogHeader>
           <div className="space-y-4">
-            <div className="flex justify-between text-lg font-semibold p-3 bg-muted rounded-lg">
-              <span>Cart Total:</span>
-              <span>{formatAmount(getTotalAmount())}</span>
-            </div>
-
+            <div className="flex justify-between text-lg font-semibold p-3 bg-muted rounded-lg"><span>Cart Total:</span><span>{formatAmount(getTotalAmount())}</span></div>
             <div className="space-y-2">
               <div className="flex items-center justify-between">
                 <Label>Select Customer *</Label>
-                <Button 
-                  variant="ghost" 
-                  size="sm" 
-                  className="h-7 text-xs gap-1"
-                  onClick={() => setShowNewCustomerForm(!showNewCustomerForm)}
-                >
-                  <UserPlus className="h-3 w-3" />
-                  {showNewCustomerForm ? 'Cancel' : 'New Customer'}
+                <Button variant="ghost" size="sm" className="h-7 text-xs gap-1" onClick={() => setShowNewCustomerForm(!showNewCustomerForm)}>
+                  <UserPlus className="h-3 w-3" />{showNewCustomerForm ? 'Cancel' : 'New Customer'}
                 </Button>
               </div>
-
               {showNewCustomerForm ? (
                 <div className="p-3 border rounded-lg space-y-3 bg-muted/30">
-                  <Input
-                    placeholder="Customer name *"
-                    value={newCustomerName}
-                    onChange={(e) => setNewCustomerName(e.target.value)}
-                  />
-                  <Input
-                    placeholder="Phone number (optional)"
-                    value={newCustomerPhone}
-                    onChange={(e) => setNewCustomerPhone(e.target.value)}
-                  />
-                  <Button 
-                    className="w-full" 
-                    size="sm"
-                    onClick={createQuickCustomer}
-                    disabled={!newCustomerName.trim()}
-                  >
-                    <UserPlus className="h-4 w-4 mr-1" />
-                    Create & Select
-                  </Button>
+                  <Input placeholder="Customer name *" value={newCustomerName} onChange={(e) => setNewCustomerName(e.target.value)} />
+                  <Input placeholder="Phone number (optional)" value={newCustomerPhone} onChange={(e) => setNewCustomerPhone(e.target.value)} />
+                  <Button className="w-full" size="sm" onClick={createQuickCustomer} disabled={!newCustomerName.trim()}><UserPlus className="h-4 w-4 mr-1" />Create & Select</Button>
                 </div>
               ) : (
                 <>
-                  <Input
-                    placeholder="Search customers..."
-                    value={customerSearchQuery}
-                    onChange={(e) => setCustomerSearchQuery(e.target.value)}
-                    className="mb-2"
-                  />
+                  <Input placeholder="Search customers..." value={customerSearchQuery} onChange={(e) => setCustomerSearchQuery(e.target.value)} className="mb-2" />
                   <ScrollArea className="h-40 border rounded-lg">
                     <div className="p-2 space-y-1">
-                      {customers
-                        .filter(c => 
-                          fuzzySearch(c.name, customerSearchQuery) || 
-                          (c.phone && fuzzySearch(c.phone, customerSearchQuery))
-                        )
-                        .map(customer => (
-                          <button
-                            key={customer.id}
-                            type="button"
-                            className={`w-full text-left p-2 rounded transition-all ${
-                              selectedCustomerId === customer.id 
-                                ? 'bg-primary text-primary-foreground' 
-                                : 'hover:bg-muted'
-                            }`}
-                            onClick={() => setSelectedCustomerId(customer.id)}
-                          >
-                            <div className="font-medium">{customer.name}</div>
-                            {customer.phone && (
-                              <div className="text-xs opacity-80">{customer.phone}</div>
-                            )}
-                          </button>
-                        ))
-                      }
-                      {customers.filter(c => 
-                        fuzzySearch(c.name, customerSearchQuery) || 
-                        (c.phone && fuzzySearch(c.phone, customerSearchQuery))
-                      ).length === 0 && (
-                        <p className="text-center text-muted-foreground text-sm py-4">
-                          No customers found
-                        </p>
+                      {customers.filter(c => fuzzySearch(c.name, customerSearchQuery) || (c.phone && fuzzySearch(c.phone, customerSearchQuery))).map(customer => (
+                        <button key={customer.id} type="button" className={`w-full text-left p-2 rounded transition-all ${selectedCustomerId === customer.id ? 'bg-primary text-primary-foreground' : 'hover:bg-muted'}`} onClick={() => setSelectedCustomerId(customer.id)}>
+                          <div className="font-medium">{customer.name}</div>
+                          {customer.phone && <div className="text-xs opacity-80">{customer.phone}</div>}
+                        </button>
+                      ))}
+                      {customers.filter(c => fuzzySearch(c.name, customerSearchQuery) || (c.phone && fuzzySearch(c.phone, customerSearchQuery))).length === 0 && (
+                        <p className="text-center text-muted-foreground text-sm py-4">No customers found</p>
                       )}
                     </div>
                   </ScrollArea>
                 </>
               )}
             </div>
-
             <div className="grid grid-cols-2 gap-4">
               <div className="space-y-2">
-                <Label className="flex items-center gap-1">
-                  <Calendar className="h-4 w-4" />
-                  Due in (days)
-                </Label>
+                <Label className="flex items-center gap-1"><Calendar className="h-4 w-4" />Due in (days)</Label>
                 <Select value={creditDueDays} onValueChange={setCreditDueDays}>
-                  <SelectTrigger>
-                    <SelectValue />
-                  </SelectTrigger>
+                  <SelectTrigger><SelectValue /></SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="7">7 days</SelectItem>
-                    <SelectItem value="14">14 days</SelectItem>
-                    <SelectItem value="30">30 days</SelectItem>
-                    <SelectItem value="60">60 days</SelectItem>
-                    <SelectItem value="90">90 days</SelectItem>
+                    <SelectItem value="7">7 days</SelectItem><SelectItem value="14">14 days</SelectItem><SelectItem value="30">30 days</SelectItem><SelectItem value="60">60 days</SelectItem><SelectItem value="90">90 days</SelectItem>
                   </SelectContent>
                 </Select>
               </div>
               <div className="space-y-2">
-                <Label className="flex items-center gap-1">
-                  <Percent className="h-4 w-4" />
-                  Interest Rate (%)
-                </Label>
-                <Input
-                  type="number"
-                  min="0"
-                  max="100"
-                  step="0.5"
-                  value={creditInterestRate}
-                  onChange={(e) => setCreditInterestRate(e.target.value)}
-                  placeholder="0"
-                />
+                <Label className="flex items-center gap-1"><Percent className="h-4 w-4" />Interest Rate (%)</Label>
+                <Input type="number" min="0" max="100" step="0.5" value={creditInterestRate} onChange={(e) => setCreditInterestRate(e.target.value)} placeholder="0" />
               </div>
             </div>
-
             {parseFloat(creditInterestRate) > 0 && (
               <div className="p-3 bg-primary/10 rounded-lg space-y-1">
-                <div className="flex justify-between text-sm">
-                  <span>Base Amount:</span>
-                  <span>{formatAmount(getTotalAmount())}</span>
-                </div>
-                <div className="flex justify-between text-sm">
-                  <span>Interest ({creditInterestRate}%):</span>
-                  <span>{formatAmount(getTotalAmount() * (parseFloat(creditInterestRate) / 100))}</span>
-                </div>
-                <div className="flex justify-between font-semibold border-t pt-1 mt-1">
-                  <span>Total Loan:</span>
-                  <span>{formatAmount(getTotalAmount() * (1 + parseFloat(creditInterestRate) / 100))}</span>
-                </div>
+                <div className="flex justify-between text-sm"><span>Base Amount:</span><span>{formatAmount(getTotalAmount())}</span></div>
+                <div className="flex justify-between text-sm"><span>Interest ({creditInterestRate}%):</span><span>{formatAmount(getTotalAmount() * (parseFloat(creditInterestRate) / 100))}</span></div>
+                <div className="flex justify-between font-semibold border-t pt-1 mt-1"><span>Total Loan:</span><span>{formatAmount(getTotalAmount() * (1 + parseFloat(creditInterestRate) / 100))}</span></div>
               </div>
             )}
-
-            <div className="flex justify-between text-sm text-muted-foreground">
-              <span>Due Date:</span>
-              <span>{format(addDays(new Date(), parseInt(creditDueDays) || 30), 'PPP')}</span>
-            </div>
-
-            <Button 
-              className="w-full gap-2" 
-              size="lg"
-              onClick={processCreditSale}
-              disabled={isProcessing || !selectedCustomerId}
-            >
-              <Wallet className="h-5 w-5" />
-              {isProcessing ? 'Processing...' : 'Complete Credit Sale'}
+            <div className="flex justify-between text-sm text-muted-foreground"><span>Due Date:</span><span>{format(addDays(new Date(), parseInt(creditDueDays) || 30), 'PPP')}</span></div>
+            <Button className="w-full gap-2" size="lg" onClick={processCreditSale} disabled={isProcessing || !selectedCustomerId}>
+              <Wallet className="h-5 w-5" />{isProcessing ? 'Processing...' : 'Complete Credit Sale'}
             </Button>
-
-            <Button 
-              variant="outline" 
-              className="w-full"
-              onClick={() => {
-                setShowCreditDialog(false);
-                setSelectedCustomerId('');
-                setCustomerSearchQuery('');
-              }}
-            >
-              Cancel
-            </Button>
+            <Button variant="outline" className="w-full" onClick={() => { setShowCreditDialog(false); setSelectedCustomerId(''); setCustomerSearchQuery(''); }}>Cancel</Button>
           </div>
         </DialogContent>
       </Dialog>
 
-      {lastSaleData && (
-        <Receipt isOpen={showReceipt} onClose={() => setShowReceipt(false)} saleData={lastSaleData} />
-      )}
+      {lastSaleData && <Receipt isOpen={showReceipt} onClose={() => setShowReceipt(false)} saleData={lastSaleData} />}
     </div>
   );
 }
