@@ -8,6 +8,7 @@ import { Sidebar } from "@/components/layout/Sidebar";
 import { Header } from "@/components/layout/Header";
 import { AuthProvider, useAuth } from "@/contexts/AuthContext";
 import { usePermissions } from "@/hooks/usePermissions";
+import { OfflineBanner } from "@/components/layout/OfflineBanner";
 import React, { Suspense } from "react";
 
 // Lazy load all pages for faster initial load
@@ -89,6 +90,7 @@ const Layout = ({ children }: { children: React.ReactNode }) => (
       <Sidebar />
       <div className="flex flex-1 flex-col overflow-hidden">
         <Header />
+        <OfflineBanner />
         <main className="flex-1 overflow-y-auto p-4 md:p-6">
           {children}
         </main>
