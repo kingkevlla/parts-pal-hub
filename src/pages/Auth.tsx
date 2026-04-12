@@ -116,7 +116,7 @@ export default function Auth() {
       <Card className="w-full max-w-md">
         <CardHeader className="text-center">
           <CardTitle className="text-2xl font-bold bg-gradient-primary bg-clip-text text-transparent">
-            Parts Manager
+            Inventory System
           </CardTitle>
           <CardDescription>Sign in to manage your business</CardDescription>
         </CardHeader>
