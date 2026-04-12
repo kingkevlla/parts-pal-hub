@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
 import { StatCard } from "@/components/dashboard/StatCard";
-import { Package, TrendingUp, TrendingDown, AlertTriangle, DollarSign, Users, WifiOff, CalendarIcon } from "lucide-react";
+import { Package, TrendingUp, TrendingDown, AlertTriangle, DollarSign, Users, WifiOff, CalendarIcon, X } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { supabase } from "@/integrations/supabase/client";
 import { useCurrency } from "@/hooks/useCurrency";
@@ -12,6 +12,7 @@ import { Calendar } from "@/components/ui/calendar";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { format, startOfDay, endOfDay, startOfMonth, endOfMonth } from "date-fns";
 import { cn } from "@/lib/utils";
+import type { DateRange } from "react-day-picker";
 
 interface DashboardStats {
   totalProducts: number;
@@ -40,7 +41,7 @@ interface LowStockProduct {
 }
 
 export default function Dashboard() {
-  const [selectedDate, setSelectedDate] = useState<Date | undefined>(undefined);
+  const [dateRange, setDateRange] = useState<DateRange | undefined>(undefined);
   const [datesWithRecords, setDatesWithRecords] = useState<Set<string>>(new Set());
   const [stats, setStats] = useState<DashboardStats>({
     totalProducts: 0,
@@ -87,7 +88,7 @@ export default function Dashboard() {
 
   useEffect(() => {
     fetchDashboardData();
-  }, [selectedDate]);
+  }, [dateRange]);
 
   const fetchDatesWithRecords = async () => {
     if (!navigator.onLine) return;
@@ -113,12 +114,11 @@ export default function Dashboard() {
   const fetchDashboardData = async () => {
     const isOnline = navigator.onLine;
 
-    // Determine date range
     let rangeStart: string;
     let rangeEnd: string;
-    if (selectedDate) {
-      rangeStart = startOfDay(selectedDate).toISOString();
-      rangeEnd = endOfDay(selectedDate).toISOString();
+    if (dateRange?.from) {
+      rangeStart = startOfDay(dateRange.from).toISOString();
+      rangeEnd = dateRange.to ? endOfDay(dateRange.to).toISOString() : endOfDay(dateRange.from).toISOString();
     } else {
       rangeStart = new Date(new Date().getFullYear(), new Date().getMonth(), 1).toISOString();
       rangeEnd = new Date().toISOString();
@@ -260,8 +260,22 @@ export default function Dashboard() {
     return `${Math.floor(seconds / 86400)} days ago`;
   };
 
-  const clearDateFilter = () => {
-    setSelectedDate(undefined);
+  const hasDateFilter = !!dateRange?.from;
+
+  const getDateLabel = () => {
+    if (!dateRange?.from) return 'Filter by date range';
+    if (!dateRange.to || dateRange.from.toDateString() === dateRange.to.toDateString()) {
+      return format(dateRange.from, 'PPP');
+    }
+    return `${format(dateRange.from, 'PP')} – ${format(dateRange.to, 'PP')}`;
+  };
+
+  const getSubtitle = () => {
+    if (!hasDateFilter) return 'Overview of your spare parts inventory';
+    if (!dateRange?.to || dateRange.from?.toDateString() === dateRange.to?.toDateString()) {
+      return `Showing data for ${format(dateRange!.from!, 'PPP')}`;
+    }
+    return `Showing data from ${format(dateRange!.from!, 'PP')} to ${format(dateRange!.to!, 'PP')}`;
   };
 
   if (loading) {
@@ -277,11 +291,7 @@ export default function Dashboard() {
       <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
         <div>
           <h1 className="text-3xl font-bold">Dashboard</h1>
-          <p className="text-muted-foreground">
-            {selectedDate
-              ? `Showing data for ${format(selectedDate, 'PPP')}`
-              : 'Overview of your spare parts inventory'}
-          </p>
+          <p className="text-muted-foreground">{getSubtitle()}</p>
         </div>
         <div className="flex items-center gap-2">
           {isOfflineData && (
@@ -295,20 +305,21 @@ export default function Dashboard() {
               <Button
                 variant="outline"
                 className={cn(
-                  "justify-start text-left font-normal",
-                  !selectedDate && "text-muted-foreground",
-                  selectedDate && "border-primary text-primary"
+                  "justify-start text-left font-normal max-w-[280px]",
+                  !hasDateFilter && "text-muted-foreground",
+                  hasDateFilter && "border-primary text-primary"
                 )}
               >
-                <CalendarIcon className="mr-2 h-4 w-4" />
-                {selectedDate ? format(selectedDate, "PPP") : "Filter by date"}
+                <CalendarIcon className="mr-2 h-4 w-4 shrink-0" />
+                <span className="truncate">{getDateLabel()}</span>
               </Button>
             </PopoverTrigger>
             <PopoverContent className="w-auto p-0" align="end">
               <Calendar
-                mode="single"
-                selected={selectedDate}
-                onSelect={setSelectedDate}
+                mode="range"
+                selected={dateRange}
+                onSelect={setDateRange}
+                numberOfMonths={1}
                 initialFocus
                 className={cn("p-3 pointer-events-auto")}
                 modifiers={{
@@ -320,9 +331,9 @@ export default function Dashboard() {
               />
             </PopoverContent>
           </Popover>
-          {selectedDate && (
-            <Button variant="ghost" size="sm" onClick={clearDateFilter} className="text-muted-foreground">
-              Clear
+          {hasDateFilter && (
+            <Button variant="ghost" size="icon" onClick={() => setDateRange(undefined)} className="text-muted-foreground h-9 w-9">
+              <X className="h-4 w-4" />
             </Button>
           )}
         </div>
@@ -336,13 +347,13 @@ export default function Dashboard() {
           variant="default"
         />
         <StatCard
-          title={selectedDate ? "Stock In (Selected)" : "Stock In (This Month)"}
+          title={hasDateFilter ? "Stock In (Filtered)" : "Stock In (This Month)"}
           value={stats.stockInMonth}
           icon={TrendingUp}
           variant="success"
         />
         <StatCard
-          title={selectedDate ? "Stock Out (Selected)" : "Stock Out (This Month)"}
+          title={hasDateFilter ? "Stock Out (Filtered)" : "Stock Out (This Month)"}
           value={stats.stockOutMonth}
           icon={TrendingDown}
           variant="default"
@@ -354,7 +365,7 @@ export default function Dashboard() {
           variant="warning"
         />
         <StatCard
-          title={selectedDate ? "Revenue (Selected)" : "Monthly Revenue"}
+          title={hasDateFilter ? "Revenue (Filtered)" : "Monthly Revenue"}
           value={formatAmount(stats.monthlyRevenue)}
           icon={DollarSign}
           variant="success"
@@ -371,13 +382,13 @@ export default function Dashboard() {
         <Card>
           <CardHeader>
             <CardTitle>
-              {selectedDate ? `Activity on ${format(selectedDate, 'PP')}` : 'Recent Activity'}
+              {hasDateFilter ? `Activity (${getDateLabel()})` : 'Recent Activity'}
             </CardTitle>
           </CardHeader>
           <CardContent>
             {recentActivity.length === 0 ? (
               <p className="text-sm text-muted-foreground text-center py-4">
-                {isOfflineData ? 'Activity history unavailable offline' : selectedDate ? 'No activity on this date' : 'No recent activity'}
+                {isOfflineData ? 'Activity history unavailable offline' : hasDateFilter ? 'No activity in this range' : 'No recent activity'}
               </p>
             ) : (
               <div className="space-y-4">

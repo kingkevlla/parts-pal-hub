@@ -18,6 +18,7 @@ import {
   useSidebar,
 } from "@/components/ui/sidebar";
 import { usePermissions } from "@/hooks/usePermissions";
+import { useSystemSettings } from "@/hooks/useSystemSettings";
 import { Skeleton } from "@/components/ui/skeleton";
 
 interface NavItem {
@@ -67,6 +68,9 @@ export function Sidebar() {
   const location = useLocation();
   const collapsed = state === "collapsed";
   const { hasPermission, loading } = usePermissions();
+  const { settings } = useSystemSettings();
+  const appName = settings.company_name || 'Parts Manager';
+  const appInitials = appName.split(' ').map(w => w[0]).join('').slice(0, 2).toUpperCase();
 
   // Filter navigation items based on user permissions
   const allowedNavigation = navigation.filter((item) => hasPermission(item.permission));
@@ -85,12 +89,12 @@ export function Sidebar() {
     <SidebarComponent collapsible="icon" className="border-r border-sidebar-border">
       <div className="flex h-16 items-center border-b border-sidebar-border px-6">
         {!collapsed ? (
-          <h1 className="text-xl font-bold bg-gradient-primary bg-clip-text text-transparent">
-            Parts Manager
+          <h1 className="text-xl font-bold bg-gradient-primary bg-clip-text text-transparent truncate">
+            {appName}
           </h1>
         ) : (
           <h1 className="text-xl font-bold bg-gradient-primary bg-clip-text text-transparent">
-            PM
+            {appInitials}
           </h1>
         )}
       </div>
