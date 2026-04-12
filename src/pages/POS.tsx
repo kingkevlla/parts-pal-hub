@@ -158,13 +158,13 @@ export default function POS() {
     const isOnline = navigator.onLine;
     let productsData: any[] = [];
     let inventoryData: any[] = [];
+    let salesCountMap = new Map<string, number>();
 
     if (isOnline) {
       const { data: pData, error: productsError } = await supabase
         .from('products')
         .select('id, name, sku, barcode, selling_price, min_stock_level, image_url, stock_unit, selling_unit, unit_conversion_factor')
-        .eq('is_active', true)
-        .order('name');
+        .eq('is_active', true);
       if (productsError) {
         productsData = await getCachedData('products');
         inventoryData = await getCachedData('inventory');
@@ -177,10 +177,27 @@ export default function POS() {
         await cacheData('products', productsData);
         if (selectedWarehouse === 'all') await cacheData('inventory', inventoryData);
       }
+
+      // Fetch sales frequency (count of transaction_items per product)
+      const { data: salesData } = await supabase
+        .from('transaction_items')
+        .select('product_id, quantity');
+      if (salesData) {
+        salesData.forEach((s: any) => {
+          salesCountMap.set(s.product_id, (salesCountMap.get(s.product_id) || 0) + Number(s.quantity || 1));
+        });
+      }
     } else {
       productsData = await getCachedData('products');
       const allInventory = await getCachedData('inventory');
       inventoryData = selectedWarehouse === 'all' ? allInventory : allInventory.filter((i: any) => i.warehouse_id === selectedWarehouse);
+      // Offline: try cached transaction_items for popularity
+      const cachedTxItems = await getCachedData('transaction_items');
+      if (cachedTxItems?.length) {
+        cachedTxItems.forEach((s: any) => {
+          salesCountMap.set(s.product_id, (salesCountMap.get(s.product_id) || 0) + Number(s.quantity || 1));
+        });
+      }
     }
 
     const stockMap = new Map<string, number>();
@@ -193,8 +210,15 @@ export default function POS() {
       const sellingUnit = p.selling_unit || 'piece';
       const convFactor = p.unit_conversion_factor || 1;
       const availableInSellingUnit = stockUnit !== sellingUnit ? rawStock * convFactor : rawStock;
-      return { ...p, stock: rawStock, stock_unit: stockUnit, selling_unit: sellingUnit, unit_conversion_factor: convFactor, availableInSellingUnit };
+      return { ...p, stock: rawStock, stock_unit: stockUnit, selling_unit: sellingUnit, unit_conversion_factor: convFactor, availableInSellingUnit, _salesCount: salesCountMap.get(p.id) || 0 };
     });
+
+    // Sort: highest stock first, then most sold second
+    productsWithStock.sort((a: any, b: any) => {
+      if ((b.stock || 0) !== (a.stock || 0)) return (b.stock || 0) - (a.stock || 0);
+      return (b._salesCount || 0) - (a._salesCount || 0);
+    });
+
     setProducts(productsWithStock);
   };
 
