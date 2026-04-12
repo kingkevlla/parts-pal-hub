@@ -1,12 +1,17 @@
 import { useState, useEffect } from "react";
 import { StatCard } from "@/components/dashboard/StatCard";
-import { Package, TrendingUp, TrendingDown, AlertTriangle, DollarSign, Users, WifiOff } from "lucide-react";
+import { Package, TrendingUp, TrendingDown, AlertTriangle, DollarSign, Users, WifiOff, CalendarIcon } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { supabase } from "@/integrations/supabase/client";
 import { useCurrency } from "@/hooks/useCurrency";
 import { useSystemSettings } from "@/hooks/useSystemSettings";
 import { getCachedData, cacheData } from "@/lib/offlineDb";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { Calendar } from "@/components/ui/calendar";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { format, startOfDay, endOfDay, startOfMonth, endOfMonth } from "date-fns";
+import { cn } from "@/lib/utils";
 
 interface DashboardStats {
   totalProducts: number;
@@ -35,6 +40,8 @@ interface LowStockProduct {
 }
 
 export default function Dashboard() {
+  const [selectedDate, setSelectedDate] = useState<Date | undefined>(undefined);
+  const [datesWithRecords, setDatesWithRecords] = useState<Set<string>>(new Set());
   const [stats, setStats] = useState<DashboardStats>({
     totalProducts: 0,
     stockInMonth: 0,
@@ -52,12 +59,14 @@ export default function Dashboard() {
 
   useEffect(() => {
     fetchDashboardData();
+    fetchDatesWithRecords();
     
     if (navigator.onLine) {
       const stockChannel = supabase
         .channel('dashboard-stock-changes')
         .on('postgres_changes', { event: '*', schema: 'public', table: 'stock_movements' }, () => {
           fetchDashboardData();
+          fetchDatesWithRecords();
         })
         .subscribe();
 
@@ -65,6 +74,7 @@ export default function Dashboard() {
         .channel('dashboard-transactions-changes')
         .on('postgres_changes', { event: '*', schema: 'public', table: 'transactions' }, () => {
           fetchDashboardData();
+          fetchDatesWithRecords();
         })
         .subscribe();
 
@@ -75,36 +85,71 @@ export default function Dashboard() {
     }
   }, [settings.low_stock_threshold]);
 
+  useEffect(() => {
+    fetchDashboardData();
+  }, [selectedDate]);
+
+  const fetchDatesWithRecords = async () => {
+    if (!navigator.onLine) return;
+    try {
+      const now = new Date();
+      const monthStart = startOfMonth(now).toISOString();
+      const monthEnd = endOfMonth(now).toISOString();
+
+      const [{ data: txDates }, { data: movDates }] = await Promise.all([
+        supabase.from('transactions').select('created_at').gte('created_at', monthStart).lte('created_at', monthEnd),
+        supabase.from('stock_movements').select('created_at').gte('created_at', monthStart).lte('created_at', monthEnd),
+      ]);
+
+      const dates = new Set<string>();
+      txDates?.forEach(t => dates.add(format(new Date(t.created_at), 'yyyy-MM-dd')));
+      movDates?.forEach(m => dates.add(format(new Date(m.created_at), 'yyyy-MM-dd')));
+      setDatesWithRecords(dates);
+    } catch (err) {
+      console.error('Failed to fetch dates with records:', err);
+    }
+  };
+
   const fetchDashboardData = async () => {
     const isOnline = navigator.onLine;
+
+    // Determine date range
+    let rangeStart: string;
+    let rangeEnd: string;
+    if (selectedDate) {
+      rangeStart = startOfDay(selectedDate).toISOString();
+      rangeEnd = endOfDay(selectedDate).toISOString();
+    } else {
+      rangeStart = new Date(new Date().getFullYear(), new Date().getMonth(), 1).toISOString();
+      rangeEnd = new Date().toISOString();
+    }
 
     if (isOnline) {
       try {
         const [
           { count: productsCount },
           { data: stockMovements },
-          { data: monthlyTransactions },
+          { data: filteredTransactions },
           { count: customersCount },
           { data: recentMovements },
           { data: products },
           { data: allInventory },
         ] = await Promise.all([
           supabase.from('products').select('*', { count: 'exact', head: true }),
-          supabase.from('stock_movements').select('movement_type, quantity').gte('created_at', new Date(new Date().getFullYear(), new Date().getMonth(), 1).toISOString()),
-          supabase.from('transactions').select('total_amount').gte('created_at', new Date(new Date().getFullYear(), new Date().getMonth(), 1).toISOString()),
+          supabase.from('stock_movements').select('movement_type, quantity').gte('created_at', rangeStart).lte('created_at', rangeEnd),
+          supabase.from('transactions').select('total_amount').gte('created_at', rangeStart).lte('created_at', rangeEnd),
           supabase.from('customers').select('*', { count: 'exact', head: true }),
-          supabase.from('stock_movements').select('id, movement_type, quantity, created_at, products(name)').order('created_at', { ascending: false }).limit(5),
+          supabase.from('stock_movements').select('id, movement_type, quantity, created_at, products(name)').gte('created_at', rangeStart).lte('created_at', rangeEnd).order('created_at', { ascending: false }).limit(10),
           supabase.from('products').select('id, sku, name, min_stock_level, categories(name)'),
           supabase.from('inventory').select('product_id, quantity'),
         ]);
 
-        // Cache for offline use
         if (products) await cacheData('products', products);
         if (allInventory) await cacheData('inventory', allInventory);
 
         const stockInMonth = stockMovements?.filter(m => m.movement_type === 'in').reduce((sum, m) => sum + (m.quantity || 0), 0) || 0;
         const stockOutMonth = stockMovements?.filter(m => m.movement_type === 'out' || m.movement_type === 'sale').reduce((sum, m) => sum + (m.quantity || 0), 0) || 0;
-        const monthlyRevenue = monthlyTransactions?.reduce((sum, t) => sum + Number(t.total_amount || 0), 0) || 0;
+        const monthlyRevenue = filteredTransactions?.reduce((sum, t) => sum + Number(t.total_amount || 0), 0) || 0;
 
         const activities: Activity[] = recentMovements?.map(m => ({
           id: m.id,
@@ -215,6 +260,10 @@ export default function Dashboard() {
     return `${Math.floor(seconds / 86400)} days ago`;
   };
 
+  const clearDateFilter = () => {
+    setSelectedDate(undefined);
+  };
+
   if (loading) {
     return (
       <div className="space-y-6 p-6">
@@ -225,17 +274,58 @@ export default function Dashboard() {
 
   return (
     <div className="space-y-6 p-6">
-      <div className="flex items-center justify-between">
+      <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
         <div>
           <h1 className="text-3xl font-bold">Dashboard</h1>
-          <p className="text-muted-foreground">Overview of your spare parts inventory</p>
+          <p className="text-muted-foreground">
+            {selectedDate
+              ? `Showing data for ${format(selectedDate, 'PPP')}`
+              : 'Overview of your spare parts inventory'}
+          </p>
         </div>
-        {isOfflineData && (
-          <Badge variant="outline" className="gap-1 border-warning text-warning">
-            <WifiOff className="h-3 w-3" />
-            Offline - Showing cached data
-          </Badge>
-        )}
+        <div className="flex items-center gap-2">
+          {isOfflineData && (
+            <Badge variant="outline" className="gap-1 border-warning text-warning">
+              <WifiOff className="h-3 w-3" />
+              Offline
+            </Badge>
+          )}
+          <Popover>
+            <PopoverTrigger asChild>
+              <Button
+                variant="outline"
+                className={cn(
+                  "justify-start text-left font-normal",
+                  !selectedDate && "text-muted-foreground",
+                  selectedDate && "border-primary text-primary"
+                )}
+              >
+                <CalendarIcon className="mr-2 h-4 w-4" />
+                {selectedDate ? format(selectedDate, "PPP") : "Filter by date"}
+              </Button>
+            </PopoverTrigger>
+            <PopoverContent className="w-auto p-0" align="end">
+              <Calendar
+                mode="single"
+                selected={selectedDate}
+                onSelect={setSelectedDate}
+                initialFocus
+                className={cn("p-3 pointer-events-auto")}
+                modifiers={{
+                  hasRecords: (date) => datesWithRecords.has(format(date, 'yyyy-MM-dd')),
+                }}
+                modifiersClassNames={{
+                  hasRecords: 'bg-destructive/20 text-destructive font-bold hover:bg-destructive/30',
+                }}
+              />
+            </PopoverContent>
+          </Popover>
+          {selectedDate && (
+            <Button variant="ghost" size="sm" onClick={clearDateFilter} className="text-muted-foreground">
+              Clear
+            </Button>
+          )}
+        </div>
       </div>
 
       <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
@@ -246,13 +336,13 @@ export default function Dashboard() {
           variant="default"
         />
         <StatCard
-          title="Stock In (This Month)"
+          title={selectedDate ? "Stock In (Selected)" : "Stock In (This Month)"}
           value={stats.stockInMonth}
           icon={TrendingUp}
           variant="success"
         />
         <StatCard
-          title="Stock Out (This Month)"
+          title={selectedDate ? "Stock Out (Selected)" : "Stock Out (This Month)"}
           value={stats.stockOutMonth}
           icon={TrendingDown}
           variant="default"
@@ -264,7 +354,7 @@ export default function Dashboard() {
           variant="warning"
         />
         <StatCard
-          title="Monthly Revenue"
+          title={selectedDate ? "Revenue (Selected)" : "Monthly Revenue"}
           value={formatAmount(stats.monthlyRevenue)}
           icon={DollarSign}
           variant="success"
@@ -280,12 +370,14 @@ export default function Dashboard() {
       <div className="grid gap-4 lg:grid-cols-2">
         <Card>
           <CardHeader>
-            <CardTitle>Recent Activity</CardTitle>
+            <CardTitle>
+              {selectedDate ? `Activity on ${format(selectedDate, 'PP')}` : 'Recent Activity'}
+            </CardTitle>
           </CardHeader>
           <CardContent>
             {recentActivity.length === 0 ? (
               <p className="text-sm text-muted-foreground text-center py-4">
-                {isOfflineData ? 'Activity history unavailable offline' : 'No recent activity'}
+                {isOfflineData ? 'Activity history unavailable offline' : selectedDate ? 'No activity on this date' : 'No recent activity'}
               </p>
             ) : (
               <div className="space-y-4">
