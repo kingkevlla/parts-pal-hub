@@ -10,6 +10,7 @@ import { useToast } from '@/hooks/use-toast';
 import { useCurrency } from '@/hooks/useCurrency';
 import { useAuth } from '@/contexts/AuthContext';
 import { supabase } from '@/integrations/supabase/client';
+import { offlineMutate } from '@/lib/offlineHelpers';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { ClipboardList, Plus, Trash2, ShoppingCart, UserPlus, Clock, Edit } from 'lucide-react';
 import { format } from 'date-fns';
@@ -212,20 +213,17 @@ export default function PendingBills({ selectedWarehouse, warehouses, cart, onLo
 
       // Perform updates
       for (const upd of toUpdate) {
-        await supabase
-          .from('pending_bill_items')
-          .update({ quantity: upd.quantity, subtotal: upd.subtotal })
-          .eq('id', upd.id);
+        await offlineMutate('pending_bill_items', 'update', { quantity: upd.quantity, subtotal: upd.subtotal }, { id: upd.id });
       }
 
       // Perform inserts
       if (toInsert.length > 0) {
-        const { error } = await supabase.from('pending_bill_items').insert(toInsert);
-        if (error) throw error;
+        const r = await offlineMutate('pending_bill_items', 'insert', toInsert);
+        if (!r.success) throw r.error;
       }
 
       // Touch updated_at
-      await supabase.from('pending_bills').update({ updated_at: new Date().toISOString() }).eq('id', billId);
+      await offlineMutate('pending_bills', 'update', { updated_at: new Date().toISOString() }, { id: billId });
 
       toast({ title: 'Items Added', description: `${cart.length} item(s) added to ${bill.customer_name}'s bill` });
       fetchBills();
@@ -265,7 +263,7 @@ export default function PendingBills({ selectedWarehouse, warehouses, cart, onLo
 
   const closeBill = async (billId: string) => {
     try {
-      await supabase.from('pending_bills').update({ status: 'closed' }).eq('id', billId);
+      await offlineMutate('pending_bills', 'update', { status: 'closed' }, { id: billId });
       setActiveBillId(null);
       fetchBills();
       toast({ title: 'Bill Closed', description: 'Pending bill has been closed' });
@@ -277,7 +275,7 @@ export default function PendingBills({ selectedWarehouse, warehouses, cart, onLo
   const deleteBill = async (billId: string) => {
     try {
       // Items cascade delete
-      await supabase.from('pending_bills').delete().eq('id', billId);
+      await offlineMutate('pending_bills', 'delete', null, { id: billId });
       if (activeBillId === billId) setActiveBillId(null);
       setShowDeleteConfirm(null);
       fetchBills();
@@ -289,8 +287,8 @@ export default function PendingBills({ selectedWarehouse, warehouses, cart, onLo
 
   const removeItemFromBill = async (billId: string, itemId: string) => {
     try {
-      await supabase.from('pending_bill_items').delete().eq('id', itemId);
-      await supabase.from('pending_bills').update({ updated_at: new Date().toISOString() }).eq('id', billId);
+      await offlineMutate('pending_bill_items', 'delete', null, { id: itemId });
+      await offlineMutate('pending_bills', 'update', { updated_at: new Date().toISOString() }, { id: billId });
       fetchBills();
       toast({ title: 'Item Removed' });
     } catch (error: any) {

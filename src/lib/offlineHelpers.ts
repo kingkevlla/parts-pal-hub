@@ -21,35 +21,33 @@ export async function offlineQuery<T = any>(
 
       if (!result.error && result.data) {
         if (shouldCache) {
-          // Cache in background - don't block
           cacheData(table, result.data as any[]).catch(() => {});
         }
         return { data: result.data as T[], isOffline: false };
       }
-      // On error, fall through to cache
     } catch {
-      // Network error, fall through to cache
+      // fall through to cache
     }
   }
 
-  // Offline or error: use cache
   const cached = await getCachedData(table);
   return { data: cached as T[], isOffline: true };
 }
 
 /**
  * Offline-aware mutation: executes online or queues for later sync.
- * Also updates local cache optimistically.
+ * For inserts, returns the inserted row(s). When offline, a client-side UUID
+ * is generated so dependent operations can still chain.
  */
-export async function offlineMutate(
+export async function offlineMutate<T = any>(
   table: CacheTable,
   operation: 'insert' | 'update' | 'delete' | 'upsert',
   data: any,
   match?: any
-): Promise<{ success: boolean; offline: boolean; error?: any }> {
+): Promise<{ success: boolean; offline: boolean; data?: T | T[]; error?: any }> {
   if (navigator.onLine) {
     try {
-      let result;
+      let result: any;
       const tbl = table as any;
 
       switch (operation) {
@@ -70,13 +68,40 @@ export async function offlineMutate(
       if (result?.error) {
         return { success: false, offline: false, error: result.error };
       }
-      return { success: true, offline: false };
+      return { success: true, offline: false, data: result?.data };
     } catch {
-      // Network failed mid-request, queue it
+      // queue
     }
   }
 
-  // Queue for sync
-  await queueMutation(table, operation, data, match);
-  return { success: true, offline: true };
+  // Offline: assign client UUIDs for inserts so callers can chain
+  let queuedData = data;
+  if (operation === 'insert' || operation === 'upsert') {
+    const stamp = (row: any) => ({
+      id: row?.id ?? (crypto as any).randomUUID(),
+      created_at: row?.created_at ?? new Date().toISOString(),
+      ...row,
+    });
+    queuedData = Array.isArray(data) ? data.map(stamp) : stamp(data);
+  }
+
+  await queueMutation(table, operation, queuedData, match);
+  return {
+    success: true,
+    offline: true,
+    data: queuedData,
+  };
+}
+
+/**
+ * Insert helper that returns a single row (mirrors supabase.insert().select().single()).
+ */
+export async function offlineInsertSingle<T = any>(
+  table: CacheTable,
+  row: any
+): Promise<{ data: T | null; error: any; offline: boolean }> {
+  const result = await offlineMutate<T>(table, 'insert', row);
+  if (!result.success) return { data: null, error: result.error, offline: result.offline };
+  const out = Array.isArray(result.data) ? result.data[0] : result.data;
+  return { data: (out as T) ?? null, error: null, offline: result.offline };
 }

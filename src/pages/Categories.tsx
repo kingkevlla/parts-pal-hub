@@ -8,6 +8,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { useToast } from '@/hooks/use-toast';
 import { Plus, Pencil, Trash2, FolderOpen, WifiOff } from 'lucide-react';
 import { supabase } from '@/integrations/supabase/client';
+import { offlineMutate } from '@/lib/offlineHelpers';
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog';
 import { Textarea } from '@/components/ui/textarea';
 import { Checkbox } from '@/components/ui/checkbox';
@@ -61,15 +62,15 @@ export default function Categories() {
     };
 
     let error;
+    let offline = false;
     if (editingCategory) {
-      const result = await supabase
-        .from('categories')
-        .update(categoryData)
-        .eq('id', editingCategory.id);
-      error = result.error;
+      const r = await offlineMutate('categories', 'update', categoryData, { id: editingCategory.id });
+      error = r.success ? null : r.error;
+      offline = r.offline;
     } else {
-      const result = await supabase.from('categories').insert(categoryData);
-      error = result.error;
+      const r = await offlineMutate('categories', 'insert', categoryData);
+      error = r.success ? null : r.error;
+      offline = r.offline;
     }
 
     if (error) {
@@ -90,10 +91,8 @@ export default function Categories() {
   const handleDelete = async () => {
     if (!deleteCategory) return;
 
-    const { error } = await supabase
-      .from('categories')
-      .delete()
-      .eq('id', deleteCategory.id);
+    const r = await offlineMutate('categories', 'delete', null, { id: deleteCategory.id });
+    const error = r.success ? null : r.error;
 
     if (error) {
       toast({ title: 'Error', description: error.message, variant: 'destructive' });
@@ -106,7 +105,8 @@ export default function Categories() {
 
   const handleBulkDelete = async () => {
     const ids = Array.from(table.selectedIds);
-    const { error } = await supabase.from('categories').delete().in('id', ids);
+    const results = await Promise.all(ids.map(id => offlineMutate('categories', 'delete', null, { id })));
+    const error = results.find(r => !r.success)?.error || null;
 
     if (error) {
       toast({ title: 'Error', description: error.message, variant: 'destructive' });

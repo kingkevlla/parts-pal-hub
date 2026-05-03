@@ -6,6 +6,7 @@ import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useToast } from "@/hooks/use-toast";
 import { supabase } from "@/integrations/supabase/client";
+import { offlineMutate } from "@/lib/offlineHelpers";
 import { Loader2 } from "lucide-react";
 
 interface UserProfile {
@@ -76,24 +77,18 @@ export default function AddEditUserDialog({ open, onOpenChange, user, onSuccess 
     try {
       if (user) {
         // Update existing user
-        const { error: profileError } = await supabase
-          .from("profiles")
-          .update({
-            full_name: formData.full_name,
-            phone: formData.phone
-          })
-          .eq("id", user.id);
-
-        if (profileError) throw profileError;
+        const upd = await offlineMutate("profiles", "update", {
+          full_name: formData.full_name,
+          phone: formData.phone
+        }, { id: user.id });
+        if (!upd.success) throw upd.error;
 
         // Update role
         const role = roles.find(r => r.name === formData.role);
         if (role) {
-          await supabase.from("user_roles").delete().eq("user_id", user.id);
-          const { error: roleError } = await supabase
-            .from("user_roles")
-            .insert({ user_id: user.id, role: role.name });
-          if (roleError) throw roleError;
+          await offlineMutate("user_roles", "delete", null, { user_id: user.id });
+          const ins = await offlineMutate("user_roles", "insert", { user_id: user.id, role: role.name });
+          if (!ins.success) throw ins.error;
         }
 
         toast({ title: "User updated successfully" });

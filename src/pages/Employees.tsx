@@ -14,7 +14,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { useToast } from "@/hooks/use-toast";
 import { supabase } from "@/integrations/supabase/client";
-import { offlineQuery } from "@/lib/offlineHelpers";
+import { offlineQuery, offlineMutate } from "@/lib/offlineHelpers";
 import { useCurrency } from "@/hooks/useCurrency";
 import { useDataTable } from "@/hooks/useDataTable";
 import { DataTableSearch, DataTablePagination, DataTableBulkActions, SelectAllCheckbox } from "@/components/ui/data-table-controls";
@@ -208,13 +208,13 @@ export default function Employees() {
       };
 
       if (editingEmployee) {
-        const { error } = await supabase.from('employees').update(employeeData).eq('id', editingEmployee.id);
-        if (error) throw error;
-        toast({ title: 'Success', description: 'Employee updated' });
+        const r = await offlineMutate('employees', 'update', employeeData, { id: editingEmployee.id });
+        if (!r.success) throw r.error;
+        toast({ title: 'Success', description: r.offline ? 'Update queued (offline)' : 'Employee updated' });
       } else {
-        const { error } = await supabase.from('employees').insert(employeeData);
-        if (error) throw error;
-        toast({ title: 'Success', description: 'Employee created' });
+        const r = await offlineMutate('employees', 'insert', employeeData);
+        if (!r.success) throw r.error;
+        toast({ title: 'Success', description: r.offline ? 'Employee queued (offline)' : 'Employee created' });
       }
 
       setIsEmployeeOpen(false);
@@ -232,7 +232,7 @@ export default function Employees() {
 
     try {
       const formData = new FormData(e.currentTarget);
-      const { error } = await supabase.from('employee_attendance').insert({
+      const r = await offlineMutate('employee_attendance', 'insert', {
         employee_id: formData.get('employee_id') as string,
         date: formData.get('date') as string,
         check_in: formData.get('check_in') as string || null,
@@ -241,7 +241,7 @@ export default function Employees() {
         notes: formData.get('notes') as string || null,
       });
 
-      if (error) throw error;
+      if (!r.success) throw r.error;
       toast({ title: 'Success', description: 'Attendance recorded' });
       setIsAttendanceOpen(false);
       fetchAttendance();
@@ -257,7 +257,7 @@ export default function Employees() {
 
     try {
       const formData = new FormData(e.currentTarget);
-      const { error } = await supabase.from('employee_leave').insert({
+      const r = await offlineMutate('employee_leave', 'insert', {
         employee_id: formData.get('employee_id') as string,
         leave_type: formData.get('leave_type') as string,
         start_date: formData.get('start_date') as string,
@@ -266,7 +266,7 @@ export default function Employees() {
         status: 'pending',
       });
 
-      if (error) throw error;
+      if (!r.success) throw r.error;
       toast({ title: 'Success', description: 'Leave request submitted' });
       setIsLeaveOpen(false);
       fetchLeaves();
@@ -286,7 +286,7 @@ export default function Employees() {
       const deductions = parseFloat(formData.get('deductions') as string) || 0;
       const bonuses = parseFloat(formData.get('bonuses') as string) || 0;
 
-      const { error } = await supabase.from('employee_payroll').insert({
+      const r = await offlineMutate('employee_payroll', 'insert', {
         employee_id: formData.get('employee_id') as string,
         pay_period_start: formData.get('pay_period_start') as string,
         pay_period_end: formData.get('pay_period_end') as string,
@@ -299,7 +299,7 @@ export default function Employees() {
         created_by: user?.id,
       });
 
-      if (error) throw error;
+      if (!r.success) throw r.error;
       toast({ title: 'Success', description: 'Payroll created' });
       setIsPayrollOpen(false);
       fetchPayrolls();
@@ -311,7 +311,8 @@ export default function Employees() {
 
   const handleDeleteEmployee = async () => {
     if (!deleteEmployee) return;
-    const { error } = await supabase.from('employees').delete().eq('id', deleteEmployee.id);
+    const r = await offlineMutate('employees', 'delete', null, { id: deleteEmployee.id });
+    const error = r.success ? null : r.error;
     if (error) {
       toast({ title: 'Error', description: error.message, variant: 'destructive' });
     } else {
@@ -323,7 +324,8 @@ export default function Employees() {
 
   const handleBulkDelete = async () => {
     const ids = Array.from(employeeTable.selectedIds);
-    const { error } = await supabase.from('employees').delete().in('id', ids);
+    const results = await Promise.all(ids.map(id => offlineMutate('employees', 'delete', null, { id })));
+    const error = results.find(r => !r.success)?.error || null;
     if (error) {
       toast({ title: 'Error', description: error.message, variant: 'destructive' });
     } else {
@@ -379,7 +381,7 @@ export default function Employees() {
     setIsLoading(true);
     try {
       const formData = new FormData(e.currentTarget);
-      const { error } = await supabase.from('employee_loans').insert({
+      const r = await offlineMutate('employee_loans', 'insert', {
         employee_id: formData.get('employee_id') as string,
         amount: parseFloat(formData.get('amount') as string),
         monthly_deduction: parseFloat(formData.get('monthly_deduction') as string) || 0,
@@ -389,8 +391,8 @@ export default function Employees() {
         notes: (formData.get('notes') as string) || null,
         status: 'active',
         created_by: user?.id,
-      } as any);
-      if (error) throw error;
+      });
+      if (!r.success) throw r.error;
       toast({ title: 'Success', description: 'Employee loan created' });
       setIsLoanOpen(false);
       fetchEmployeeLoans();
@@ -408,15 +410,15 @@ export default function Employees() {
       const formData = new FormData(e.currentTarget);
       const paymentAmount = parseFloat(formData.get('amount') as string);
       
-      const { error } = await supabase.from('employee_loan_payments').insert({
+      const r = await offlineMutate('employee_loan_payments', 'insert', {
         loan_id: selectedLoanId,
         amount: paymentAmount,
         payment_date: formData.get('payment_date') as string,
         payment_method: (formData.get('payment_method') as string) || null,
         notes: (formData.get('notes') as string) || null,
         created_by: user?.id,
-      } as any);
-      if (error) throw error;
+      });
+      if (!r.success) throw r.error;
 
       // Update loan paid_amount
       const loan = employeeLoans.find(l => l.id === selectedLoanId);

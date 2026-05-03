@@ -14,6 +14,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Badge } from "@/components/ui/badge";
 import { useToast } from "@/hooks/use-toast";
 import { supabase } from "@/integrations/supabase/client";
+import { offlineMutate } from "@/lib/offlineHelpers";
 import { useAuth } from "@/contexts/AuthContext";
 import { Download, Upload, AlertCircle, FileUp, CheckCircle2 } from "lucide-react";
 
@@ -216,13 +217,10 @@ export function BulkStockAdjustmentDialog({ onComplete }: BulkStockAdjustmentDia
       try {
         const diff = row.newQuantity - (row.currentQty || 0);
 
-        const { error: updateError } = await supabase
-          .from("inventory")
-          .update({ quantity: row.newQuantity, updated_at: new Date().toISOString() })
-          .eq("id", row.inventoryId!);
-        if (updateError) throw updateError;
+        const upd = await offlineMutate("inventory", "update", { quantity: row.newQuantity, updated_at: new Date().toISOString() }, { id: row.inventoryId! });
+        if (!upd.success) throw upd.error;
 
-        const { error: movError } = await supabase.from("stock_movements").insert({
+        const mov = await offlineMutate("stock_movements", "insert", {
           product_id: row.productId!,
           warehouse_id: row.warehouseId!,
           quantity: Math.abs(diff),
@@ -231,7 +229,7 @@ export function BulkStockAdjustmentDialog({ onComplete }: BulkStockAdjustmentDia
           created_by: user?.id || null,
           reference_number: `BADJ-${Date.now()}`,
         });
-        if (movError) throw movError;
+        if (!mov.success) throw mov.error;
 
         success++;
       } catch (err: any) {

@@ -8,7 +8,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { useToast } from "@/hooks/use-toast";
 import { Plus, Trash2 } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
-import { offlineQuery } from "@/lib/offlineHelpers";
+import { offlineQuery, offlineMutate } from "@/lib/offlineHelpers";
 import { getCachedData } from "@/lib/offlineDb";
 import { useAuth } from "@/contexts/AuthContext";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
@@ -114,7 +114,7 @@ export default function StockIn() {
     const warehouseId = formData.get('warehouse_id') as string;
     const quantity = parseInt(formData.get('quantity') as string);
 
-    const { error } = await supabase.from('stock_movements').insert({
+    const r = await offlineMutate('stock_movements', 'insert', {
       product_id: productId,
       warehouse_id: warehouseId,
       movement_type: 'in',
@@ -123,6 +123,7 @@ export default function StockIn() {
       notes: formData.get('notes') as string || null,
       created_by: user?.id,
     });
+    const error = r.success ? null : r.error;
 
     if (error) {
       toast({ title: 'Error', description: error.message, variant: 'destructive' });
@@ -138,7 +139,8 @@ export default function StockIn() {
   const handleDelete = async () => {
     if (!deleteMovement) return;
 
-    const { error } = await supabase.from('stock_movements').delete().eq('id', deleteMovement.id);
+    const r = await offlineMutate('stock_movements', 'delete', null, { id: deleteMovement.id });
+    const error = r.success ? null : r.error;
 
     if (error) {
       toast({ title: 'Error', description: error.message, variant: 'destructive' });
@@ -151,7 +153,8 @@ export default function StockIn() {
 
   const handleBulkDelete = async () => {
     const ids = Array.from(table.selectedIds);
-    const { error } = await supabase.from('stock_movements').delete().in('id', ids);
+    const results = await Promise.all(ids.map(id => offlineMutate('stock_movements', 'delete', null, { id })));
+    const error = results.find(r => !r.success)?.error || null;
 
     if (error) {
       toast({ title: 'Error', description: error.message, variant: 'destructive' });
