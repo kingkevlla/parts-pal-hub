@@ -16,6 +16,7 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { useToast } from "@/hooks/use-toast";
 import { supabase } from "@/integrations/supabase/client";
+import { offlineMutate } from "@/lib/offlineHelpers";
 import { useCurrency } from "@/hooks/useCurrency";
 import { useDataTable } from "@/hooks/useDataTable";
 import { DataTableSearch, DataTablePagination, DataTableBulkActions, SelectAllCheckbox } from "@/components/ui/data-table-controls";
@@ -65,7 +66,7 @@ const handleBulkGenerateSKUs = async (products: ProductWithStock[], toast: any, 
   }));
 
   for (const update of updates) {
-    await supabase.from('products').update({ sku: update.sku }).eq('id', update.id);
+    await offlineMutate('products', 'update', { sku: update.sku }, { id: update.id });
   }
 
   toast({ title: 'Success', description: `Generated SKUs for ${updates.length} products` });
@@ -426,27 +427,22 @@ export default function Inventory() {
       };
 
       if (editingProduct) {
-        const { error } = await supabase
-          .from('products')
-          .update(productData)
-          .eq('id', editingProduct.id);
-
-        if (error) {
-          toast({ title: 'Error', description: error.message, variant: 'destructive' });
+        const r = await offlineMutate('products', 'update', productData, { id: editingProduct.id });
+        if (!r.success) {
+          toast({ title: 'Error', description: r.error?.message || 'Update failed', variant: 'destructive' });
         } else {
-          toast({ title: 'Success', description: 'Product updated successfully' });
+          toast({ title: 'Success', description: r.offline ? 'Update queued (offline)' : 'Product updated successfully' });
           setIsOpen(false);
           setEditingProduct(null);
           resetForm();
           fetchProducts();
         }
       } else {
-        const { error } = await supabase.from('products').insert(productData);
-
-        if (error) {
-          toast({ title: 'Error', description: error.message, variant: 'destructive' });
+        const r = await offlineMutate('products', 'insert', productData);
+        if (!r.success) {
+          toast({ title: 'Error', description: r.error?.message || 'Insert failed', variant: 'destructive' });
         } else {
-          toast({ title: 'Success', description: 'Product created successfully' });
+          toast({ title: 'Success', description: r.offline ? 'Product queued (offline)' : 'Product created successfully' });
           setIsOpen(false);
           resetForm();
           fetchProducts();
@@ -482,7 +478,8 @@ export default function Inventory() {
   const handleDelete = async () => {
     if (!deleteProduct) return;
 
-    const { error } = await supabase.from('products').delete().eq('id', deleteProduct.id);
+    const r = await offlineMutate('products', 'delete', null, { id: deleteProduct.id });
+    const error = r.success ? null : r.error;
 
     if (error) {
       toast({ title: 'Error', description: error.message, variant: 'destructive' });
@@ -495,7 +492,8 @@ export default function Inventory() {
 
   const handleBulkDelete = async () => {
     const ids = Array.from(table.selectedIds);
-    const { error } = await supabase.from('products').delete().in('id', ids);
+    const results = await Promise.all(ids.map(id => offlineMutate('products', 'delete', null, { id })));
+    const error = results.find(r => !r.success)?.error || null;
 
     if (error) {
       toast({ title: 'Error', description: error.message, variant: 'destructive' });

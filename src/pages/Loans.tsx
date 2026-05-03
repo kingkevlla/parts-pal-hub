@@ -10,7 +10,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { useToast } from '@/hooks/use-toast';
 import { Plus, DollarSign } from 'lucide-react';
 import { supabase } from '@/integrations/supabase/client';
-import { offlineQuery } from '@/lib/offlineHelpers';
+import { offlineQuery, offlineMutate } from '@/lib/offlineHelpers';
 import { getCachedData } from '@/lib/offlineDb';
 import { useAuth } from '@/contexts/AuthContext';
 import { useCurrency } from '@/hooks/useCurrency';
@@ -115,11 +115,11 @@ export default function Loans() {
 
     let error;
     if (editingLoan) {
-      const result = await supabase.from('loans').update(loanData).eq('id', editingLoan.id);
-      error = result.error;
+      const r = await offlineMutate('loans', 'update', loanData, { id: editingLoan.id });
+      error = r.success ? null : r.error;
     } else {
-      const result = await supabase.from('loans').insert(loanData);
-      error = result.error;
+      const r = await offlineMutate('loans', 'insert', loanData);
+      error = r.success ? null : r.error;
     }
 
     if (error) {
@@ -137,7 +137,8 @@ export default function Loans() {
   const handleDelete = async () => {
     if (!deleteLoan) return;
 
-    const { error } = await supabase.from('loans').delete().eq('id', deleteLoan.id);
+    const r = await offlineMutate('loans', 'delete', null, { id: deleteLoan.id });
+    const error = r.success ? null : r.error;
 
     if (error) {
       toast({ title: 'Error', description: error.message, variant: 'destructive' });
@@ -150,7 +151,8 @@ export default function Loans() {
 
   const handleBulkDelete = async () => {
     const ids = Array.from(table.selectedIds);
-    const { error } = await supabase.from('loans').delete().in('id', ids);
+    const results = await Promise.all(ids.map(id => offlineMutate('loans', 'delete', null, { id })));
+    const error = results.find(r => !r.success)?.error || null;
 
     if (error) {
       toast({ title: 'Error', description: error.message, variant: 'destructive' });

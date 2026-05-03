@@ -13,7 +13,7 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useToast } from "@/hooks/use-toast";
 import { supabase } from "@/integrations/supabase/client";
-import { offlineQuery } from "@/lib/offlineHelpers";
+import { offlineQuery, offlineMutate } from "@/lib/offlineHelpers";
 import { useCurrency } from "@/hooks/useCurrency";
 import { useDataTable } from "@/hooks/useDataTable";
 import { DataTableSearch, DataTablePagination, DataTableBulkActions, SelectAllCheckbox } from "@/components/ui/data-table-controls";
@@ -166,13 +166,13 @@ export default function Expenses() {
       };
 
       if (editingExpense) {
-        const { error } = await supabase.from('expenses').update(expenseData).eq('id', editingExpense.id);
-        if (error) throw error;
-        toast({ title: 'Success', description: 'Expense updated' });
+        const r = await offlineMutate('expenses', 'update', expenseData, { id: editingExpense.id });
+        if (!r.success) throw r.error;
+        toast({ title: 'Success', description: r.offline ? 'Expense update queued (offline)' : 'Expense updated' });
       } else {
-        const { error } = await supabase.from('expenses').insert(expenseData);
-        if (error) throw error;
-        toast({ title: 'Success', description: 'Expense created' });
+        const r = await offlineMutate('expenses', 'insert', expenseData);
+        if (!r.success) throw r.error;
+        toast({ title: 'Success', description: r.offline ? 'Expense queued (offline)' : 'Expense created' });
       }
 
       setIsExpenseOpen(false);
@@ -199,11 +199,11 @@ export default function Expenses() {
       };
 
       if (editingCategory) {
-        const { error } = await supabase.from('expense_categories').update(categoryData).eq('id', editingCategory.id);
-        if (error) throw error;
+        const r = await offlineMutate('expense_categories', 'update', categoryData, { id: editingCategory.id });
+        if (!r.success) throw r.error;
       } else {
-        const { error } = await supabase.from('expense_categories').insert(categoryData);
-        if (error) throw error;
+        const r = await offlineMutate('expense_categories', 'insert', categoryData);
+        if (!r.success) throw r.error;
       }
 
       setIsCategoryOpen(false);
@@ -230,8 +230,8 @@ export default function Expenses() {
         period_end: formData.get('period_end') as string,
       };
 
-      const { error } = await supabase.from('budgets').insert(budgetData);
-      if (error) throw error;
+      const r = await offlineMutate('budgets', 'insert', budgetData);
+      if (!r.success) throw r.error;
 
       setIsBudgetOpen(false);
       fetchBudgets();
@@ -244,7 +244,8 @@ export default function Expenses() {
 
   const handleDeleteExpense = async () => {
     if (!deleteExpense) return;
-    const { error } = await supabase.from('expenses').delete().eq('id', deleteExpense.id);
+    const r = await offlineMutate('expenses', 'delete', null, { id: deleteExpense.id });
+    const error = r.success ? null : r.error;
     if (error) {
       toast({ title: 'Error', description: error.message, variant: 'destructive' });
     } else {
@@ -256,7 +257,8 @@ export default function Expenses() {
 
   const handleBulkDelete = async () => {
     const ids = Array.from(expenseTable.selectedIds);
-    const { error } = await supabase.from('expenses').delete().in('id', ids);
+    const results = await Promise.all(ids.map(id => offlineMutate('expenses', 'delete', null, { id })));
+    const error = results.find(r => !r.success)?.error || null;
     if (error) {
       toast({ title: 'Error', description: error.message, variant: 'destructive' });
     } else {
