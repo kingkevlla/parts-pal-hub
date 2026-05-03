@@ -4,7 +4,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useToast } from "@/hooks/use-toast";
-import { supabase } from "@/integrations/supabase/client";
+import { offlineMutate } from "@/lib/offlineHelpers";
 
 interface Customer {
   id?: string;
@@ -39,18 +39,13 @@ export default function AddEditCustomerDialog({ open, onOpenChange, customer, on
 
     try {
       if (customer?.id) {
-        const { error } = await supabase
-          .from("customers")
-          .update(formData)
-          .eq("id", customer.id);
-
-        if (error) throw error;
-        toast({ title: "Customer updated successfully" });
+        const r = await offlineMutate("customers", "update", formData, { id: customer.id });
+        if (!r.success) throw r.error;
+        toast({ title: r.offline ? "Customer update queued (offline)" : "Customer updated successfully" });
       } else {
-        const { error } = await supabase.from("customers").insert([formData]);
-
-        if (error) throw error;
-        toast({ title: "Customer added successfully" });
+        const r = await offlineMutate("customers", "insert", formData);
+        if (!r.success) throw r.error;
+        toast({ title: r.offline ? "Customer queued (offline)" : "Customer added successfully" });
       }
 
       onSuccess();

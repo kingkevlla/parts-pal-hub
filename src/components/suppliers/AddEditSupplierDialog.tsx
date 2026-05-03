@@ -5,7 +5,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useToast } from "@/hooks/use-toast";
-import { supabase } from "@/integrations/supabase/client";
+import { offlineMutate } from "@/lib/offlineHelpers";
 
 interface Supplier {
   id?: string;
@@ -44,18 +44,13 @@ export default function AddEditSupplierDialog({ open, onOpenChange, supplier, on
 
     try {
       if (supplier?.id) {
-        const { error } = await supabase
-          .from("suppliers")
-          .update(formData)
-          .eq("id", supplier.id);
-
-        if (error) throw error;
-        toast({ title: "Supplier updated successfully" });
+        const r = await offlineMutate("suppliers", "update", formData, { id: supplier.id });
+        if (!r.success) throw r.error;
+        toast({ title: r.offline ? "Update queued (offline)" : "Supplier updated successfully" });
       } else {
-        const { error } = await supabase.from("suppliers").insert([formData]);
-
-        if (error) throw error;
-        toast({ title: "Supplier added successfully" });
+        const r = await offlineMutate("suppliers", "insert", formData);
+        if (!r.success) throw r.error;
+        toast({ title: r.offline ? "Supplier queued (offline)" : "Supplier added successfully" });
       }
 
       onSuccess();

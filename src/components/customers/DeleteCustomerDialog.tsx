@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
 import { useToast } from "@/hooks/use-toast";
-import { supabase } from "@/integrations/supabase/client";
+import { offlineMutate } from "@/lib/offlineHelpers";
 
 interface DeleteCustomerDialogProps {
   open: boolean;
@@ -18,11 +18,9 @@ export default function DeleteCustomerDialog({ open, onOpenChange, customerId, c
   const handleDelete = async () => {
     setLoading(true);
     try {
-      const { error } = await supabase.from("customers").delete().eq("id", customerId);
-
-      if (error) throw error;
-
-      toast({ title: "Customer deleted successfully" });
+      const r = await offlineMutate("customers", "delete", null, { id: customerId });
+      if (!r.success) throw r.error;
+      toast({ title: r.offline ? "Delete queued (offline)" : "Customer deleted successfully" });
       onSuccess();
       onOpenChange(false);
     } catch (error: any) {
