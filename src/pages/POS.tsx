@@ -9,6 +9,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { useToast } from '@/hooks/use-toast';
 import { Trash2, AlertTriangle, Minus, Plus, Package, CreditCard, Banknote, Smartphone, Building2, X, Split, Wallet, Calendar, CheckCircle, UserPlus, Percent, ClipboardList, ShoppingCart, ChevronUp, Search } from 'lucide-react';
 import { supabase } from '@/integrations/supabase/client';
+import { offlineMutate, offlineInsertSingle } from '@/lib/offlineHelpers';
 import { useAuth } from '@/contexts/AuthContext';
 import { useCurrency } from '@/hooks/useCurrency';
 import { useSystemSettings } from '@/hooks/useSystemSettings';
@@ -255,7 +256,7 @@ export default function POS() {
   const createQuickCustomer = async () => {
     if (!newCustomerName.trim()) { toast({ title: 'Error', description: 'Customer name is required', variant: 'destructive' }); return; }
     try {
-      const { data, error } = await supabase.from('customers').insert({ name: newCustomerName.trim(), phone: newCustomerPhone.trim() || null }).select().single();
+      const { data, error } = await offlineInsertSingle<any>('customers', { name: newCustomerName.trim(), phone: newCustomerPhone.trim() || null });
       if (error) throw error;
       setCustomers(prev => [...prev, data].sort((a, b) => a.name.localeCompare(b.name)));
       setSelectedCustomerId(data.id);
@@ -281,10 +282,10 @@ export default function POS() {
     try {
       const newPaidAmount = (selectedLoan.paid_amount || 0) + amount;
       const newStatus = newPaidAmount >= selectedLoan.amount ? 'paid' : 'partial';
-      const { error: paymentError } = await supabase.from('loan_payments').insert({ loan_id: selectedLoan.id, amount, payment_method: loanPaymentMethod, notes: 'Payment via POS', created_by: user?.id });
-      if (paymentError) throw paymentError;
-      const { error } = await supabase.from('loans').update({ paid_amount: newPaidAmount, status: newStatus }).eq('id', selectedLoan.id);
-      if (error) throw error;
+      const pay = await offlineMutate('loan_payments', 'insert', { loan_id: selectedLoan.id, amount, payment_method: loanPaymentMethod, notes: 'Payment via POS', created_by: user?.id });
+      if (!pay.success) throw pay.error;
+      const upd = await offlineMutate('loans', 'update', { paid_amount: newPaidAmount, status: newStatus }, { id: selectedLoan.id });
+      if (!upd.success) throw upd.error;
       toast({ title: 'Payment Successful', description: newStatus === 'paid' ? 'Loan fully paid!' : `${formatAmount(amount)} paid. Remaining: ${formatAmount(selectedLoan.amount - newPaidAmount)}` });
       fetchLoanPayments(selectedLoan.id);
       setLoanPaymentAmount('');
@@ -398,10 +399,11 @@ export default function POS() {
         fetchProductsWithStock(); setIsProcessing(false); return;
       }
 
-      const { data: transaction, error: transactionError } = await supabase.from('transactions').insert(transactionData).select().single();
-      if (transactionError) throw transactionError;
-      const { error: itemsError } = await supabase.from('transaction_items').insert(cart.map(item => ({ transaction_id: transaction.id, product_id: item.productId, quantity: item.quantity, unit_price: item.price, total_price: item.subtotal })));
-      if (itemsError) throw itemsError;
+      const txRes = await offlineInsertSingle<any>('transactions', transactionData);
+      if (txRes.error) throw txRes.error;
+      const transaction = txRes.data!;
+      const itemsRes = await offlineMutate('transaction_items', 'insert', cart.map(item => ({ transaction_id: transaction.id, product_id: item.productId, quantity: item.quantity, unit_price: item.price, total_price: item.subtotal })));
+      if (!itemsRes.success) throw itemsRes.error;
 
       let extraWarehouseId: string | null = null;
       if (cart.some(item => item.isManual)) {
@@ -413,7 +415,7 @@ export default function POS() {
           const { data: inv } = await supabase.from('inventory').select('quantity').eq('product_id', item.productId).eq('warehouse_id', extraWarehouseId).maybeSingle();
           const currentStock = inv?.quantity ?? 0;
           if (currentStock < item.quantity) {
-            await supabase.from('stock_movements').insert({ product_id: item.productId, warehouse_id: extraWarehouseId, quantity: item.quantity - currentStock, movement_type: 'in', notes: 'Auto top-up for manual POS item', created_by: user?.id });
+            await offlineMutate('stock_movements', 'insert', { product_id: item.productId, warehouse_id: extraWarehouseId, quantity: item.quantity - currentStock, movement_type: 'in', notes: 'Auto top-up for manual POS item', created_by: user?.id });
           }
         }
       }
@@ -424,13 +426,13 @@ export default function POS() {
         const stockUnitQty = product && product.stock_unit !== product.selling_unit ? item.quantity / convFactor : item.quantity;
         return { product_id: item.productId, warehouse_id: item.isManual && extraWarehouseId ? extraWarehouseId : selectedWarehouse, quantity: stockUnitQty, movement_type: 'out', reference_number: transactionNumber, notes: `POS Sale: ${item.quantity} ${item.sellingUnit || 'pc'} to ${customerName || 'Walk-in customer'}`, created_by: user?.id };
       });
-      const { error: movementError } = await supabase.from('stock_movements').insert(stockMovements);
-      if (movementError) throw movementError;
+      const movRes = await offlineMutate('stock_movements', 'insert', stockMovements);
+      if (!movRes.success) throw movRes.error;
 
       setLastSaleData({ id: transaction.id, items: cart.map(item => ({ name: item.name, quantity: item.quantity, unit_price: item.price, subtotal: item.subtotal })), total_amount: getTotalAmount(), payment_method: finalPaymentMethod, customer_name: customerName, customer_phone: customerPhone, sale_date: new Date().toISOString() });
       setShowReceipt(true); setShowSplitPayment(false); setSplitPayments([]); setMobileCartOpen(false);
       toast({ title: 'Success', description: 'Sale completed successfully' });
-      if (activePendingBillId) { await supabase.from('pending_bills').update({ status: 'closed' }).eq('id', activePendingBillId); setActivePendingBillId(null); }
+      if (activePendingBillId) { await offlineMutate('pending_bills', 'update', { status: 'closed' }, { id: activePendingBillId }); setActivePendingBillId(null); }
       setCart([]); setCustomerName(''); setCustomerPhone(''); setPaymentMethod('cash');
       fetchProductsWithStock();
     } catch (error: any) { toast({ title: 'Error', description: error.message, variant: 'destructive' }); }
@@ -453,10 +455,11 @@ export default function POS() {
       const dueDate = addDays(new Date(), dueDays);
       const selectedCustomer = customers.find(c => c.id === selectedCustomerId);
 
-      const { data: transaction, error: transactionError } = await supabase.from('transactions').insert({ transaction_number: transactionNumber, total_amount: baseAmount, payment_method: 'credit', status: 'completed', customer_id: selectedCustomerId, notes: `Credit Sale - Loan Amount: ${formatAmount(totalLoanAmount)} (includes ${interestRate}% interest)`, created_by: user?.id }).select().single();
-      if (transactionError) throw transactionError;
-      const { error: itemsError } = await supabase.from('transaction_items').insert(cart.map(item => ({ transaction_id: transaction.id, product_id: item.productId, quantity: item.quantity, unit_price: item.price, total_price: item.subtotal })));
-      if (itemsError) throw itemsError;
+      const txRes = await offlineInsertSingle<any>('transactions', { transaction_number: transactionNumber, total_amount: baseAmount, payment_method: 'credit', status: 'completed', customer_id: selectedCustomerId, notes: `Credit Sale - Loan Amount: ${formatAmount(totalLoanAmount)} (includes ${interestRate}% interest)`, created_by: user?.id });
+      if (txRes.error) throw txRes.error;
+      const transaction = txRes.data!;
+      const itemsRes = await offlineMutate('transaction_items', 'insert', cart.map(item => ({ transaction_id: transaction.id, product_id: item.productId, quantity: item.quantity, unit_price: item.price, total_price: item.subtotal })));
+      if (!itemsRes.success) throw itemsRes.error;
 
       let extraWarehouseId: string | null = null;
       if (cart.some(item => item.isManual)) {
@@ -467,7 +470,7 @@ export default function POS() {
         if (item.isManual && extraWarehouseId) {
           const { data: inv } = await supabase.from('inventory').select('quantity').eq('product_id', item.productId).eq('warehouse_id', extraWarehouseId).maybeSingle();
           if ((inv?.quantity ?? 0) < item.quantity) {
-            await supabase.from('stock_movements').insert({ product_id: item.productId, warehouse_id: extraWarehouseId, quantity: item.quantity - (inv?.quantity ?? 0), movement_type: 'in', notes: 'Auto top-up for manual POS item (credit)', created_by: user?.id });
+            await offlineMutate('stock_movements', 'insert', { product_id: item.productId, warehouse_id: extraWarehouseId, quantity: item.quantity - (inv?.quantity ?? 0), movement_type: 'in', notes: 'Auto top-up for manual POS item (credit)', created_by: user?.id });
           }
         }
       }
@@ -478,16 +481,16 @@ export default function POS() {
         const stockUnitQty = product && product.stock_unit !== product.selling_unit ? item.quantity / convFactor : item.quantity;
         return { product_id: item.productId, warehouse_id: item.isManual && extraWarehouseId ? extraWarehouseId : selectedWarehouse, quantity: stockUnitQty, movement_type: 'out', reference_number: transactionNumber, notes: `Credit Sale: ${item.quantity} ${item.sellingUnit || 'pc'} to ${selectedCustomer?.name || 'Customer'}`, created_by: user?.id };
       });
-      const { error: movementError } = await supabase.from('stock_movements').insert(stockMovements);
-      if (movementError) throw movementError;
+      const movRes = await offlineMutate('stock_movements', 'insert', stockMovements);
+      if (!movRes.success) throw movRes.error;
 
-      const { error: loanError } = await supabase.from('loans').insert({ customer_id: selectedCustomerId, amount: totalLoanAmount, paid_amount: 0, due_date: format(dueDate, 'yyyy-MM-dd'), status: 'pending', notes: `Credit sale - TXN: ${transactionNumber}\nBase: ${formatAmount(baseAmount)}, Interest: ${interestRate}%`, created_by: user?.id });
-      if (loanError) throw loanError;
+      const loanRes = await offlineMutate('loans', 'insert', { customer_id: selectedCustomerId, amount: totalLoanAmount, paid_amount: 0, due_date: format(dueDate, 'yyyy-MM-dd'), status: 'pending', notes: `Credit sale - TXN: ${transactionNumber}\nBase: ${formatAmount(baseAmount)}, Interest: ${interestRate}%`, created_by: user?.id });
+      if (!loanRes.success) throw loanRes.error;
 
       setLastSaleData({ id: transaction.id, items: cart.map(item => ({ name: item.name, quantity: item.quantity, unit_price: item.price, subtotal: item.subtotal })), total_amount: baseAmount, payment_method: `Credit (Due: ${format(dueDate, 'PP')})`, customer_name: selectedCustomer?.name, customer_phone: selectedCustomer?.phone, sale_date: new Date().toISOString() });
       setShowReceipt(true); setShowCreditDialog(false); setMobileCartOpen(false);
       toast({ title: 'Credit Sale Completed', description: `Loan of ${formatAmount(totalLoanAmount)} created for ${selectedCustomer?.name}` });
-      if (activePendingBillId) { await supabase.from('pending_bills').update({ status: 'closed' }).eq('id', activePendingBillId); setActivePendingBillId(null); }
+      if (activePendingBillId) { await offlineMutate('pending_bills', 'update', { status: 'closed' }, { id: activePendingBillId }); setActivePendingBillId(null); }
       setCart([]); setCustomerName(''); setCustomerPhone(''); setPaymentMethod('cash'); setSelectedCustomerId(''); setCreditDueDays('30'); setCreditInterestRate('0');
       fetchProductsWithStock(); fetchLoans();
     } catch (error: any) { toast({ title: 'Error', description: error.message, variant: 'destructive' }); }
