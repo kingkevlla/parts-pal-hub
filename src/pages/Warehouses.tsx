@@ -8,6 +8,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { useToast } from '@/hooks/use-toast';
 import { Plus, Warehouse, WifiOff } from 'lucide-react';
 import { supabase } from '@/integrations/supabase/client';
+import { offlineMutate } from '@/lib/offlineHelpers';
 import { Badge } from '@/components/ui/badge';
 import { offlineQuery } from '@/lib/offlineHelpers';
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog';
@@ -52,11 +53,11 @@ export default function Warehouses() {
 
     let error;
     if (editingWarehouse) {
-      const result = await supabase.from('warehouses').update(warehouseData).eq('id', editingWarehouse.id);
-      error = result.error;
+      const r = await offlineMutate('warehouses', 'update', warehouseData, { id: editingWarehouse.id });
+      error = r.success ? null : r.error;
     } else {
-      const result = await supabase.from('warehouses').insert(warehouseData);
-      error = result.error;
+      const r = await offlineMutate('warehouses', 'insert', warehouseData);
+      error = r.success ? null : r.error;
     }
 
     if (error) {
@@ -74,7 +75,8 @@ export default function Warehouses() {
   const handleDelete = async () => {
     if (!deleteWarehouse) return;
 
-    const { error } = await supabase.from('warehouses').delete().eq('id', deleteWarehouse.id);
+    const r = await offlineMutate('warehouses', 'delete', null, { id: deleteWarehouse.id });
+    const error = r.success ? null : r.error;
 
     if (error) {
       toast({ title: 'Error', description: error.message, variant: 'destructive' });
