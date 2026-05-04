@@ -230,13 +230,11 @@ export default function OwnerDashboard() {
 
   const fetchTodayStats = async () => {
     try {
-      const today = new Date();
-      const startOfDay = new Date(today.getFullYear(), today.getMonth(), today.getDate()).toISOString();
-      const endOfDay = new Date(today.getFullYear(), today.getMonth(), today.getDate() + 1).toISOString();
+      const { startISO, endISO, startDate, endDate } = getRangeBounds();
 
       const [salesData, expensesData] = await Promise.all([
-        supabase.from('transactions').select('total_amount').gte('created_at', startOfDay).lt('created_at', endOfDay),
-        supabase.from('expenses').select('amount').gte('expense_date', today.toISOString().split('T')[0]).lte('expense_date', today.toISOString().split('T')[0])
+        supabase.from('transactions').select('total_amount').gte('created_at', startISO).lt('created_at', endISO),
+        supabase.from('expenses').select('amount').gte('expense_date', startDate).lte('expense_date', endDate)
       ]);
 
       const todayRevenue = salesData.data?.reduce((sum, t) => sum + Number(t.total_amount || 0), 0) || 0;
@@ -285,10 +283,18 @@ export default function OwnerDashboard() {
 
   const fetchTopProducts = async () => {
     try {
-      const { data: items } = await supabase
-        .from('transaction_items')
-        .select('product_id, quantity, total_price, products(name)');
+      const { startISO, endISO } = getRangeBounds();
+      const isAllTime = !dateRange?.from;
 
+      let query = supabase
+        .from('transaction_items')
+        .select('product_id, quantity, total_price, created_at, products(name)');
+
+      if (!isAllTime) {
+        query = query.gte('created_at', startISO).lt('created_at', endISO);
+      }
+
+      const { data: items } = await query;
       if (!items) return;
 
       const productMap = new Map<string, { name: string; totalSold: number; revenue: number }>();
