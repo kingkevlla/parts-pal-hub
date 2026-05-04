@@ -655,22 +655,72 @@ export default function OwnerDashboard() {
 
   const netProfit = stats.totalRevenue - totalExpenses;
 
+  const hasDateFilter = !!dateRange?.from;
+  const rangeLabel = !hasDateFilter
+    ? "Today"
+    : !dateRange?.to || dateRange.from?.toDateString() === dateRange.to?.toDateString()
+    ? format(dateRange!.from!, "PPP")
+    : `${format(dateRange!.from!, "PP")} – ${format(dateRange!.to!, "PP")}`;
+  const datePickerLabel = !hasDateFilter
+    ? "Filter by date range"
+    : rangeLabel;
+
   return (
     <div className="space-y-4 pb-20 md:pb-6">
       {/* Header */}
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
         <div>
           <h1 className="text-2xl md:text-3xl font-bold">Owner Dashboard</h1>
-          <p className="text-sm text-muted-foreground">Real-time system overview and controls</p>
+          <p className="text-sm text-muted-foreground">
+            {hasDateFilter ? `Showing data for ${rangeLabel}` : "Real-time system overview and controls"}
+          </p>
         </div>
-        <Button 
-          variant="destructive" 
-          onClick={() => setShowShutdownDialog(true)}
-          className="w-full sm:w-auto"
-        >
-          <Power className="h-4 w-4 mr-2" />
-          Shutdown System
-        </Button>
+        <div className="flex items-center gap-2 w-full sm:w-auto flex-wrap">
+          <Popover>
+            <PopoverTrigger asChild>
+              <Button
+                variant="outline"
+                className={cn(
+                  "justify-start text-left font-normal max-w-[260px]",
+                  !hasDateFilter && "text-muted-foreground",
+                  hasDateFilter && "border-primary text-primary"
+                )}
+              >
+                <CalendarIcon className="mr-2 h-4 w-4 shrink-0" />
+                <span className="truncate">{datePickerLabel}</span>
+              </Button>
+            </PopoverTrigger>
+            <PopoverContent className="w-auto p-0" align="end">
+              <Calendar
+                mode="range"
+                selected={dateRange}
+                onSelect={setDateRange}
+                numberOfMonths={1}
+                initialFocus
+                className={cn("p-3 pointer-events-auto")}
+              />
+            </PopoverContent>
+          </Popover>
+          {hasDateFilter && (
+            <Button
+              variant="ghost"
+              size="icon"
+              onClick={() => setDateRange(undefined)}
+              className="text-muted-foreground h-9 w-9"
+              title="Clear date filter"
+            >
+              <X className="h-4 w-4" />
+            </Button>
+          )}
+          <Button
+            variant="destructive"
+            onClick={() => setShowShutdownDialog(true)}
+            className="ml-auto sm:ml-0"
+          >
+            <Power className="h-4 w-4 mr-2" />
+            Shutdown System
+          </Button>
+        </div>
       </div>
 
       {/* Loan Reminder Notification */}
