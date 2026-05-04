@@ -148,6 +148,8 @@ export default function OwnerDashboard() {
   const [showProductDetails, setShowProductDetails] = useState(false);
   const [dateRange, setDateRange] = useState<DateRange | undefined>(undefined);
 
+  const canAccess = isOwner || isAdmin;
+
   useEffect(() => {
     if (!permissionsLoading) {
       setLoading(false);
