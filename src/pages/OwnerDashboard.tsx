@@ -7,11 +7,16 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { useToast } from "@/hooks/use-toast";
-import { 
-  TrendingUp, 
-  Users, 
-  Package, 
-  DollarSign, 
+import { format } from "date-fns";
+import type { DateRange } from "react-day-picker";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { Calendar } from "@/components/ui/calendar";
+import { cn } from "@/lib/utils";
+import {
+  TrendingUp,
+  Users,
+  Package,
+  DollarSign,
   Activity,
   Power,
   UserX,
@@ -30,7 +35,9 @@ import {
   ArrowDownRight,
   Clock,
   PackageCheck,
-  Banknote
+  Banknote,
+  Calendar as CalendarIcon,
+  X
 } from "lucide-react";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
 import { ScrollArea } from "@/components/ui/scroll-area";
