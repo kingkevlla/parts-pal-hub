@@ -347,10 +347,17 @@ export default function OwnerDashboard() {
 
   const fetchActivities = async () => {
     try {
-      const [transactions, stockMovements] = await Promise.all([
-        supabase.from('transactions').select('*').order('created_at', { ascending: false }).limit(5),
-        supabase.from('stock_movements').select('*').order('created_at', { ascending: false }).limit(5)
-      ]);
+      const { startISO, endISO } = getRangeBounds();
+      const isAllTime = !dateRange?.from;
+
+      let txQ = supabase.from('transactions').select('*').order('created_at', { ascending: false }).limit(5);
+      let smQ = supabase.from('stock_movements').select('*').order('created_at', { ascending: false }).limit(5);
+      if (!isAllTime) {
+        txQ = txQ.gte('created_at', startISO).lt('created_at', endISO);
+        smQ = smQ.gte('created_at', startISO).lt('created_at', endISO);
+      }
+
+      const [transactions, stockMovements] = await Promise.all([txQ, smQ]);
 
       const activityItems: ActivityItem[] = [];
 
