@@ -163,10 +163,21 @@ export default function Receipt({ isOpen, onClose, saleData }: ReceiptProps) {
     <Dialog open={isOpen} onOpenChange={onClose}>
       <DialogContent className="max-w-md">
         <DialogHeader>
-          <DialogTitle className="flex items-center justify-between">
-            Receipt
+          <DialogTitle className="flex items-center justify-between gap-2">
+            <div className="flex items-center gap-2">
+              Receipt
+              {!isOnline && (
+                <Badge variant="outline" className="gap-1 border-warning text-warning">
+                  <WifiOff className="h-3 w-3" />
+                  Offline – queued
+                </Badge>
+              )}
+            </div>
             <div className="flex gap-2">
-              <Button size="icon" variant="outline" onClick={handlePrint}>
+              <Button size="icon" variant="outline" onClick={handleExport} title="Download as .txt">
+                <Download className="h-4 w-4" />
+              </Button>
+              <Button size="icon" variant="outline" onClick={handlePrint} title="Print">
                 <Printer className="h-4 w-4" />
               </Button>
               <Button size="icon" variant="ghost" onClick={onClose}>
