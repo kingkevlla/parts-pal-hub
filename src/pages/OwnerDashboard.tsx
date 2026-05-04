@@ -169,7 +169,7 @@ export default function OwnerDashboard() {
       fetchDueLoans();
       fetchProducts();
       subscribeToRealtime();
-      
+
       const interval = setInterval(() => {
         fetchDueLoans();
         fetchTodayStats();
@@ -177,6 +177,31 @@ export default function OwnerDashboard() {
       return () => clearInterval(interval);
     }
   }, [canAccess, permissionsLoading]);
+
+  // Re-run period-scoped fetches when the date range changes
+  useEffect(() => {
+    if (canAccess && !permissionsLoading) {
+      fetchTodayStats();
+      fetchTopProducts();
+      fetchActivities();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [dateRange?.from?.toDateString(), dateRange?.to?.toDateString()]);
+
+  // Build [startISO, endISO) for the active range. Defaults to "today".
+  const getRangeBounds = () => {
+    const from = dateRange?.from
+      ? new Date(dateRange.from.getFullYear(), dateRange.from.getMonth(), dateRange.from.getDate())
+      : (() => { const d = new Date(); return new Date(d.getFullYear(), d.getMonth(), d.getDate()); })();
+    const toBase = dateRange?.to ?? dateRange?.from ?? new Date();
+    const end = new Date(toBase.getFullYear(), toBase.getMonth(), toBase.getDate() + 1);
+    return {
+      startISO: from.toISOString(),
+      endISO: end.toISOString(),
+      startDate: from.toISOString().split('T')[0],
+      endDate: new Date(end.getTime() - 86400000).toISOString().split('T')[0],
+    };
+  };
 
   const fetchStats = async () => {
     try {
