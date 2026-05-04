@@ -146,8 +146,7 @@ export default function OwnerDashboard() {
   const [products, setProducts] = useState<Product[]>([]);
   const [selectedProductId, setSelectedProductId] = useState<string | null>(null);
   const [showProductDetails, setShowProductDetails] = useState(false);
-
-  const canAccess = isOwner || isAdmin;
+  const [dateRange, setDateRange] = useState<DateRange | undefined>(undefined);
 
   useEffect(() => {
     if (!permissionsLoading) {
