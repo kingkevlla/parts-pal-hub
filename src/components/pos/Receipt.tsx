@@ -1,12 +1,26 @@
 import { useEffect, useState, useRef } from "react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
-import { Printer, X } from "lucide-react";
-import { supabase } from "@/integrations/supabase/client";
+import { Printer, X, Download, WifiOff } from "lucide-react";
+import { offlineQuery } from "@/lib/offlineHelpers";
 import { useSystemSettings } from "@/hooks/useSystemSettings";
 import { useCurrency } from "@/hooks/useCurrency";
+import { useOnlineStatus } from "@/hooks/useOnlineStatus";
 import QRCode from "qrcode";
+
+const QUEUED_RECEIPTS_KEY = "queued_receipts";
+
+function queueReceipt(saleData: any) {
+  try {
+    const existing = JSON.parse(localStorage.getItem(QUEUED_RECEIPTS_KEY) || "[]");
+    if (existing.find((r: any) => r.id === saleData.id)) return;
+    existing.unshift({ ...saleData, queued_at: new Date().toISOString() });
+    // Keep last 50 only
+    localStorage.setItem(QUEUED_RECEIPTS_KEY, JSON.stringify(existing.slice(0, 50)));
+  } catch {}
+}
 
 interface ReceiptProps {
   isOpen: boolean;
@@ -41,6 +55,7 @@ interface ReceiptSettings {
 export default function Receipt({ isOpen, onClose, saleData }: ReceiptProps) {
   const { settings: systemSettings } = useSystemSettings();
   const { formatAmount } = useCurrency();
+  const isOnline = useOnlineStatus();
   const [receiptSettings, setReceiptSettings] = useState<ReceiptSettings>({
     receipt_logo_url: "",
     receipt_header_text: "RECEIPT",
@@ -62,27 +77,62 @@ export default function Receipt({ isOpen, onClose, saleData }: ReceiptProps) {
     if (isOpen && receiptSettings.receipt_show_qr) {
       generateQRCode();
     }
-  }, [isOpen, saleData.id, receiptSettings.receipt_show_qr]);
+    // Always queue/cache the receipt locally so it can be re-opened offline.
+    if (isOpen && saleData?.id) {
+      queueReceipt(saleData);
+    }
+  }, [isOpen, saleData?.id, receiptSettings.receipt_show_qr]);
 
   const fetchReceiptSettings = async () => {
     try {
-      const { data, error } = await supabase
-        .from("system_settings")
-        .select("*")
-        .like("key", "receipt_%");
-
-      if (error) throw error;
-
+      const { data } = await offlineQuery<any>("system_settings");
       const settingsMap: any = { ...receiptSettings };
-      data?.forEach((setting: any) => {
-        if (setting.value !== null) {
-          settingsMap[setting.key] = typeof setting.value === 'object' ? setting.value : setting.value;
-        }
-      });
+      (data || [])
+        .filter((s: any) => typeof s.key === "string" && s.key.startsWith("receipt_"))
+        .forEach((setting: any) => {
+          if (setting.value !== null && setting.value !== undefined) {
+            settingsMap[setting.key] = setting.value;
+          }
+        });
       setReceiptSettings(settingsMap);
     } catch (error) {
       console.error("Error fetching receipt settings:", error);
     }
+  };
+
+  const handleExport = () => {
+    const lines = [
+      receiptSettings.receipt_header_text,
+      systemSettings.company_name || "",
+      systemSettings.company_phone || "",
+      "",
+      `Receipt: ${saleData.id.substring(0, 8).toUpperCase()}`,
+      `Date: ${new Date(saleData.sale_date).toLocaleString()}`,
+      `Payment: ${saleData.payment_method}`,
+      saleData.customer_name ? `Customer: ${saleData.customer_name}` : "",
+      saleData.customer_phone ? `Phone: ${saleData.customer_phone}` : "",
+      "",
+      "Items:",
+      ...saleData.items.map(
+        (i) => `  ${i.quantity} x ${i.name} @ ${formatAmount(i.unit_price)} = ${formatAmount(i.subtotal)}`
+      ),
+      "",
+      `TOTAL: ${formatAmount(saleData.total_amount)}`,
+      "",
+      receiptSettings.receipt_footer_text || "",
+      !isOnline ? "\n[OFFLINE — will sync when online]" : "",
+    ]
+      .filter(Boolean)
+      .join("\n");
+    const blob = new Blob([lines], { type: "text/plain;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `receipt-${saleData.id.substring(0, 8)}.txt`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
   };
 
   const generateQRCode = async () => {
