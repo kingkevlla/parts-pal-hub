@@ -779,14 +779,14 @@ export default function OwnerDashboard() {
       <div>
         <h2 className="text-lg font-semibold mb-3 flex items-center gap-2">
           <CalendarDays className="h-5 w-5 text-primary" />
-          Today's Summary
+          {hasDateFilter ? `Summary — ${rangeLabel}` : "Today's Summary"}
         </h2>
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
           <Card className="bg-gradient-to-br from-emerald-500/10 to-emerald-600/5 border-emerald-500/20">
             <CardContent className="p-4">
               <div className="flex items-center gap-2 mb-1">
                 <ArrowUpRight className="h-4 w-4 text-emerald-600 dark:text-emerald-400" />
-                <p className="text-xs font-medium text-muted-foreground">Today's Sales</p>
+                <p className="text-xs font-medium text-muted-foreground">{hasDateFilter ? "Sales" : "Today's Sales"}</p>
               </div>
               <p className="text-xl font-bold">{formatAmount(todayStats.todayRevenue)}</p>
               <p className="text-xs text-muted-foreground mt-1">{todayStats.todayTransactions} transactions</p>
@@ -797,10 +797,10 @@ export default function OwnerDashboard() {
             <CardContent className="p-4">
               <div className="flex items-center gap-2 mb-1">
                 <ArrowDownRight className="h-4 w-4 text-red-600 dark:text-red-400" />
-                <p className="text-xs font-medium text-muted-foreground">Today's Expenses</p>
+                <p className="text-xs font-medium text-muted-foreground">{hasDateFilter ? "Expenses" : "Today's Expenses"}</p>
               </div>
               <p className="text-xl font-bold">{formatAmount(todayStats.todayExpenses)}</p>
-              <p className="text-xs text-muted-foreground mt-1">Outgoing today</p>
+              <p className="text-xs text-muted-foreground mt-1">{hasDateFilter ? "In selected range" : "Outgoing today"}</p>
             </CardContent>
           </Card>
 
@@ -808,7 +808,7 @@ export default function OwnerDashboard() {
             <CardContent className="p-4">
               <div className="flex items-center gap-2 mb-1">
                 <BarChart3 className="h-4 w-4 text-blue-600 dark:text-blue-400" />
-                <p className="text-xs font-medium text-muted-foreground">Today's Profit</p>
+                <p className="text-xs font-medium text-muted-foreground">{hasDateFilter ? "Profit" : "Today's Profit"}</p>
               </div>
               <p className={`text-xl font-bold ${todayStats.todayProfit >= 0 ? 'text-emerald-600 dark:text-emerald-400' : 'text-red-600 dark:text-red-400'}`}>
                 {formatAmount(todayStats.todayProfit)}
