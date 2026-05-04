@@ -7,11 +7,16 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { useToast } from "@/hooks/use-toast";
-import { 
-  TrendingUp, 
-  Users, 
-  Package, 
-  DollarSign, 
+import { format } from "date-fns";
+import type { DateRange } from "react-day-picker";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { Calendar } from "@/components/ui/calendar";
+import { cn } from "@/lib/utils";
+import {
+  TrendingUp,
+  Users,
+  Package,
+  DollarSign,
   Activity,
   Power,
   UserX,
@@ -30,7 +35,9 @@ import {
   ArrowDownRight,
   Clock,
   PackageCheck,
-  Banknote
+  Banknote,
+  Calendar as CalendarIcon,
+  X
 } from "lucide-react";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
 import { ScrollArea } from "@/components/ui/scroll-area";
@@ -139,6 +146,7 @@ export default function OwnerDashboard() {
   const [products, setProducts] = useState<Product[]>([]);
   const [selectedProductId, setSelectedProductId] = useState<string | null>(null);
   const [showProductDetails, setShowProductDetails] = useState(false);
+  const [dateRange, setDateRange] = useState<DateRange | undefined>(undefined);
 
   const canAccess = isOwner || isAdmin;
 
@@ -161,7 +169,7 @@ export default function OwnerDashboard() {
       fetchDueLoans();
       fetchProducts();
       subscribeToRealtime();
-      
+
       const interval = setInterval(() => {
         fetchDueLoans();
         fetchTodayStats();
@@ -169,6 +177,31 @@ export default function OwnerDashboard() {
       return () => clearInterval(interval);
     }
   }, [canAccess, permissionsLoading]);
+
+  // Re-run period-scoped fetches when the date range changes
+  useEffect(() => {
+    if (canAccess && !permissionsLoading) {
+      fetchTodayStats();
+      fetchTopProducts();
+      fetchActivities();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [dateRange?.from?.toDateString(), dateRange?.to?.toDateString()]);
+
+  // Build [startISO, endISO) for the active range. Defaults to "today".
+  const getRangeBounds = () => {
+    const from = dateRange?.from
+      ? new Date(dateRange.from.getFullYear(), dateRange.from.getMonth(), dateRange.from.getDate())
+      : (() => { const d = new Date(); return new Date(d.getFullYear(), d.getMonth(), d.getDate()); })();
+    const toBase = dateRange?.to ?? dateRange?.from ?? new Date();
+    const end = new Date(toBase.getFullYear(), toBase.getMonth(), toBase.getDate() + 1);
+    return {
+      startISO: from.toISOString(),
+      endISO: end.toISOString(),
+      startDate: from.toISOString().split('T')[0],
+      endDate: new Date(end.getTime() - 86400000).toISOString().split('T')[0],
+    };
+  };
 
   const fetchStats = async () => {
     try {
@@ -197,13 +230,11 @@ export default function OwnerDashboard() {
 
   const fetchTodayStats = async () => {
     try {
-      const today = new Date();
-      const startOfDay = new Date(today.getFullYear(), today.getMonth(), today.getDate()).toISOString();
-      const endOfDay = new Date(today.getFullYear(), today.getMonth(), today.getDate() + 1).toISOString();
+      const { startISO, endISO, startDate, endDate } = getRangeBounds();
 
       const [salesData, expensesData] = await Promise.all([
-        supabase.from('transactions').select('total_amount').gte('created_at', startOfDay).lt('created_at', endOfDay),
-        supabase.from('expenses').select('amount').gte('expense_date', today.toISOString().split('T')[0]).lte('expense_date', today.toISOString().split('T')[0])
+        supabase.from('transactions').select('total_amount').gte('created_at', startISO).lt('created_at', endISO),
+        supabase.from('expenses').select('amount').gte('expense_date', startDate).lte('expense_date', endDate)
       ]);
 
       const todayRevenue = salesData.data?.reduce((sum, t) => sum + Number(t.total_amount || 0), 0) || 0;
@@ -252,10 +283,18 @@ export default function OwnerDashboard() {
 
   const fetchTopProducts = async () => {
     try {
-      const { data: items } = await supabase
-        .from('transaction_items')
-        .select('product_id, quantity, total_price, products(name)');
+      const { startISO, endISO } = getRangeBounds();
+      const isAllTime = !dateRange?.from;
 
+      let query = supabase
+        .from('transaction_items')
+        .select('product_id, quantity, total_price, created_at, products(name)');
+
+      if (!isAllTime) {
+        query = query.gte('created_at', startISO).lt('created_at', endISO);
+      }
+
+      const { data: items } = await query;
       if (!items) return;
 
       const productMap = new Map<string, { name: string; totalSold: number; revenue: number }>();
@@ -308,10 +347,17 @@ export default function OwnerDashboard() {
 
   const fetchActivities = async () => {
     try {
-      const [transactions, stockMovements] = await Promise.all([
-        supabase.from('transactions').select('*').order('created_at', { ascending: false }).limit(5),
-        supabase.from('stock_movements').select('*').order('created_at', { ascending: false }).limit(5)
-      ]);
+      const { startISO, endISO } = getRangeBounds();
+      const isAllTime = !dateRange?.from;
+
+      let txQ = supabase.from('transactions').select('*').order('created_at', { ascending: false }).limit(5);
+      let smQ = supabase.from('stock_movements').select('*').order('created_at', { ascending: false }).limit(5);
+      if (!isAllTime) {
+        txQ = txQ.gte('created_at', startISO).lt('created_at', endISO);
+        smQ = smQ.gte('created_at', startISO).lt('created_at', endISO);
+      }
+
+      const [transactions, stockMovements] = await Promise.all([txQ, smQ]);
 
       const activityItems: ActivityItem[] = [];
 
@@ -609,22 +655,72 @@ export default function OwnerDashboard() {
 
   const netProfit = stats.totalRevenue - totalExpenses;
 
+  const hasDateFilter = !!dateRange?.from;
+  const rangeLabel = !hasDateFilter
+    ? "Today"
+    : !dateRange?.to || dateRange.from?.toDateString() === dateRange.to?.toDateString()
+    ? format(dateRange!.from!, "PPP")
+    : `${format(dateRange!.from!, "PP")} – ${format(dateRange!.to!, "PP")}`;
+  const datePickerLabel = !hasDateFilter
+    ? "Filter by date range"
+    : rangeLabel;
+
   return (
     <div className="space-y-4 pb-20 md:pb-6">
       {/* Header */}
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
         <div>
           <h1 className="text-2xl md:text-3xl font-bold">Owner Dashboard</h1>
-          <p className="text-sm text-muted-foreground">Real-time system overview and controls</p>
+          <p className="text-sm text-muted-foreground">
+            {hasDateFilter ? `Showing data for ${rangeLabel}` : "Real-time system overview and controls"}
+          </p>
         </div>
-        <Button 
-          variant="destructive" 
-          onClick={() => setShowShutdownDialog(true)}
-          className="w-full sm:w-auto"
-        >
-          <Power className="h-4 w-4 mr-2" />
-          Shutdown System
-        </Button>
+        <div className="flex items-center gap-2 w-full sm:w-auto flex-wrap">
+          <Popover>
+            <PopoverTrigger asChild>
+              <Button
+                variant="outline"
+                className={cn(
+                  "justify-start text-left font-normal max-w-[260px]",
+                  !hasDateFilter && "text-muted-foreground",
+                  hasDateFilter && "border-primary text-primary"
+                )}
+              >
+                <CalendarIcon className="mr-2 h-4 w-4 shrink-0" />
+                <span className="truncate">{datePickerLabel}</span>
+              </Button>
+            </PopoverTrigger>
+            <PopoverContent className="w-auto p-0" align="end">
+              <Calendar
+                mode="range"
+                selected={dateRange}
+                onSelect={setDateRange}
+                numberOfMonths={1}
+                initialFocus
+                className={cn("p-3 pointer-events-auto")}
+              />
+            </PopoverContent>
+          </Popover>
+          {hasDateFilter && (
+            <Button
+              variant="ghost"
+              size="icon"
+              onClick={() => setDateRange(undefined)}
+              className="text-muted-foreground h-9 w-9"
+              title="Clear date filter"
+            >
+              <X className="h-4 w-4" />
+            </Button>
+          )}
+          <Button
+            variant="destructive"
+            onClick={() => setShowShutdownDialog(true)}
+            className="ml-auto sm:ml-0"
+          >
+            <Power className="h-4 w-4 mr-2" />
+            Shutdown System
+          </Button>
+        </div>
       </div>
 
       {/* Loan Reminder Notification */}
@@ -683,14 +779,14 @@ export default function OwnerDashboard() {
       <div>
         <h2 className="text-lg font-semibold mb-3 flex items-center gap-2">
           <CalendarDays className="h-5 w-5 text-primary" />
-          Today's Summary
+          {hasDateFilter ? `Summary — ${rangeLabel}` : "Today's Summary"}
         </h2>
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
           <Card className="bg-gradient-to-br from-emerald-500/10 to-emerald-600/5 border-emerald-500/20">
             <CardContent className="p-4">
               <div className="flex items-center gap-2 mb-1">
                 <ArrowUpRight className="h-4 w-4 text-emerald-600 dark:text-emerald-400" />
-                <p className="text-xs font-medium text-muted-foreground">Today's Sales</p>
+                <p className="text-xs font-medium text-muted-foreground">{hasDateFilter ? "Sales" : "Today's Sales"}</p>
               </div>
               <p className="text-xl font-bold">{formatAmount(todayStats.todayRevenue)}</p>
               <p className="text-xs text-muted-foreground mt-1">{todayStats.todayTransactions} transactions</p>
@@ -701,10 +797,10 @@ export default function OwnerDashboard() {
             <CardContent className="p-4">
               <div className="flex items-center gap-2 mb-1">
                 <ArrowDownRight className="h-4 w-4 text-red-600 dark:text-red-400" />
-                <p className="text-xs font-medium text-muted-foreground">Today's Expenses</p>
+                <p className="text-xs font-medium text-muted-foreground">{hasDateFilter ? "Expenses" : "Today's Expenses"}</p>
               </div>
               <p className="text-xl font-bold">{formatAmount(todayStats.todayExpenses)}</p>
-              <p className="text-xs text-muted-foreground mt-1">Outgoing today</p>
+              <p className="text-xs text-muted-foreground mt-1">{hasDateFilter ? "In selected range" : "Outgoing today"}</p>
             </CardContent>
           </Card>
 
@@ -712,7 +808,7 @@ export default function OwnerDashboard() {
             <CardContent className="p-4">
               <div className="flex items-center gap-2 mb-1">
                 <BarChart3 className="h-4 w-4 text-blue-600 dark:text-blue-400" />
-                <p className="text-xs font-medium text-muted-foreground">Today's Profit</p>
+                <p className="text-xs font-medium text-muted-foreground">{hasDateFilter ? "Profit" : "Today's Profit"}</p>
               </div>
               <p className={`text-xl font-bold ${todayStats.todayProfit >= 0 ? 'text-emerald-600 dark:text-emerald-400' : 'text-red-600 dark:text-red-400'}`}>
                 {formatAmount(todayStats.todayProfit)}
