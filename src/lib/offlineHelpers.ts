@@ -1,5 +1,69 @@
 import { supabase } from '@/integrations/supabase/client';
-import { cacheData, getCachedData, queueMutation, type CacheTable } from '@/lib/offlineDb';
+import {
+  cacheData,
+  getCachedData,
+  queueMutation,
+  getCachedQuery,
+  setCachedQuery,
+  makeCacheKey,
+  type CacheTable,
+} from '@/lib/offlineDb';
+
+export { makeCacheKey };
+
+/**
+ * Stale-while-revalidate query for an arbitrary keyed result (filters,
+ * date ranges, joins, search terms). Returns cached data instantly when
+ * available and refreshes in the background. Use for queries that don't
+ * map 1:1 to a full table cache.
+ *
+ * @param key  Stable cache key (use makeCacheKey).
+ * @param queryFn  Network fetcher returning { data, error }.
+ * @param onUpdate  Optional callback invoked with fresh data after background refresh.
+ */
+export async function offlineKeyedQuery<T = any>(
+  key: string,
+  queryFn: () => PromiseLike<{ data: T | null; error: any }>,
+  onUpdate?: (fresh: T) => void
+): Promise<{ data: T | null; isOffline: boolean; fromCache: boolean }> {
+  const isOnline = navigator.onLine;
+  const cached = await getCachedQuery<T>(key);
+
+  const runNetwork = async () => {
+    const result = await queryFn();
+    if (!result.error && result.data !== null && result.data !== undefined) {
+      await setCachedQuery(key, result.data);
+      return result.data as T;
+    }
+    return null;
+  };
+
+  if (cached) {
+    if (isOnline) {
+      runNetwork()
+        .then((fresh) => {
+          if (fresh && onUpdate) {
+            try {
+              if (JSON.stringify(fresh) !== JSON.stringify(cached.data)) onUpdate(fresh);
+            } catch {
+              onUpdate(fresh);
+            }
+          }
+        })
+        .catch(() => {});
+    }
+    return { data: cached.data, isOffline: !isOnline, fromCache: true };
+  }
+
+  if (isOnline) {
+    try {
+      const fresh = await runNetwork();
+      if (fresh !== null) return { data: fresh, isOffline: false, fromCache: false };
+    } catch {}
+  }
+  return { data: null, isOffline: true, fromCache: false };
+}
+
 
 type QueryFn<T> = () => PromiseLike<{ data: T[] | null; error: any }>;
 
