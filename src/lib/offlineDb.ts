@@ -43,10 +43,14 @@ interface OfflineSchema extends DBSchema {
     key: string;
     value: { key: string; lastSync: number };
   };
+  query_cache: {
+    key: string;
+    value: { key: string; data: any; lastSync: number };
+  };
 }
 
 const DB_NAME = 'parts-pal-offline';
-const DB_VERSION = 2;
+const DB_VERSION = 3;
 
 const SIMPLE_STORES = [
   'suppliers', 'employees', 'employee_attendance', 'employee_leave',
