@@ -1,43 +1,66 @@
 import { supabase } from '@/integrations/supabase/client';
 import { cacheData, getCachedData, queueMutation, type CacheTable } from '@/lib/offlineDb';
 
+type QueryFn<T> = () => PromiseLike<{ data: T[] | null; error: any }>;
+
 /**
- * Universal offline-aware query: tries Supabase first, falls back to IndexedDB cache.
- * Automatically caches successful online results.
+ * Stale-while-revalidate offline-aware query.
+ * - Returns cached data IMMEDIATELY if present (no network wait).
+ * - Kicks off a background refresh from Supabase to update cache for next call.
+ * - Only awaits the network when cache is empty.
  */
 export async function offlineQuery<T = any>(
   table: CacheTable,
-  queryFn?: () => PromiseLike<{ data: T[] | null; error: any }>,
-  options?: { cacheResult?: boolean }
+  queryFn?: QueryFn<T>,
+  options?: { cacheResult?: boolean; forceNetwork?: boolean }
 ): Promise<{ data: T[]; isOffline: boolean }> {
   const isOnline = navigator.onLine;
   const shouldCache = options?.cacheResult !== false;
+  const force = options?.forceNetwork === true;
 
+  const runNetwork = async () => {
+    const result = queryFn
+      ? await queryFn()
+      : await supabase.from(table as any).select('*');
+    if (!result.error && result.data && shouldCache) {
+      cacheData(table, result.data as any[]).catch(() => {});
+    }
+    return result;
+  };
+
+  // Try cache first for instant response
+  let cached: any[] = [];
+  try {
+    cached = await getCachedData(table);
+  } catch {
+    cached = [];
+  }
+
+  if (cached.length > 0 && !force) {
+    // Fire-and-forget background refresh
+    if (isOnline) {
+      runNetwork().catch(() => {});
+    }
+    return { data: cached as T[], isOffline: !isOnline };
+  }
+
+  // No cache (or forced) - need to wait for network
   if (isOnline) {
     try {
-      const result = queryFn
-        ? await queryFn()
-        : await supabase.from(table as any).select('*');
-
+      const result = await runNetwork();
       if (!result.error && result.data) {
-        if (shouldCache) {
-          cacheData(table, result.data as any[]).catch(() => {});
-        }
         return { data: result.data as T[], isOffline: false };
       }
     } catch {
-      // fall through to cache
+      // fall through
     }
   }
 
-  const cached = await getCachedData(table);
   return { data: cached as T[], isOffline: true };
 }
 
 /**
  * Offline-aware mutation: executes online or queues for later sync.
- * For inserts, returns the inserted row(s). When offline, a client-side UUID
- * is generated so dependent operations can still chain.
  */
 export async function offlineMutate<T = any>(
   table: CacheTable,
@@ -74,7 +97,6 @@ export async function offlineMutate<T = any>(
     }
   }
 
-  // Offline: assign client UUIDs for inserts so callers can chain
   let queuedData = data;
   if (operation === 'insert' || operation === 'upsert') {
     const stamp = (row: any) => ({
@@ -94,7 +116,7 @@ export async function offlineMutate<T = any>(
 }
 
 /**
- * Insert helper that returns a single row (mirrors supabase.insert().select().single()).
+ * Insert helper that returns a single row.
  */
 export async function offlineInsertSingle<T = any>(
   table: CacheTable,
