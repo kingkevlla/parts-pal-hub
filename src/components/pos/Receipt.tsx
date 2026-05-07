@@ -50,20 +50,34 @@ interface ReceiptSettings {
   receipt_show_customer_info: boolean;
 }
 
+const RECEIPT_SETTINGS_CACHE_KEY = "receipt_settings_cache_v1";
+
+const DEFAULT_RECEIPT_SETTINGS: ReceiptSettings = {
+  receipt_logo_url: "",
+  receipt_header_text: "RECEIPT",
+  receipt_company_info: true,
+  receipt_footer_text: "Thank you for your business!",
+  receipt_show_qr: true,
+  receipt_tax_label: "VAT",
+  receipt_paper_size: "80mm",
+  receipt_show_customer_info: true,
+};
+
+function loadCachedReceiptSettings(): ReceiptSettings {
+  try {
+    const raw = localStorage.getItem(RECEIPT_SETTINGS_CACHE_KEY);
+    if (raw) return { ...DEFAULT_RECEIPT_SETTINGS, ...JSON.parse(raw) };
+  } catch {}
+  return DEFAULT_RECEIPT_SETTINGS;
+}
+
 export default function Receipt({ isOpen, onClose, saleData }: ReceiptProps) {
   const { settings: systemSettings } = useSystemSettings();
   const { formatAmount } = useCurrency();
   const isOnline = useOnlineStatus();
-  const [receiptSettings, setReceiptSettings] = useState<ReceiptSettings>({
-    receipt_logo_url: "",
-    receipt_header_text: "RECEIPT",
-    receipt_company_info: true,
-    receipt_footer_text: "Thank you for your business!",
-    receipt_show_qr: true,
-    receipt_tax_label: "VAT",
-    receipt_paper_size: "80mm",
-    receipt_show_customer_info: true,
-  });
+  // Load instantly from localStorage cache so the receipt renders with the
+  // user's branding even before the system_settings query resolves.
+  const [receiptSettings, setReceiptSettings] = useState<ReceiptSettings>(() => loadCachedReceiptSettings());
   const [qrCodeUrl, setQrCodeUrl] = useState<string>("");
   const receiptRef = useRef<HTMLDivElement>(null);
 
@@ -83,16 +97,19 @@ export default function Receipt({ isOpen, onClose, saleData }: ReceiptProps) {
 
   const fetchReceiptSettings = async () => {
     try {
+      // SWR: offlineQuery already returns cached data instantly and refreshes
+      // in the background. Persist the merged result for next session.
       const { data } = await offlineQuery<any>("system_settings");
-      const settingsMap: any = { ...receiptSettings };
+      const merged: ReceiptSettings = { ...DEFAULT_RECEIPT_SETTINGS };
       (data || [])
         .filter((s: any) => typeof s.key === "string" && s.key.startsWith("receipt_"))
         .forEach((setting: any) => {
           if (setting.value !== null && setting.value !== undefined) {
-            settingsMap[setting.key] = setting.value;
+            (merged as any)[setting.key] = setting.value;
           }
         });
-      setReceiptSettings(settingsMap);
+      setReceiptSettings(merged);
+      try { localStorage.setItem(RECEIPT_SETTINGS_CACHE_KEY, JSON.stringify(merged)); } catch {}
     } catch (error) {
       console.error("Error fetching receipt settings:", error);
     }

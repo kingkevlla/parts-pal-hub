@@ -43,10 +43,14 @@ interface OfflineSchema extends DBSchema {
     key: string;
     value: { key: string; lastSync: number };
   };
+  query_cache: {
+    key: string;
+    value: { key: string; data: any; lastSync: number };
+  };
 }
 
 const DB_NAME = 'parts-pal-offline';
-const DB_VERSION = 2;
+const DB_VERSION = 3;
 
 const SIMPLE_STORES = [
   'suppliers', 'employees', 'employee_attendance', 'employee_leave',
@@ -95,6 +99,13 @@ export async function getOfflineDb() {
           if (!db.objectStoreNames.contains(name)) {
             db.createObjectStore(name, { keyPath: 'id' });
           }
+        }
+      }
+
+      // V3 - add query_cache for keyed/filtered query results
+      if (oldVersion < 3) {
+        if (!db.objectStoreNames.contains('query_cache')) {
+          db.createObjectStore('query_cache', { keyPath: 'key' });
         }
       }
     },
@@ -183,3 +194,29 @@ export async function getPendingCount(): Promise<number> {
   const mutations = await getPendingMutations();
   return mutations.length;
 }
+
+/**
+ * Stable cache key from a base name + filter object.
+ * Sorts keys so order doesn't matter.
+ */
+export function makeCacheKey(base: string, filters?: Record<string, any>): string {
+  if (!filters) return base;
+  const norm = Object.keys(filters)
+    .sort()
+    .filter((k) => filters[k] !== undefined && filters[k] !== null && filters[k] !== '')
+    .map((k) => `${k}=${typeof filters[k] === 'object' ? JSON.stringify(filters[k]) : filters[k]}`)
+    .join('&');
+  return norm ? `${base}?${norm}` : base;
+}
+
+export async function getCachedQuery<T = any>(key: string): Promise<{ data: T; lastSync: number } | null> {
+  const db = await getOfflineDb();
+  const row = await db.get('query_cache', key);
+  return row ? { data: row.data as T, lastSync: row.lastSync } : null;
+}
+
+export async function setCachedQuery(key: string, data: any) {
+  const db = await getOfflineDb();
+  await db.put('query_cache', { key, data, lastSync: Date.now() });
+}
+
