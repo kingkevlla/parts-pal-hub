@@ -194,3 +194,29 @@ export async function getPendingCount(): Promise<number> {
   const mutations = await getPendingMutations();
   return mutations.length;
 }
+
+/**
+ * Stable cache key from a base name + filter object.
+ * Sorts keys so order doesn't matter.
+ */
+export function makeCacheKey(base: string, filters?: Record<string, any>): string {
+  if (!filters) return base;
+  const norm = Object.keys(filters)
+    .sort()
+    .filter((k) => filters[k] !== undefined && filters[k] !== null && filters[k] !== '')
+    .map((k) => `${k}=${typeof filters[k] === 'object' ? JSON.stringify(filters[k]) : filters[k]}`)
+    .join('&');
+  return norm ? `${base}?${norm}` : base;
+}
+
+export async function getCachedQuery<T = any>(key: string): Promise<{ data: T; lastSync: number } | null> {
+  const db = await getOfflineDb();
+  const row = await db.get('query_cache', key);
+  return row ? { data: row.data as T, lastSync: row.lastSync } : null;
+}
+
+export async function setCachedQuery(key: string, data: any) {
+  const db = await getOfflineDb();
+  await db.put('query_cache', { key, data, lastSync: Date.now() });
+}
+
