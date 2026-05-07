@@ -101,6 +101,13 @@ export async function getOfflineDb() {
           }
         }
       }
+
+      // V3 - add query_cache for keyed/filtered query results
+      if (oldVersion < 3) {
+        if (!db.objectStoreNames.contains('query_cache')) {
+          db.createObjectStore('query_cache', { keyPath: 'key' });
+        }
+      }
     },
   });
 
