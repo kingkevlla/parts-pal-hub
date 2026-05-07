@@ -9,15 +9,13 @@ import { useSystemSettings } from "@/hooks/useSystemSettings";
 import { useCurrency } from "@/hooks/useCurrency";
 import { useOnlineStatus } from "@/hooks/useOnlineStatus";
 import QRCode from "qrcode";
-
-const QUEUED_RECEIPTS_KEY = "queued_receipts";
+import { QUEUED_RECEIPTS_KEY } from "@/lib/queuedReceipts";
 
 function queueReceipt(saleData: any) {
   try {
     const existing = JSON.parse(localStorage.getItem(QUEUED_RECEIPTS_KEY) || "[]");
     if (existing.find((r: any) => r.id === saleData.id)) return;
     existing.unshift({ ...saleData, queued_at: new Date().toISOString() });
-    // Keep last 50 only
     localStorage.setItem(QUEUED_RECEIPTS_KEY, JSON.stringify(existing.slice(0, 50)));
   } catch {}
 }

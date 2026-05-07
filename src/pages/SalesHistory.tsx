@@ -6,7 +6,7 @@ import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Checkbox } from "@/components/ui/checkbox";
-import { ShoppingCart, DollarSign, TrendingUp, Calendar, Eye, Receipt } from "lucide-react";
+import { ShoppingCart, DollarSign, TrendingUp, Calendar, Eye, Receipt, Download } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { supabase } from "@/integrations/supabase/client";
 import { getCachedData } from "@/lib/offlineDb";
@@ -14,6 +14,8 @@ import { useCurrency } from "@/hooks/useCurrency";
 import { useDataTable } from "@/hooks/useDataTable";
 import { DataTableSearch, DataTablePagination, SelectAllCheckbox } from "@/components/ui/data-table-controls";
 import { format, startOfDay, endOfDay, startOfWeek, endOfWeek, startOfMonth, endOfMonth, subDays } from "date-fns";
+import { exportQueuedReceipts, getQueuedReceipts, clearQueuedReceipts } from "@/lib/queuedReceipts";
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 
 interface Transaction {
   id: string;
@@ -163,6 +165,50 @@ export default function SalesHistory() {
           <h1 className="text-3xl font-bold">Sales History</h1>
           <p className="text-muted-foreground">View and analyze all sales transactions</p>
         </div>
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <Button variant="outline" className="gap-2">
+              <Download className="h-4 w-4" />
+              Export Queued Receipts ({getQueuedReceipts().length})
+            </Button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end">
+            <DropdownMenuItem
+              onClick={() => {
+                const n = exportQueuedReceipts(formatAmount, "txt");
+                toast({ title: n ? `Exported ${n} receipts (.txt)` : "No queued receipts" });
+              }}
+            >
+              Download as .txt
+            </DropdownMenuItem>
+            <DropdownMenuItem
+              onClick={() => {
+                const n = exportQueuedReceipts(formatAmount, "csv");
+                toast({ title: n ? `Exported ${n} receipts (.csv)` : "No queued receipts" });
+              }}
+            >
+              Download as .csv
+            </DropdownMenuItem>
+            <DropdownMenuItem
+              onClick={() => {
+                const n = exportQueuedReceipts(formatAmount, "json");
+                toast({ title: n ? `Exported ${n} receipts (.json)` : "No queued receipts" });
+              }}
+            >
+              Download as .json
+            </DropdownMenuItem>
+            <DropdownMenuSeparator />
+            <DropdownMenuItem
+              onClick={() => {
+                clearQueuedReceipts();
+                toast({ title: "Queued receipts cleared" });
+              }}
+              className="text-destructive"
+            >
+              Clear queued receipts
+            </DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
       </div>
 
       {/* Stats Cards */}
