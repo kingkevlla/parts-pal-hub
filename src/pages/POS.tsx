@@ -155,52 +155,11 @@ export default function POS() {
     fetchProductsWithStock();
   }, [selectedWarehouse]);
 
-  const fetchProductsWithStock = async () => {
-    const isOnline = navigator.onLine;
-    let productsData: any[] = [];
-    let inventoryData: any[] = [];
-    let salesCountMap = new Map<string, number>();
-
-    if (isOnline) {
-      const { data: pData, error: productsError } = await supabase
-        .from('products')
-        .select('id, name, sku, barcode, selling_price, min_stock_level, image_url, stock_unit, selling_unit, unit_conversion_factor')
-        .eq('is_active', true);
-      if (productsError) {
-        productsData = await getCachedData('products');
-        inventoryData = await getCachedData('inventory');
-      } else {
-        productsData = pData || [];
-        let inventoryQuery = supabase.from('inventory').select('product_id, quantity, warehouse_id');
-        if (selectedWarehouse !== 'all') inventoryQuery = inventoryQuery.eq('warehouse_id', selectedWarehouse);
-        const { data: iData } = await inventoryQuery;
-        inventoryData = iData || [];
-        await cacheData('products', productsData);
-        if (selectedWarehouse === 'all') await cacheData('inventory', inventoryData);
-      }
-
-      // Fetch sales frequency (count of transaction_items per product)
-      const { data: salesData } = await supabase
-        .from('transaction_items')
-        .select('product_id, quantity');
-      if (salesData) {
-        salesData.forEach((s: any) => {
-          salesCountMap.set(s.product_id, (salesCountMap.get(s.product_id) || 0) + Number(s.quantity || 1));
-        });
-      }
-    } else {
-      productsData = await getCachedData('products');
-      const allInventory = await getCachedData('inventory');
-      inventoryData = selectedWarehouse === 'all' ? allInventory : allInventory.filter((i: any) => i.warehouse_id === selectedWarehouse);
-      // Offline: try cached transaction_items for popularity
-      const cachedTxItems = await getCachedData('transaction_items');
-      if (cachedTxItems?.length) {
-        cachedTxItems.forEach((s: any) => {
-          salesCountMap.set(s.product_id, (salesCountMap.get(s.product_id) || 0) + Number(s.quantity || 1));
-        });
-      }
-    }
-
+  const buildProductsWithStock = (
+    productsData: any[],
+    inventoryData: any[],
+    salesCountMap: Map<string, number>
+  ) => {
     const stockMap = new Map<string, number>();
     (inventoryData || []).forEach((i: any) => {
       stockMap.set(i.product_id, (stockMap.get(i.product_id) || 0) + (i.quantity || 0));
@@ -213,15 +172,77 @@ export default function POS() {
       const availableInSellingUnit = stockUnit !== sellingUnit ? rawStock * convFactor : rawStock;
       return { ...p, stock: rawStock, stock_unit: stockUnit, selling_unit: sellingUnit, unit_conversion_factor: convFactor, availableInSellingUnit, _salesCount: salesCountMap.get(p.id) || 0 };
     });
-
-    // Sort: highest stock first, then most sold second
     productsWithStock.sort((a: any, b: any) => {
       if ((b.stock || 0) !== (a.stock || 0)) return (b.stock || 0) - (a.stock || 0);
       return (b._salesCount || 0) - (a._salesCount || 0);
     });
-
-    setProducts(productsWithStock);
+    return productsWithStock;
   };
+
+  const fetchProductsWithStock = async () => {
+    const isOnline = navigator.onLine;
+    const cacheKey = makeCacheKey('pos_products_with_stock', { warehouse: selectedWarehouse });
+
+    // 1) Render instantly from keyed cache if present.
+    const cached = await getCachedQuery<any[]>(cacheKey);
+    if (cached?.data?.length) {
+      setProducts(cached.data);
+      if (!isOnline) return;
+      // fall through to background refresh
+    }
+
+    // 2) Fallback: build from raw cached tables (first ever load while online too).
+    if (!cached?.data?.length) {
+      const rawProducts = await getCachedData('products');
+      const rawInv = await getCachedData('inventory');
+      const rawTx = await getCachedData('transaction_items');
+      if (rawProducts.length) {
+        const inv = selectedWarehouse === 'all'
+          ? rawInv
+          : rawInv.filter((i: any) => i.warehouse_id === selectedWarehouse);
+        const salesMap = new Map<string, number>();
+        (rawTx || []).forEach((s: any) => {
+          salesMap.set(s.product_id, (salesMap.get(s.product_id) || 0) + Number(s.quantity || 1));
+        });
+        setProducts(buildProductsWithStock(rawProducts, inv, salesMap));
+      }
+      if (!isOnline) return;
+    }
+
+    // 3) Background refresh from network — runs in parallel.
+    try {
+      const [pRes, iRes, sRes] = await Promise.all([
+        supabase
+          .from('products')
+          .select('id, name, sku, barcode, selling_price, min_stock_level, image_url, stock_unit, selling_unit, unit_conversion_factor')
+          .eq('is_active', true),
+        selectedWarehouse !== 'all'
+          ? supabase.from('inventory').select('product_id, quantity, warehouse_id').eq('warehouse_id', selectedWarehouse)
+          : supabase.from('inventory').select('product_id, quantity, warehouse_id'),
+        supabase.from('transaction_items').select('product_id, quantity'),
+      ]);
+
+      if (pRes.error) return;
+      const productsData = pRes.data || [];
+      const inventoryData = iRes.data || [];
+      const salesCountMap = new Map<string, number>();
+      (sRes.data || []).forEach((s: any) => {
+        salesCountMap.set(s.product_id, (salesCountMap.get(s.product_id) || 0) + Number(s.quantity || 1));
+      });
+
+      // Refresh underlying caches for other screens.
+      cacheData('products', productsData).catch(() => {});
+      if (selectedWarehouse === 'all') cacheData('inventory', inventoryData).catch(() => {});
+      cacheData('transaction_items', sRes.data || []).catch(() => {});
+
+      const fresh = buildProductsWithStock(productsData, inventoryData, salesCountMap);
+      await setCachedQuery(cacheKey, fresh);
+      setProducts(fresh);
+    } catch {
+      // network failure — keep showing cached data
+    }
+  };
+
 
   const fetchWarehouses = async () => {
     if (navigator.onLine) {
