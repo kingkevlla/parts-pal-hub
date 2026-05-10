@@ -425,7 +425,8 @@ export default function POS() {
         setShowReceipt(true); setShowSplitPayment(false); setSplitPayments([]); setMobileCartOpen(false);
         toast({ title: 'Sale Saved Offline', description: 'Will sync automatically when internet returns' });
         setCart([]); setCustomerName(''); setCustomerPhone(''); setPaymentMethod('cash');
-        fetchProductsWithStock(); setIsProcessing(false); return;
+        await invalidatePosProductCaches();
+        fetchProductsWithStock({ force: true }); setIsProcessing(false); return;
       }
 
       const txRes = await offlineInsertSingle<any>('transactions', transactionData);
@@ -463,7 +464,8 @@ export default function POS() {
       toast({ title: 'Success', description: 'Sale completed successfully' });
       if (activePendingBillId) { await offlineMutate('pending_bills', 'update', { status: 'closed' }, { id: activePendingBillId }); setActivePendingBillId(null); }
       setCart([]); setCustomerName(''); setCustomerPhone(''); setPaymentMethod('cash');
-      fetchProductsWithStock();
+      await invalidatePosProductCaches();
+      fetchProductsWithStock({ force: true });
     } catch (error: any) { toast({ title: 'Error', description: error.message, variant: 'destructive' }); }
     finally { setIsProcessing(false); }
   };
@@ -521,7 +523,8 @@ export default function POS() {
       toast({ title: 'Credit Sale Completed', description: `Loan of ${formatAmount(totalLoanAmount)} created for ${selectedCustomer?.name}` });
       if (activePendingBillId) { await offlineMutate('pending_bills', 'update', { status: 'closed' }, { id: activePendingBillId }); setActivePendingBillId(null); }
       setCart([]); setCustomerName(''); setCustomerPhone(''); setPaymentMethod('cash'); setSelectedCustomerId(''); setCreditDueDays('30'); setCreditInterestRate('0');
-      fetchProductsWithStock(); fetchLoans();
+      await invalidatePosProductCaches();
+      fetchProductsWithStock({ force: true }); fetchLoans();
     } catch (error: any) { toast({ title: 'Error', description: error.message, variant: 'destructive' }); }
     finally { setIsProcessing(false); }
   };
@@ -540,7 +543,8 @@ export default function POS() {
   );
 
   const handleRefresh = () => {
-    fetchProductsWithStock(); fetchWarehouses(); fetchLoans();
+    invalidatePosProductCaches().then(() => fetchProductsWithStock({ force: true }));
+    fetchWarehouses(); fetchLoans();
     toast({ title: 'Refreshed', description: 'Data updated' });
   };
 
