@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { useOnlineStatus } from '@/hooks/useOnlineStatus';
-import { getCachedData, queueMutation, cacheData, makeCacheKey, getCachedQuery, setCachedQuery } from '@/lib/offlineDb';
+import { getCachedData, queueMutation, cacheData, makeCacheKey, getCachedQuery, setCachedQuery, isQueryFresh, getTtlForKey, invalidateQueryByPrefix } from '@/lib/offlineDb';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -179,16 +179,19 @@ export default function POS() {
     return productsWithStock;
   };
 
-  const fetchProductsWithStock = async () => {
+  const fetchProductsWithStock = async (opts?: { force?: boolean }) => {
     const isOnline = navigator.onLine;
     const cacheKey = makeCacheKey('pos_products_with_stock', { warehouse: selectedWarehouse });
+    const force = opts?.force === true;
 
     // 1) Render instantly from keyed cache if present.
     const cached = await getCachedQuery<any[]>(cacheKey);
+    const fresh = !force && isQueryFresh(cached, getTtlForKey(cacheKey));
     if (cached?.data?.length) {
       setProducts(cached.data);
-      if (!isOnline) return;
-      // fall through to background refresh
+      // Fresh cache → skip the network refresh entirely.
+      if (!isOnline || fresh) return;
+      // stale → fall through to background refresh
     }
 
     // 2) Fallback: build from raw cached tables (first ever load while online too).
@@ -235,12 +238,17 @@ export default function POS() {
       if (selectedWarehouse === 'all') cacheData('inventory', inventoryData).catch(() => {});
       cacheData('transaction_items', sRes.data || []).catch(() => {});
 
-      const fresh = buildProductsWithStock(productsData, inventoryData, salesCountMap);
-      await setCachedQuery(cacheKey, fresh);
-      setProducts(fresh);
+      const next = buildProductsWithStock(productsData, inventoryData, salesCountMap);
+      await setCachedQuery(cacheKey, next);
+      setProducts(next);
     } catch {
       // network failure — keep showing cached data
     }
+  };
+
+  /** Drop every keyed POS cache so the next fetch is forced to refresh. */
+  const invalidatePosProductCaches = async () => {
+    await invalidateQueryByPrefix('pos_products_with_stock');
   };
 
 
