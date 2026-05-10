@@ -65,11 +65,11 @@ export async function offlineKeyedQuery<T = any>(
 
   if (isOnline) {
     try {
-      const fresh = await runNetwork();
-      if (fresh !== null) return { data: fresh, isOffline: false, fromCache: false };
+      const next = await runNetwork();
+      if (next !== null) return { data: next, isOffline: false, fromCache: false, isFresh: true };
     } catch {}
   }
-  return { data: null, isOffline: true, fromCache: false };
+  return { data: null, isOffline: true, fromCache: false, isFresh: false };
 }
 
 
