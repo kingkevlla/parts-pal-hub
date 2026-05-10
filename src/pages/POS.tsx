@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { useOnlineStatus } from '@/hooks/useOnlineStatus';
-import { getCachedData, queueMutation, cacheData, makeCacheKey, getCachedQuery, setCachedQuery } from '@/lib/offlineDb';
+import { getCachedData, queueMutation, cacheData, makeCacheKey, getCachedQuery, setCachedQuery, isQueryFresh, getTtlForKey, invalidateQueryByPrefix } from '@/lib/offlineDb';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -179,16 +179,19 @@ export default function POS() {
     return productsWithStock;
   };
 
-  const fetchProductsWithStock = async () => {
+  const fetchProductsWithStock = async (opts?: { force?: boolean }) => {
     const isOnline = navigator.onLine;
     const cacheKey = makeCacheKey('pos_products_with_stock', { warehouse: selectedWarehouse });
+    const force = opts?.force === true;
 
     // 1) Render instantly from keyed cache if present.
     const cached = await getCachedQuery<any[]>(cacheKey);
+    const fresh = !force && isQueryFresh(cached, getTtlForKey(cacheKey));
     if (cached?.data?.length) {
       setProducts(cached.data);
-      if (!isOnline) return;
-      // fall through to background refresh
+      // Fresh cache → skip the network refresh entirely.
+      if (!isOnline || fresh) return;
+      // stale → fall through to background refresh
     }
 
     // 2) Fallback: build from raw cached tables (first ever load while online too).
@@ -235,12 +238,17 @@ export default function POS() {
       if (selectedWarehouse === 'all') cacheData('inventory', inventoryData).catch(() => {});
       cacheData('transaction_items', sRes.data || []).catch(() => {});
 
-      const fresh = buildProductsWithStock(productsData, inventoryData, salesCountMap);
-      await setCachedQuery(cacheKey, fresh);
-      setProducts(fresh);
+      const next = buildProductsWithStock(productsData, inventoryData, salesCountMap);
+      await setCachedQuery(cacheKey, next);
+      setProducts(next);
     } catch {
       // network failure — keep showing cached data
     }
+  };
+
+  /** Drop every keyed POS cache so the next fetch is forced to refresh. */
+  const invalidatePosProductCaches = async () => {
+    await invalidateQueryByPrefix('pos_products_with_stock');
   };
 
 
@@ -417,7 +425,8 @@ export default function POS() {
         setShowReceipt(true); setShowSplitPayment(false); setSplitPayments([]); setMobileCartOpen(false);
         toast({ title: 'Sale Saved Offline', description: 'Will sync automatically when internet returns' });
         setCart([]); setCustomerName(''); setCustomerPhone(''); setPaymentMethod('cash');
-        fetchProductsWithStock(); setIsProcessing(false); return;
+        await invalidatePosProductCaches();
+        fetchProductsWithStock({ force: true }); setIsProcessing(false); return;
       }
 
       const txRes = await offlineInsertSingle<any>('transactions', transactionData);
@@ -455,7 +464,8 @@ export default function POS() {
       toast({ title: 'Success', description: 'Sale completed successfully' });
       if (activePendingBillId) { await offlineMutate('pending_bills', 'update', { status: 'closed' }, { id: activePendingBillId }); setActivePendingBillId(null); }
       setCart([]); setCustomerName(''); setCustomerPhone(''); setPaymentMethod('cash');
-      fetchProductsWithStock();
+      await invalidatePosProductCaches();
+      fetchProductsWithStock({ force: true });
     } catch (error: any) { toast({ title: 'Error', description: error.message, variant: 'destructive' }); }
     finally { setIsProcessing(false); }
   };
@@ -513,7 +523,8 @@ export default function POS() {
       toast({ title: 'Credit Sale Completed', description: `Loan of ${formatAmount(totalLoanAmount)} created for ${selectedCustomer?.name}` });
       if (activePendingBillId) { await offlineMutate('pending_bills', 'update', { status: 'closed' }, { id: activePendingBillId }); setActivePendingBillId(null); }
       setCart([]); setCustomerName(''); setCustomerPhone(''); setPaymentMethod('cash'); setSelectedCustomerId(''); setCreditDueDays('30'); setCreditInterestRate('0');
-      fetchProductsWithStock(); fetchLoans();
+      await invalidatePosProductCaches();
+      fetchProductsWithStock({ force: true }); fetchLoans();
     } catch (error: any) { toast({ title: 'Error', description: error.message, variant: 'destructive' }); }
     finally { setIsProcessing(false); }
   };
@@ -532,7 +543,8 @@ export default function POS() {
   );
 
   const handleRefresh = () => {
-    fetchProductsWithStock(); fetchWarehouses(); fetchLoans();
+    invalidatePosProductCaches().then(() => fetchProductsWithStock({ force: true }));
+    fetchWarehouses(); fetchLoans();
     toast({ title: 'Refreshed', description: 'Data updated' });
   };
 

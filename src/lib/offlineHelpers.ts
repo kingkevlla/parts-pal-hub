@@ -6,10 +6,14 @@ import {
   getCachedQuery,
   setCachedQuery,
   makeCacheKey,
+  isQueryFresh,
+  getTtlForKey,
+  invalidateQuery,
+  invalidateQueryByPrefix,
   type CacheTable,
 } from '@/lib/offlineDb';
 
-export { makeCacheKey };
+export { makeCacheKey, invalidateQuery, invalidateQueryByPrefix };
 
 /**
  * Stale-while-revalidate query for an arbitrary keyed result (filters,
@@ -24,10 +28,13 @@ export { makeCacheKey };
 export async function offlineKeyedQuery<T = any>(
   key: string,
   queryFn: () => PromiseLike<{ data: T | null; error: any }>,
-  onUpdate?: (fresh: T) => void
-): Promise<{ data: T | null; isOffline: boolean; fromCache: boolean }> {
+  onUpdate?: (fresh: T) => void,
+  options?: { ttlMs?: number; forceRefresh?: boolean }
+): Promise<{ data: T | null; isOffline: boolean; fromCache: boolean; isFresh: boolean }> {
   const isOnline = navigator.onLine;
   const cached = await getCachedQuery<T>(key);
+  const ttlMs = options?.ttlMs ?? getTtlForKey(key);
+  const fresh = !options?.forceRefresh && isQueryFresh(cached, ttlMs);
 
   const runNetwork = async () => {
     const result = await queryFn();
@@ -39,29 +46,30 @@ export async function offlineKeyedQuery<T = any>(
   };
 
   if (cached) {
-    if (isOnline) {
+    // Skip background refresh entirely while still fresh — saves the round trip.
+    if (isOnline && !fresh) {
       runNetwork()
-        .then((fresh) => {
-          if (fresh && onUpdate) {
+        .then((next) => {
+          if (next && onUpdate) {
             try {
-              if (JSON.stringify(fresh) !== JSON.stringify(cached.data)) onUpdate(fresh);
+              if (JSON.stringify(next) !== JSON.stringify(cached.data)) onUpdate(next);
             } catch {
-              onUpdate(fresh);
+              onUpdate(next);
             }
           }
         })
         .catch(() => {});
     }
-    return { data: cached.data, isOffline: !isOnline, fromCache: true };
+    return { data: cached.data, isOffline: !isOnline, fromCache: true, isFresh: fresh };
   }
 
   if (isOnline) {
     try {
-      const fresh = await runNetwork();
-      if (fresh !== null) return { data: fresh, isOffline: false, fromCache: false };
+      const next = await runNetwork();
+      if (next !== null) return { data: next, isOffline: false, fromCache: false, isFresh: true };
     } catch {}
   }
-  return { data: null, isOffline: true, fromCache: false };
+  return { data: null, isOffline: true, fromCache: false, isFresh: false };
 }
 
 
