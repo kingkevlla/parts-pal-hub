@@ -56,11 +56,32 @@ export function useCurrency() {
   };
 
   const formatAmount = (amount: number) => {
-    return `${currencySymbol}${amount.toLocaleString(undefined, {
+    const safe = Number.isFinite(amount) ? amount : 0;
+    return `${currencySymbol}${safe.toLocaleString(undefined, {
       minimumFractionDigits: 2,
       maximumFractionDigits: 2
     })}`;
   };
 
-  return { currency, currencySymbol, formatAmount, loading };
+  /**
+   * Compact formatter for dashboard KPI cards. Keeps numbers short
+   * so they never overflow narrow cards. Examples (RWF):
+   *   1234       -> "FRw 1,234"
+   *   12345      -> "FRw 12.3K"
+   *   1234567    -> "FRw 1.23M"
+   *   1234567890 -> "FRw 1.23B"
+   */
+  const formatCompact = (amount: number) => {
+    const safe = Number.isFinite(amount) ? amount : 0;
+    const sign = safe < 0 ? "-" : "";
+    const abs = Math.abs(safe);
+    let body: string;
+    if (abs >= 1_000_000_000) body = `${(abs / 1_000_000_000).toFixed(2)}B`;
+    else if (abs >= 1_000_000) body = `${(abs / 1_000_000).toFixed(2)}M`;
+    else if (abs >= 10_000) body = `${(abs / 1_000).toFixed(1)}K`;
+    else body = Math.round(abs).toLocaleString();
+    return `${sign}${currencySymbol} ${body}`;
+  };
+
+  return { currency, currencySymbol, formatAmount, formatCompact, loading };
 }

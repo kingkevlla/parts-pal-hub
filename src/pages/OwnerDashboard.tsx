@@ -112,7 +112,7 @@ interface TopProduct {
 export default function OwnerDashboard() {
   const { user } = useAuth();
   const { toast } = useToast();
-  const { formatAmount } = useCurrency();
+  const { formatAmount, formatCompact } = useCurrency();
   const { isOwner, isAdmin, loading: permissionsLoading } = usePermissions();
   const [loading, setLoading] = useState(true);
   const [stats, setStats] = useState<Stats>({
