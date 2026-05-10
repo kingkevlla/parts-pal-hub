@@ -220,3 +220,50 @@ export async function setCachedQuery(key: string, data: any) {
   await db.put('query_cache', { key, data, lastSync: Date.now() });
 }
 
+/** Default TTLs (ms) per cache-key base. Falls back to DEFAULT_TTL_MS. */
+export const DEFAULT_TTL_MS = 60_000;
+export const QUERY_TTL: Record<string, number> = {
+  pos_products_with_stock: 30_000,
+  pos_loans: 30_000,
+  pos_warehouses: 5 * 60_000,
+  receipt_settings: 5 * 60_000,
+  owner_dashboard: 60_000,
+  inventory_list: 30_000,
+  reports: 60_000,
+};
+
+export function getTtlForKey(key: string): number {
+  const base = key.split('?')[0];
+  return QUERY_TTL[base] ?? DEFAULT_TTL_MS;
+}
+
+/** True if the cached row exists and is within its TTL. */
+export function isQueryFresh(
+  cached: { lastSync: number } | null | undefined,
+  ttlMs: number
+): boolean {
+  if (!cached) return false;
+  return Date.now() - cached.lastSync < ttlMs;
+}
+
+/** Invalidate a single keyed cache entry (force next call to refresh). */
+export async function invalidateQuery(key: string) {
+  const db = await getOfflineDb();
+  await db.delete('query_cache', key);
+}
+
+/** Invalidate every keyed cache entry whose key starts with `prefix`. */
+export async function invalidateQueryByPrefix(prefix: string) {
+  const db = await getOfflineDb();
+  const tx = db.transaction('query_cache', 'readwrite');
+  const store = tx.objectStore('query_cache');
+  let cursor = await store.openCursor();
+  while (cursor) {
+    if (typeof cursor.key === 'string' && cursor.key.startsWith(prefix)) {
+      await cursor.delete();
+    }
+    cursor = await cursor.continue();
+  }
+  await tx.done;
+}
+
