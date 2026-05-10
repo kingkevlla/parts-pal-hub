@@ -112,7 +112,7 @@ interface TopProduct {
 export default function OwnerDashboard() {
   const { user } = useAuth();
   const { toast } = useToast();
-  const { formatAmount } = useCurrency();
+  const { formatAmount, formatCompact } = useCurrency();
   const { isOwner, isAdmin, loading: permissionsLoading } = usePermissions();
   const [loading, setLoading] = useState(true);
   const [stats, setStats] = useState<Stats>({
@@ -782,49 +782,49 @@ export default function OwnerDashboard() {
           {hasDateFilter ? `Summary — ${rangeLabel}` : "Today's Summary"}
         </h2>
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-          <Card className="bg-gradient-to-br from-emerald-500/10 to-emerald-600/5 border-emerald-500/20">
-            <CardContent className="p-4">
-              <div className="flex items-center gap-2 mb-1">
-                <ArrowUpRight className="h-4 w-4 text-emerald-600 dark:text-emerald-400" />
-                <p className="text-xs font-medium text-muted-foreground">{hasDateFilter ? "Sales" : "Today's Sales"}</p>
+          <Card className="bg-gradient-to-br from-emerald-500/10 to-emerald-600/5 border-emerald-500/20 min-w-0">
+            <CardContent className="p-4 min-w-0">
+              <div className="flex items-center gap-2 mb-1 min-w-0">
+                <ArrowUpRight className="h-4 w-4 shrink-0 text-emerald-600 dark:text-emerald-400" />
+                <p className="text-xs font-medium text-muted-foreground truncate">{hasDateFilter ? "Sales" : "Today's Sales"}</p>
               </div>
-              <p className="text-xl font-bold">{formatAmount(todayStats.todayRevenue)}</p>
-              <p className="text-xs text-muted-foreground mt-1">{todayStats.todayTransactions} transactions</p>
+              <p className="text-lg sm:text-xl font-bold tabular-nums truncate" title={formatAmount(todayStats.todayRevenue)}>{formatCompact(todayStats.todayRevenue)}</p>
+              <p className="text-xs text-muted-foreground mt-1 truncate">{todayStats.todayTransactions} transactions</p>
             </CardContent>
           </Card>
 
-          <Card className="bg-gradient-to-br from-red-500/10 to-red-600/5 border-red-500/20">
-            <CardContent className="p-4">
-              <div className="flex items-center gap-2 mb-1">
-                <ArrowDownRight className="h-4 w-4 text-red-600 dark:text-red-400" />
-                <p className="text-xs font-medium text-muted-foreground">{hasDateFilter ? "Expenses" : "Today's Expenses"}</p>
+          <Card className="bg-gradient-to-br from-red-500/10 to-red-600/5 border-red-500/20 min-w-0">
+            <CardContent className="p-4 min-w-0">
+              <div className="flex items-center gap-2 mb-1 min-w-0">
+                <ArrowDownRight className="h-4 w-4 shrink-0 text-red-600 dark:text-red-400" />
+                <p className="text-xs font-medium text-muted-foreground truncate">{hasDateFilter ? "Expenses" : "Today's Expenses"}</p>
               </div>
-              <p className="text-xl font-bold">{formatAmount(todayStats.todayExpenses)}</p>
-              <p className="text-xs text-muted-foreground mt-1">{hasDateFilter ? "In selected range" : "Outgoing today"}</p>
+              <p className="text-lg sm:text-xl font-bold tabular-nums truncate" title={formatAmount(todayStats.todayExpenses)}>{formatCompact(todayStats.todayExpenses)}</p>
+              <p className="text-xs text-muted-foreground mt-1 truncate">{hasDateFilter ? "In selected range" : "Outgoing today"}</p>
             </CardContent>
           </Card>
 
-          <Card className="bg-gradient-to-br from-blue-500/10 to-blue-600/5 border-blue-500/20">
-            <CardContent className="p-4">
-              <div className="flex items-center gap-2 mb-1">
-                <BarChart3 className="h-4 w-4 text-blue-600 dark:text-blue-400" />
-                <p className="text-xs font-medium text-muted-foreground">{hasDateFilter ? "Profit" : "Today's Profit"}</p>
+          <Card className="bg-gradient-to-br from-blue-500/10 to-blue-600/5 border-blue-500/20 min-w-0">
+            <CardContent className="p-4 min-w-0">
+              <div className="flex items-center gap-2 mb-1 min-w-0">
+                <BarChart3 className="h-4 w-4 shrink-0 text-blue-600 dark:text-blue-400" />
+                <p className="text-xs font-medium text-muted-foreground truncate">{hasDateFilter ? "Profit" : "Today's Profit"}</p>
               </div>
-              <p className={`text-xl font-bold ${todayStats.todayProfit >= 0 ? 'text-emerald-600 dark:text-emerald-400' : 'text-red-600 dark:text-red-400'}`}>
-                {formatAmount(todayStats.todayProfit)}
+              <p className={`text-lg sm:text-xl font-bold tabular-nums truncate ${todayStats.todayProfit >= 0 ? 'text-emerald-600 dark:text-emerald-400' : 'text-red-600 dark:text-red-400'}`} title={formatAmount(todayStats.todayProfit)}>
+                {formatCompact(todayStats.todayProfit)}
               </p>
-              <p className="text-xs text-muted-foreground mt-1">Revenue - Expenses</p>
+              <p className="text-xs text-muted-foreground mt-1 truncate">Revenue - Expenses</p>
             </CardContent>
           </Card>
 
-          <Card className="bg-gradient-to-br from-amber-500/10 to-amber-600/5 border-amber-500/20">
-            <CardContent className="p-4">
-              <div className="flex items-center gap-2 mb-1">
-                <Clock className="h-4 w-4 text-amber-600 dark:text-amber-400" />
-                <p className="text-xs font-medium text-muted-foreground">Last Sale</p>
+          <Card className="bg-gradient-to-br from-amber-500/10 to-amber-600/5 border-amber-500/20 min-w-0">
+            <CardContent className="p-4 min-w-0">
+              <div className="flex items-center gap-2 mb-1 min-w-0">
+                <Clock className="h-4 w-4 shrink-0 text-amber-600 dark:text-amber-400" />
+                <p className="text-xs font-medium text-muted-foreground truncate">Last Sale</p>
               </div>
-              <p className="text-xl font-bold">{todayStats.todaySales > 0 ? 'Active' : 'No sales'}</p>
-              <p className="text-xs text-muted-foreground mt-1">
+              <p className="text-lg sm:text-xl font-bold truncate">{todayStats.todaySales > 0 ? 'Active' : 'No sales'}</p>
+              <p className="text-xs text-muted-foreground mt-1 truncate">
                 {new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
               </p>
             </CardContent>
@@ -834,68 +834,68 @@ export default function OwnerDashboard() {
 
       {/* All-time Stats Grid */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-        <Card className="bg-gradient-to-br from-primary/10 to-accent/10 border-primary/20">
-          <CardContent className="p-4 sm:p-6">
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-sm font-medium text-muted-foreground">Total Revenue</p>
-                <p className="text-2xl sm:text-3xl font-bold">{formatAmount(stats.totalRevenue)}</p>
-                <p className="text-xs text-emerald-600 dark:text-emerald-400 mt-1 flex items-center gap-1">
-                  <TrendingUp className="h-3 w-3" />
-                  {stats.totalSales} sales
+        <Card className="bg-gradient-to-br from-primary/10 to-accent/10 border-primary/20 min-w-0">
+          <CardContent className="p-4 sm:p-6 min-w-0">
+            <div className="flex items-center justify-between gap-3 min-w-0">
+              <div className="min-w-0 flex-1">
+                <p className="text-sm font-medium text-muted-foreground truncate">Total Revenue</p>
+                <p className="text-xl sm:text-2xl lg:text-3xl font-bold tabular-nums truncate" title={formatAmount(stats.totalRevenue)}>{formatCompact(stats.totalRevenue)}</p>
+                <p className="text-xs text-emerald-600 dark:text-emerald-400 mt-1 flex items-center gap-1 truncate">
+                  <TrendingUp className="h-3 w-3 shrink-0" />
+                  <span className="truncate">{stats.totalSales} sales</span>
                 </p>
               </div>
-              <DollarSign className="h-10 w-10 sm:h-12 sm:w-12 text-primary opacity-50" />
+              <DollarSign className="h-8 w-8 sm:h-10 sm:w-10 lg:h-12 lg:w-12 shrink-0 text-primary opacity-50" />
             </div>
           </CardContent>
         </Card>
 
-        <Card className="bg-gradient-to-br from-accent/10 to-emerald-500/10 border-accent/20">
-          <CardContent className="p-4 sm:p-6">
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-sm font-medium text-muted-foreground">Total Users</p>
-                <p className="text-2xl sm:text-3xl font-bold">{stats.totalUsers}</p>
-                <p className="text-xs text-muted-foreground mt-1">Active accounts</p>
+        <Card className="bg-gradient-to-br from-accent/10 to-emerald-500/10 border-accent/20 min-w-0">
+          <CardContent className="p-4 sm:p-6 min-w-0">
+            <div className="flex items-center justify-between gap-3 min-w-0">
+              <div className="min-w-0 flex-1">
+                <p className="text-sm font-medium text-muted-foreground truncate">Total Users</p>
+                <p className="text-xl sm:text-2xl lg:text-3xl font-bold tabular-nums truncate">{stats.totalUsers.toLocaleString()}</p>
+                <p className="text-xs text-muted-foreground mt-1 truncate">Active accounts</p>
               </div>
-              <Users className="h-10 w-10 sm:h-12 sm:w-12 text-accent opacity-50" />
+              <Users className="h-8 w-8 sm:h-10 sm:w-10 lg:h-12 lg:w-12 shrink-0 text-accent opacity-50" />
             </div>
           </CardContent>
         </Card>
 
-        <Card className="bg-gradient-to-br from-warning/10 to-destructive/10 border-warning/20">
-          <CardContent className="p-4 sm:p-6">
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-sm font-medium text-muted-foreground">Products</p>
-                <p className="text-2xl sm:text-3xl font-bold">{stats.totalProducts}</p>
+        <Card className="bg-gradient-to-br from-warning/10 to-destructive/10 border-warning/20 min-w-0">
+          <CardContent className="p-4 sm:p-6 min-w-0">
+            <div className="flex items-center justify-between gap-3 min-w-0">
+              <div className="min-w-0 flex-1">
+                <p className="text-sm font-medium text-muted-foreground truncate">Products</p>
+                <p className="text-xl sm:text-2xl lg:text-3xl font-bold tabular-nums truncate">{stats.totalProducts.toLocaleString()}</p>
                 {stats.lowStockCount > 0 && (
-                  <p className="text-xs text-destructive mt-1 flex items-center gap-1">
-                    <AlertCircle className="h-3 w-3" />
-                    {stats.lowStockCount} low stock
+                  <p className="text-xs text-destructive mt-1 flex items-center gap-1 truncate">
+                    <AlertCircle className="h-3 w-3 shrink-0" />
+                    <span className="truncate">{stats.lowStockCount} low stock</span>
                   </p>
                 )}
               </div>
-              <Package className="h-10 w-10 sm:h-12 sm:w-12 text-warning opacity-50" />
+              <Package className="h-8 w-8 sm:h-10 sm:w-10 lg:h-12 lg:w-12 shrink-0 text-warning opacity-50" />
             </div>
           </CardContent>
         </Card>
 
         <Card 
-          className="bg-gradient-to-br from-purple-500/10 to-pink-500/10 border-purple-500/20 cursor-pointer hover:shadow-lg transition-all"
+          className="bg-gradient-to-br from-purple-500/10 to-pink-500/10 border-purple-500/20 cursor-pointer hover:shadow-lg transition-all min-w-0"
           onClick={() => setShowLoanDetails(true)}
         >
-          <CardContent className="p-4 sm:p-6">
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-sm font-medium text-muted-foreground">Active Loans</p>
-                <p className="text-2xl sm:text-3xl font-bold">{stats.activeLoans}</p>
-                <p className="text-xs text-purple-600 dark:text-purple-400 mt-1 flex items-center gap-1">
-                  <HandCoins className="h-3 w-3" />
-                  {formatAmount(totalLoanAmount)} outstanding
+          <CardContent className="p-4 sm:p-6 min-w-0">
+            <div className="flex items-center justify-between gap-3 min-w-0">
+              <div className="min-w-0 flex-1">
+                <p className="text-sm font-medium text-muted-foreground truncate">Active Loans</p>
+                <p className="text-xl sm:text-2xl lg:text-3xl font-bold tabular-nums truncate">{stats.activeLoans.toLocaleString()}</p>
+                <p className="text-xs text-purple-600 dark:text-purple-400 mt-1 flex items-center gap-1 truncate" title={`${formatAmount(totalLoanAmount)} outstanding`}>
+                  <HandCoins className="h-3 w-3 shrink-0" />
+                  <span className="truncate">{formatCompact(totalLoanAmount)} outstanding</span>
                 </p>
               </div>
-              <HandCoins className="h-10 w-10 sm:h-12 sm:w-12 text-purple-500 opacity-50" />
+              <HandCoins className="h-8 w-8 sm:h-10 sm:w-10 lg:h-12 lg:w-12 shrink-0 text-purple-500 opacity-50" />
             </div>
           </CardContent>
         </Card>
@@ -903,45 +903,45 @@ export default function OwnerDashboard() {
 
       {/* Financial Overview & Inventory Value */}
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-        <Card className="bg-gradient-to-br from-emerald-500/10 to-teal-500/5 border-emerald-500/20">
-          <CardContent className="p-4 sm:p-6">
-            <div className="flex items-center gap-3">
-              <div className="h-10 w-10 rounded-full bg-emerald-500/20 flex items-center justify-center">
+        <Card className="bg-gradient-to-br from-emerald-500/10 to-teal-500/5 border-emerald-500/20 min-w-0">
+          <CardContent className="p-4 sm:p-6 min-w-0">
+            <div className="flex items-center gap-3 min-w-0">
+              <div className="h-10 w-10 shrink-0 rounded-full bg-emerald-500/20 flex items-center justify-center">
                 <Banknote className="h-5 w-5 text-emerald-600 dark:text-emerald-400" />
               </div>
-              <div>
-                <p className="text-sm text-muted-foreground">Net Profit (All Time)</p>
-                <p className={`text-2xl font-bold ${netProfit >= 0 ? 'text-emerald-600 dark:text-emerald-400' : 'text-red-600 dark:text-red-400'}`}>
-                  {formatAmount(netProfit)}
+              <div className="min-w-0 flex-1">
+                <p className="text-sm text-muted-foreground truncate">Net Profit (All Time)</p>
+                <p className={`text-xl sm:text-2xl font-bold tabular-nums truncate ${netProfit >= 0 ? 'text-emerald-600 dark:text-emerald-400' : 'text-red-600 dark:text-red-400'}`} title={formatAmount(netProfit)}>
+                  {formatCompact(netProfit)}
                 </p>
               </div>
             </div>
           </CardContent>
         </Card>
 
-        <Card className="bg-gradient-to-br from-indigo-500/10 to-blue-500/5 border-indigo-500/20">
-          <CardContent className="p-4 sm:p-6">
-            <div className="flex items-center gap-3">
-              <div className="h-10 w-10 rounded-full bg-indigo-500/20 flex items-center justify-center">
+        <Card className="bg-gradient-to-br from-indigo-500/10 to-blue-500/5 border-indigo-500/20 min-w-0">
+          <CardContent className="p-4 sm:p-6 min-w-0">
+            <div className="flex items-center gap-3 min-w-0">
+              <div className="h-10 w-10 shrink-0 rounded-full bg-indigo-500/20 flex items-center justify-center">
                 <PackageCheck className="h-5 w-5 text-indigo-600 dark:text-indigo-400" />
               </div>
-              <div>
-                <p className="text-sm text-muted-foreground">Inventory Value</p>
-                <p className="text-2xl font-bold text-indigo-600 dark:text-indigo-400">{formatAmount(inventoryValue)}</p>
+              <div className="min-w-0 flex-1">
+                <p className="text-sm text-muted-foreground truncate">Inventory Value</p>
+                <p className="text-xl sm:text-2xl font-bold tabular-nums truncate text-indigo-600 dark:text-indigo-400" title={formatAmount(inventoryValue)}>{formatCompact(inventoryValue)}</p>
               </div>
             </div>
           </CardContent>
         </Card>
 
-        <Card className="bg-gradient-to-br from-red-500/10 to-orange-500/5 border-red-500/20">
-          <CardContent className="p-4 sm:p-6">
-            <div className="flex items-center gap-3">
-              <div className="h-10 w-10 rounded-full bg-red-500/20 flex items-center justify-center">
+        <Card className="bg-gradient-to-br from-red-500/10 to-orange-500/5 border-red-500/20 min-w-0">
+          <CardContent className="p-4 sm:p-6 min-w-0">
+            <div className="flex items-center gap-3 min-w-0">
+              <div className="h-10 w-10 shrink-0 rounded-full bg-red-500/20 flex items-center justify-center">
                 <Receipt className="h-5 w-5 text-red-600 dark:text-red-400" />
               </div>
-              <div>
-                <p className="text-sm text-muted-foreground">Total Expenses</p>
-                <p className="text-2xl font-bold text-red-600 dark:text-red-400">{formatAmount(totalExpenses)}</p>
+              <div className="min-w-0 flex-1">
+                <p className="text-sm text-muted-foreground truncate">Total Expenses</p>
+                <p className="text-xl sm:text-2xl font-bold tabular-nums truncate text-red-600 dark:text-red-400" title={formatAmount(totalExpenses)}>{formatCompact(totalExpenses)}</p>
               </div>
             </div>
           </CardContent>
