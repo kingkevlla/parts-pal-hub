@@ -113,10 +113,28 @@ interface TopProduct {
 
 /* Small helper: renders a compact value with an accessible tooltip showing the full formatted amount */
 function AccessibleKpi({ compact, full, className }: { compact: string; full: string; className?: string }) {
+  const [open, setOpen] = useState(false);
+
+  const handleKeyDown = (e: KeyboardEvent<HTMLSpanElement>) => {
+    if (e.key === "Enter" || e.key === " ") {
+      e.preventDefault();
+      setOpen((prev) => !prev);
+    }
+    if (e.key === "Escape") {
+      setOpen(false);
+    }
+  };
+
   return (
-    <Tooltip>
+    <Tooltip open={open} onOpenChange={setOpen}>
       <TooltipTrigger asChild>
-        <span tabIndex={0} className={cn("outline-none cursor-help", className)} aria-label={`Full amount: ${full}`}>
+        <span
+          tabIndex={0}
+          role="button"
+          className={cn("outline-none cursor-help", className)}
+          aria-label={`Full amount: ${full}`}
+          onKeyDown={handleKeyDown}
+        >
           {compact}
         </span>
       </TooltipTrigger>
