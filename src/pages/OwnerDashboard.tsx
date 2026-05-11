@@ -805,7 +805,7 @@ export default function OwnerDashboard() {
                 <ArrowUpRight className="h-4 w-4 shrink-0 text-emerald-600 dark:text-emerald-400" />
                 <p className="text-xs font-medium text-muted-foreground truncate">{hasDateFilter ? "Sales" : "Today's Sales"}</p>
               </div>
-              <p className="text-lg sm:text-xl font-bold tabular-nums truncate" title={formatAmount(todayStats.todayRevenue)}>{formatCompact(todayStats.todayRevenue)}</p>
+              <p className="text-lg sm:text-xl font-bold tabular-nums truncate"><AccessibleKpi compact={formatCompact(todayStats.todayRevenue)} full={formatAmount(todayStats.todayRevenue)} /></p>
               <p className="text-xs text-muted-foreground mt-1 truncate">{todayStats.todayTransactions} transactions</p>
             </CardContent>
           </Card>
@@ -816,7 +816,7 @@ export default function OwnerDashboard() {
                 <ArrowDownRight className="h-4 w-4 shrink-0 text-red-600 dark:text-red-400" />
                 <p className="text-xs font-medium text-muted-foreground truncate">{hasDateFilter ? "Expenses" : "Today's Expenses"}</p>
               </div>
-              <p className="text-lg sm:text-xl font-bold tabular-nums truncate" title={formatAmount(todayStats.todayExpenses)}>{formatCompact(todayStats.todayExpenses)}</p>
+              <p className="text-lg sm:text-xl font-bold tabular-nums truncate"><AccessibleKpi compact={formatCompact(todayStats.todayExpenses)} full={formatAmount(todayStats.todayExpenses)} /></p>
               <p className="text-xs text-muted-foreground mt-1 truncate">{hasDateFilter ? "In selected range" : "Outgoing today"}</p>
             </CardContent>
           </Card>
@@ -827,8 +827,8 @@ export default function OwnerDashboard() {
                 <BarChart3 className="h-4 w-4 shrink-0 text-blue-600 dark:text-blue-400" />
                 <p className="text-xs font-medium text-muted-foreground truncate">{hasDateFilter ? "Profit" : "Today's Profit"}</p>
               </div>
-              <p className={`text-lg sm:text-xl font-bold tabular-nums truncate ${todayStats.todayProfit >= 0 ? 'text-emerald-600 dark:text-emerald-400' : 'text-red-600 dark:text-red-400'}`} title={formatAmount(todayStats.todayProfit)}>
-                {formatCompact(todayStats.todayProfit)}
+              <p className={`text-lg sm:text-xl font-bold tabular-nums truncate ${todayStats.todayProfit >= 0 ? 'text-emerald-600 dark:text-emerald-400' : 'text-red-600 dark:text-red-400'}`}>
+                <AccessibleKpi compact={formatCompact(todayStats.todayProfit)} full={formatAmount(todayStats.todayProfit)} />
               </p>
               <p className="text-xs text-muted-foreground mt-1 truncate">Revenue - Expenses</p>
             </CardContent>
@@ -856,7 +856,7 @@ export default function OwnerDashboard() {
             <div className="flex items-center justify-between gap-3 min-w-0">
               <div className="min-w-0 flex-1">
                 <p className="text-sm font-medium text-muted-foreground truncate">Total Revenue</p>
-                <p className="text-xl sm:text-2xl lg:text-3xl font-bold tabular-nums truncate" title={formatAmount(stats.totalRevenue)}>{formatCompact(stats.totalRevenue)}</p>
+                <p className="text-xl sm:text-2xl lg:text-3xl font-bold tabular-nums truncate"><AccessibleKpi compact={formatCompact(stats.totalRevenue)} full={formatAmount(stats.totalRevenue)} /></p>
                 <p className="text-xs text-emerald-600 dark:text-emerald-400 mt-1 flex items-center gap-1 truncate">
                   <TrendingUp className="h-3 w-3 shrink-0" />
                   <span className="truncate">{stats.totalSales} sales</span>
@@ -907,9 +907,9 @@ export default function OwnerDashboard() {
               <div className="min-w-0 flex-1">
                 <p className="text-sm font-medium text-muted-foreground truncate">Active Loans</p>
                 <p className="text-xl sm:text-2xl lg:text-3xl font-bold tabular-nums truncate">{stats.activeLoans.toLocaleString()}</p>
-                <p className="text-xs text-purple-600 dark:text-purple-400 mt-1 flex items-center gap-1 truncate" title={`${formatAmount(totalLoanAmount)} outstanding`}>
+                <p className="text-xs text-purple-600 dark:text-purple-400 mt-1 flex items-center gap-1 truncate">
                   <HandCoins className="h-3 w-3 shrink-0" />
-                  <span className="truncate">{formatCompact(totalLoanAmount)} outstanding</span>
+                  <AccessibleKpi compact={`${formatCompact(totalLoanAmount)} outstanding`} full={`${formatAmount(totalLoanAmount)} outstanding`} />
                 </p>
               </div>
               <HandCoins className="h-8 w-8 sm:h-10 sm:w-10 lg:h-12 lg:w-12 shrink-0 text-purple-500 opacity-50" />
@@ -928,8 +928,8 @@ export default function OwnerDashboard() {
               </div>
               <div className="min-w-0 flex-1">
                 <p className="text-sm text-muted-foreground truncate">Net Profit (All Time)</p>
-                <p className={`text-xl sm:text-2xl font-bold tabular-nums truncate ${netProfit >= 0 ? 'text-emerald-600 dark:text-emerald-400' : 'text-red-600 dark:text-red-400'}`} title={formatAmount(netProfit)}>
-                  {formatCompact(netProfit)}
+                <p className={`text-xl sm:text-2xl font-bold tabular-nums truncate ${netProfit >= 0 ? 'text-emerald-600 dark:text-emerald-400' : 'text-red-600 dark:text-red-400'}`}>
+                  <AccessibleKpi compact={formatCompact(netProfit)} full={formatAmount(netProfit)} />
                 </p>
               </div>
             </div>
@@ -944,7 +944,7 @@ export default function OwnerDashboard() {
               </div>
               <div className="min-w-0 flex-1">
                 <p className="text-sm text-muted-foreground truncate">Inventory Value</p>
-                <p className="text-xl sm:text-2xl font-bold tabular-nums truncate text-indigo-600 dark:text-indigo-400" title={formatAmount(inventoryValue)}>{formatCompact(inventoryValue)}</p>
+                <p className="text-xl sm:text-2xl font-bold tabular-nums truncate text-indigo-600 dark:text-indigo-400"><AccessibleKpi compact={formatCompact(inventoryValue)} full={formatAmount(inventoryValue)} /></p>
               </div>
             </div>
           </CardContent>
@@ -958,7 +958,7 @@ export default function OwnerDashboard() {
               </div>
               <div className="min-w-0 flex-1">
                 <p className="text-sm text-muted-foreground truncate">Total Expenses</p>
-                <p className="text-xl sm:text-2xl font-bold tabular-nums truncate text-red-600 dark:text-red-400" title={formatAmount(totalExpenses)}>{formatCompact(totalExpenses)}</p>
+                <p className="text-xl sm:text-2xl font-bold tabular-nums truncate text-red-600 dark:text-red-400"><AccessibleKpi compact={formatCompact(totalExpenses)} full={formatAmount(totalExpenses)} /></p>
               </div>
             </div>
           </CardContent>
