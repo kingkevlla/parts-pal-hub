@@ -111,7 +111,6 @@ interface TopProduct {
 }
 
 /* Small helper: renders a compact value with an accessible tooltip showing the full formatted amount */
-/* Small helper: renders a compact value with an accessible tooltip showing the full formatted amount */
 function AccessibleKpi({ compact, full, className }: { compact: string; full: string; className?: string }) {
   return (
     <Tooltip>
