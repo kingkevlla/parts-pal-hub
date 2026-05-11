@@ -111,6 +111,23 @@ interface TopProduct {
 }
 
 export default function OwnerDashboard() {
+/* Small helper: renders a compact value with an accessible tooltip showing the full formatted amount */
+function AccessibleKpi({ compact, full, className }: { compact: string; full: string; className?: string }) {
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <span tabIndex={0} className={cn("outline-none cursor-help", className)} aria-label={`Full amount: ${full}`}>
+          {compact}
+        </span>
+      </TooltipTrigger>
+      <TooltipContent>
+        <p>{full}</p>
+      </TooltipContent>
+    </Tooltip>
+  );
+}
+
+export default function OwnerDashboard() {
   const { user } = useAuth();
   const { toast } = useToast();
   const { formatAmount, formatCompact } = useCurrency();
