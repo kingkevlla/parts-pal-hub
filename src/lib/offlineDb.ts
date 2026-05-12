@@ -36,8 +36,28 @@ interface OfflineSchema extends DBSchema {
       match?: any;
       timestamp: number;
       synced: boolean;
+      attempts?: number;
+      last_error?: string | null;
+      next_retry_at?: number;
+      client_updated_at?: string;
     };
-    indexes: { 'by-synced': number };
+    indexes: { 'by-synced': number; 'by-next-retry': number };
+  };
+  failed_sync: {
+    key: number;
+    value: {
+      id?: number;
+      original_id?: number;
+      table: string;
+      operation: 'insert' | 'update' | 'delete' | 'upsert';
+      data: any;
+      match?: any;
+      attempts: number;
+      first_failed_at: number;
+      last_failed_at: number;
+      last_error: string;
+      reason: 'max_retries' | 'conflict' | 'permanent';
+    };
   };
   sync_meta: {
     key: string;
@@ -50,7 +70,14 @@ interface OfflineSchema extends DBSchema {
 }
 
 const DB_NAME = 'parts-pal-offline';
-const DB_VERSION = 3;
+const DB_VERSION = 4;
+
+// Retry policy
+export const MAX_SYNC_ATTEMPTS = 6;
+const BACKOFF_BASE_MS = 5_000; // 5s, 10s, 20s, 40s, 80s, 160s
+export function backoffDelay(attempts: number): number {
+  return BACKOFF_BASE_MS * Math.pow(2, Math.min(attempts, 8));
+}
 
 const SIMPLE_STORES = [
   'suppliers', 'employees', 'employee_attendance', 'employee_leave',
