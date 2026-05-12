@@ -55,7 +55,7 @@ export default function Dashboard() {
   const [lowStockItems, setLowStockItems] = useState<LowStockProduct[]>([]);
   const [loading, setLoading] = useState(true);
   const [isOfflineData, setIsOfflineData] = useState(false);
-  const { formatAmount } = useCurrency();
+  const { formatAmount, formatCompact } = useCurrency();
   const { settings } = useSystemSettings();
 
   useEffect(() => {
