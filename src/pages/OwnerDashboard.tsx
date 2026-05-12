@@ -898,7 +898,7 @@ export default function OwnerDashboard() {
             <div className="flex items-center justify-between gap-3 min-w-0">
               <div className="min-w-0 flex-1">
                 <p className="text-sm font-medium text-muted-foreground truncate">Active Loans</p>
-                <p className="text-xl sm:text-2xl lg:text-3xl font-bold tabular-nums truncate">{stats.activeLoans.toLocaleString()}</p>
+                <p className="text-xl sm:text-2xl lg:text-3xl font-bold tabular-nums truncate"><AccessibleKpi compact={compactNumber(stats.activeLoans)} full={`${stats.activeLoans.toLocaleString()} active loans`} /></p>
                 <p className="text-xs text-purple-600 dark:text-purple-400 mt-1 flex items-center gap-1 truncate">
                   <HandCoins className="h-3 w-3 shrink-0" />
                   <AccessibleKpi compact={`${formatCompact(totalLoanAmount)} outstanding`} full={`${formatAmount(totalLoanAmount)} outstanding`} />
