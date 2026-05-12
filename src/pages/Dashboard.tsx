@@ -366,7 +366,8 @@ export default function Dashboard() {
         />
         <StatCard
           title={hasDateFilter ? "Revenue (Filtered)" : "Monthly Revenue"}
-          value={formatAmount(stats.monthlyRevenue)}
+          value={formatCompact(stats.monthlyRevenue)}
+          fullValue={formatAmount(stats.monthlyRevenue)}
           icon={DollarSign}
           variant="success"
         />
