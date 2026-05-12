@@ -858,7 +858,7 @@ export default function OwnerDashboard() {
             <div className="flex items-center justify-between gap-3 min-w-0">
               <div className="min-w-0 flex-1">
                 <p className="text-sm font-medium text-muted-foreground truncate">Total Users</p>
-                <p className="text-xl sm:text-2xl lg:text-3xl font-bold tabular-nums truncate">{stats.totalUsers.toLocaleString()}</p>
+                <p className="text-xl sm:text-2xl lg:text-3xl font-bold tabular-nums truncate"><AccessibleKpi compact={compactNumber(stats.totalUsers)} full={`${stats.totalUsers.toLocaleString()} users`} /></p>
                 <p className="text-xs text-muted-foreground mt-1 truncate">Active accounts</p>
               </div>
               <Users className="h-8 w-8 sm:h-10 sm:w-10 lg:h-12 lg:w-12 shrink-0 text-accent opacity-50" />
