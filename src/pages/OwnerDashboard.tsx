@@ -111,6 +111,12 @@ interface TopProduct {
   revenue: number;
 }
 
+/** Compact integer formatter for non-currency counts (e.g. users, products). */
+const compactNumber = (n: number) => {
+  const safe = Number.isFinite(n) ? n : 0;
+  return new Intl.NumberFormat(undefined, { notation: "compact", maximumFractionDigits: 1 }).format(safe);
+};
+
 
 export default function OwnerDashboard() {
   const { user } = useAuth();
