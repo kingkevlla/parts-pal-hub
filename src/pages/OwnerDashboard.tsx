@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
-import type { KeyboardEvent } from "react";
 import { supabase } from "@/integrations/supabase/client";
+import { AccessibleKpi } from "@/components/dashboard/AccessibleKpi";
 import { useAuth } from "@/contexts/AuthContext";
 import { useCurrency } from "@/hooks/useCurrency";
 import { usePermissions } from "@/hooks/usePermissions";
