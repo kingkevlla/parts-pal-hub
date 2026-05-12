@@ -5,10 +5,15 @@ import {
   cacheData,
   getCachedData,
   queueMutation,
+  getDueMutations,
   getPendingMutations,
   markMutationSynced,
+  recordSyncFailure,
+  moveToFailedSync,
   clearSyncedMutations,
   getPendingCount,
+  getFailedSyncCount,
+  MAX_SYNC_ATTEMPTS,
   type CacheTable,
 } from '@/lib/offlineDb';
 import { toast } from 'sonner';
@@ -24,140 +29,231 @@ const CACHE_TABLES: CacheTable[] = [
   'profiles', 'user_roles', 'system_settings',
 ];
 
+// Tables that have an `updated_at` column we can use for last-write-wins conflict checks.
+const TABLES_WITH_UPDATED_AT = new Set<string>([
+  'products', 'inventory', 'pending_bills', 'profiles', 'system_settings',
+]);
+
+/** Strip client-only metadata from a row before sending to Supabase. */
+function stripClientMeta<T = any>(payload: T): T {
+  if (!payload || typeof payload !== 'object') return payload;
+  if (Array.isArray(payload)) {
+    return payload.map((r) => stripClientMeta(r)) as any;
+  }
+  const { client_updated_at, ...rest } = payload as any;
+  return rest as T;
+}
+
+/**
+ * Classify a Supabase/Postgres error.
+ * - permanent: validation, RLS denial, schema mismatch — never succeeds on retry.
+ * - transient: network, 5xx, timeout — retry with backoff.
+ */
+function classifyError(error: any): 'permanent' | 'transient' {
+  if (!error) return 'transient';
+  const code = String(error.code ?? '');
+  const status = Number(error.status ?? 0);
+  const msg = String(error.message ?? '').toLowerCase();
+
+  // Postgres SQLSTATE classes that won't fix themselves: 22 (data exception),
+  // 23 (integrity violation), 42 (syntax/access rule), 28 (auth)
+  if (/^(22|23|42|28)/.test(code)) return 'permanent';
+  // PostgREST permission / RLS / not found
+  if (code === 'PGRST301' || code === 'PGRST116' || code === '42501') return 'permanent';
+  if (status >= 400 && status < 500 && status !== 408 && status !== 429) return 'permanent';
+  if (msg.includes('row level security') || msg.includes('violates')) return 'permanent';
+
+  return 'transient';
+}
+
+/**
+ * Conflict check for update operations on tables with updated_at.
+ * Returns true if the server has a newer version than our queued client_updated_at.
+ */
+async function isStaleUpdate(table: string, match: any, clientUpdatedAt?: string): Promise<boolean> {
+  if (!clientUpdatedAt || !match || !TABLES_WITH_UPDATED_AT.has(table)) return false;
+  try {
+    const { data, error } = await supabase
+      .from(table as any)
+      .select('updated_at')
+      .match(match)
+      .maybeSingle();
+    if (error || !data) return false;
+    const serverTs = new Date((data as any).updated_at).getTime();
+    const clientTs = new Date(clientUpdatedAt).getTime();
+    return serverTs > clientTs;
+  } catch {
+    return false;
+  }
+}
+
 export function useOfflineSync() {
   const isOnline = useOnlineStatus();
   const [pendingCount, setPendingCount] = useState(0);
+  const [failedCount, setFailedCount] = useState(0);
   const [isSyncing, setIsSyncing] = useState(false);
-  const syncIntervalRef = useRef<NodeJS.Timeout | null>(null);
+  const cacheIntervalRef = useRef<NodeJS.Timeout | null>(null);
+  const retryIntervalRef = useRef<NodeJS.Timeout | null>(null);
+  const syncingRef = useRef(false);
 
-  const refreshPendingCount = useCallback(async () => {
-    const count = await getPendingCount();
-    setPendingCount(count);
+  const refreshCounts = useCallback(async () => {
+    const [p, f] = await Promise.all([getPendingCount(), getFailedSyncCount()]);
+    setPendingCount(p);
+    setFailedCount(f);
   }, []);
 
   // Cache all critical data from Supabase
   const cacheAllData = useCallback(async () => {
     if (!isOnline) return;
-
     try {
-      // Batch in groups of 5 to avoid overwhelming the connection
       for (let i = 0; i < CACHE_TABLES.length; i += 5) {
         const batch = CACHE_TABLES.slice(i, i + 5);
-        const promises = batch.map(async (table) => {
-          try {
-            const { data, error } = await supabase.from(table as any).select('*');
-            if (!error && data) {
-              await cacheData(table, data);
-            }
-          } catch {
-            // Skip individual table errors
-          }
-        });
-        await Promise.all(promises);
+        await Promise.all(
+          batch.map(async (table) => {
+            try {
+              const { data, error } = await supabase.from(table as any).select('*');
+              if (!error && data) await cacheData(table, data);
+            } catch { /* skip */ }
+          })
+        );
       }
-      console.log('[Offline] All data cached successfully');
     } catch (err) {
       console.error('[Offline] Cache error:', err);
     }
   }, [isOnline]);
 
-  // Sync pending mutations to Supabase
+  // Sync due mutations with retry/backoff + conflict resolution
   const syncPendingMutations = useCallback(async () => {
-    if (!isOnline || isSyncing) return;
+    if (!isOnline || syncingRef.current) return;
+    const mutations = await getDueMutations();
+    if (mutations.length === 0) {
+      await refreshCounts();
+      return;
+    }
 
-    const mutations = await getPendingMutations();
-    if (mutations.length === 0) return;
-
+    syncingRef.current = true;
     setIsSyncing(true);
     let syncedCount = 0;
-    let failedCount = 0;
+    let retriedCount = 0;
+    let failedPermanently = 0;
 
     for (const mutation of mutations) {
-      try {
-        let result;
-        const table = mutation.table as any;
+      const id = mutation.id!;
+      const table = mutation.table as any;
+      const cleanData = stripClientMeta(mutation.data);
 
+      try {
+        // Conflict resolution: skip stale updates (server is newer).
+        if (mutation.operation === 'update') {
+          const stale = await isStaleUpdate(
+            mutation.table,
+            mutation.match,
+            mutation.client_updated_at,
+          );
+          if (stale) {
+            await moveToFailedSync(id, 'conflict', 'Server row is newer than queued change');
+            failedPermanently++;
+            continue;
+          }
+        }
+
+        let result: any;
         switch (mutation.operation) {
           case 'insert':
-            result = await supabase.from(table).insert(mutation.data);
+            result = await supabase.from(table).insert(cleanData);
             break;
           case 'update':
-            result = await supabase.from(table).update(mutation.data).match(mutation.match);
+            result = await supabase.from(table).update(cleanData).match(mutation.match);
             break;
           case 'delete':
             result = await supabase.from(table).delete().match(mutation.match);
             break;
           case 'upsert':
-            result = await supabase.from(table).upsert(mutation.data);
+            result = await supabase.from(table).upsert(cleanData);
             break;
         }
 
         if (result?.error) {
-          console.error('[Offline] Sync error for mutation:', mutation, result.error);
-          failedCount++;
+          const kind = classifyError(result.error);
+          const errMsg = result.error.message ?? String(result.error);
+          if (kind === 'permanent') {
+            await moveToFailedSync(id, 'permanent', errMsg);
+            failedPermanently++;
+          } else if ((mutation.attempts ?? 0) + 1 >= MAX_SYNC_ATTEMPTS) {
+            await moveToFailedSync(id, 'max_retries', errMsg);
+            failedPermanently++;
+          } else {
+            await recordSyncFailure(id, errMsg);
+            retriedCount++;
+          }
         } else {
-          if (mutation.id) await markMutationSynced(mutation.id);
+          await markMutationSynced(id);
           syncedCount++;
         }
-      } catch (err) {
-        console.error('[Offline] Sync exception:', err);
-        failedCount++;
+      } catch (err: any) {
+        const errMsg = err?.message ?? String(err);
+        // Network exceptions are always transient.
+        if ((mutation.attempts ?? 0) + 1 >= MAX_SYNC_ATTEMPTS) {
+          await moveToFailedSync(id, 'max_retries', errMsg);
+          failedPermanently++;
+        } else {
+          await recordSyncFailure(id, errMsg);
+          retriedCount++;
+        }
       }
     }
 
     await clearSyncedMutations();
-    await refreshPendingCount();
+    await refreshCounts();
+    syncingRef.current = false;
     setIsSyncing(false);
 
     if (syncedCount > 0) {
-      toast.success(`Synced ${syncedCount} offline changes`);
+      toast.success(`Synced ${syncedCount} offline change${syncedCount > 1 ? 's' : ''}`);
       await cacheAllData();
     }
-    if (failedCount > 0) {
-      toast.error(`${failedCount} changes failed to sync - will retry`);
+    if (failedPermanently > 0) {
+      toast.error(
+        `${failedPermanently} change${failedPermanently > 1 ? 's' : ''} moved to failed sync — review required`,
+      );
     }
-  }, [isOnline, isSyncing, refreshPendingCount, cacheAllData]);
+    if (retriedCount > 0 && syncedCount === 0 && failedPermanently === 0) {
+      console.info(`[Offline] ${retriedCount} mutation(s) deferred — will retry with backoff`);
+    }
+  }, [isOnline, refreshCounts, cacheAllData]);
 
-  // Auto-cache on initial load and periodically when online
+  // On mount + when online: cache + sync, then run periodic cache refresh and a retry tick.
   useEffect(() => {
-    if (isOnline) {
-      cacheAllData();
-      syncPendingMutations();
+    if (!isOnline) return;
+    cacheAllData();
+    syncPendingMutations();
 
-      // Re-cache every 5 minutes
-      syncIntervalRef.current = setInterval(() => {
-        cacheAllData();
-      }, 5 * 60 * 1000);
-    }
+    cacheIntervalRef.current = setInterval(() => cacheAllData(), 5 * 60 * 1000);
+    // Retry tick — picks up due mutations once their backoff window elapses.
+    retryIntervalRef.current = setInterval(() => syncPendingMutations(), 15 * 1000);
 
     return () => {
-      if (syncIntervalRef.current) {
-        clearInterval(syncIntervalRef.current);
-      }
+      if (cacheIntervalRef.current) clearInterval(cacheIntervalRef.current);
+      if (retryIntervalRef.current) clearInterval(retryIntervalRef.current);
     };
   }, [isOnline, cacheAllData, syncPendingMutations]);
 
-  // When coming back online, sync pending mutations
+  // Refresh counts periodically so the UI badge stays accurate.
   useEffect(() => {
-    if (isOnline) {
-      syncPendingMutations();
-    }
-  }, [isOnline, syncPendingMutations]);
-
-  // Refresh pending count periodically
-  useEffect(() => {
-    refreshPendingCount();
-    const interval = setInterval(refreshPendingCount, 10000);
+    refreshCounts();
+    const interval = setInterval(refreshCounts, 10000);
     return () => clearInterval(interval);
-  }, [refreshPendingCount]);
+  }, [refreshCounts]);
 
   return {
     isOnline,
     pendingCount,
+    failedCount,
     isSyncing,
     syncNow: syncPendingMutations,
     cacheNow: cacheAllData,
     queueMutation,
     getCachedData,
+    getPendingMutations,
   };
 }

@@ -36,8 +36,28 @@ interface OfflineSchema extends DBSchema {
       match?: any;
       timestamp: number;
       synced: boolean;
+      attempts?: number;
+      last_error?: string | null;
+      next_retry_at?: number;
+      client_updated_at?: string;
     };
-    indexes: { 'by-synced': number };
+    indexes: { 'by-synced': number; 'by-next-retry': number };
+  };
+  failed_sync: {
+    key: number;
+    value: {
+      id?: number;
+      original_id?: number;
+      table: string;
+      operation: 'insert' | 'update' | 'delete' | 'upsert';
+      data: any;
+      match?: any;
+      attempts: number;
+      first_failed_at: number;
+      last_failed_at: number;
+      last_error: string;
+      reason: 'max_retries' | 'conflict' | 'permanent';
+    };
   };
   sync_meta: {
     key: string;
@@ -50,7 +70,14 @@ interface OfflineSchema extends DBSchema {
 }
 
 const DB_NAME = 'parts-pal-offline';
-const DB_VERSION = 3;
+const DB_VERSION = 4;
+
+// Retry policy
+export const MAX_SYNC_ATTEMPTS = 6;
+const BACKOFF_BASE_MS = 5_000; // 5s, 10s, 20s, 40s, 80s, 160s
+export function backoffDelay(attempts: number): number {
+  return BACKOFF_BASE_MS * Math.pow(2, Math.min(attempts, 8));
+}
 
 const SIMPLE_STORES = [
   'suppliers', 'employees', 'employee_attendance', 'employee_leave',
@@ -65,7 +92,7 @@ export async function getOfflineDb() {
   if (dbInstance) return dbInstance;
 
   dbInstance = await openDB<OfflineSchema>(DB_NAME, DB_VERSION, {
-    upgrade(db, oldVersion) {
+    upgrade(db, oldVersion, _newVersion, transaction) {
       // V1 stores
       if (oldVersion < 1) {
         const productStore = db.createObjectStore('products', { keyPath: 'id' });
@@ -106,6 +133,21 @@ export async function getOfflineDb() {
       if (oldVersion < 3) {
         if (!db.objectStoreNames.contains('query_cache')) {
           db.createObjectStore('query_cache', { keyPath: 'key' });
+        }
+      }
+
+      // V4 - failed_sync store + by-next-retry index on pending_mutations
+      if (oldVersion < 4) {
+        if (!db.objectStoreNames.contains('failed_sync')) {
+          db.createObjectStore('failed_sync', { keyPath: 'id', autoIncrement: true });
+        }
+        try {
+          const mutStore = transaction.objectStore('pending_mutations');
+          if (!mutStore.indexNames.contains('by-next-retry')) {
+            mutStore.createIndex('by-next-retry', 'next_retry_at');
+          }
+        } catch {
+          // index may already exist
         }
       }
     },
@@ -150,17 +192,41 @@ export async function queueMutation(
   match?: any
 ) {
   const db = await getOfflineDb();
+  const now = Date.now();
+  const clientUpdatedAt = new Date(now).toISOString();
+  // Stamp client_updated_at on row payloads for last-write-wins conflict resolution.
+  let stamped = data;
+  if (operation !== 'delete' && data && typeof data === 'object') {
+    stamped = Array.isArray(data)
+      ? data.map((r) => ({ ...r, client_updated_at: r?.client_updated_at ?? clientUpdatedAt }))
+      : { ...data, client_updated_at: data?.client_updated_at ?? clientUpdatedAt };
+  }
   await db.add('pending_mutations', {
-    table, operation, data, match,
-    timestamp: Date.now(),
+    table,
+    operation,
+    data: stamped,
+    match,
+    timestamp: now,
     synced: false,
+    attempts: 0,
+    last_error: null,
+    next_retry_at: now,
+    client_updated_at: clientUpdatedAt,
   } as any);
+}
+
+/** Mutations whose next_retry_at <= now (or unset). Excludes synced. */
+export async function getDueMutations() {
+  const db = await getOfflineDb();
+  const all = await db.getAll('pending_mutations');
+  const now = Date.now();
+  return all.filter((m) => !m.synced && (m.next_retry_at ?? 0) <= now);
 }
 
 export async function getPendingMutations() {
   const db = await getOfflineDb();
   const all = await db.getAll('pending_mutations');
-  return all.filter(m => !m.synced);
+  return all.filter((m) => !m.synced);
 }
 
 export async function markMutationSynced(id: number) {
@@ -170,6 +236,77 @@ export async function markMutationSynced(id: number) {
     mutation.synced = true;
     await db.put('pending_mutations', mutation);
   }
+}
+
+/** Record a failed attempt and schedule the next retry with exponential backoff. */
+export async function recordSyncFailure(id: number, error: string) {
+  const db = await getOfflineDb();
+  const mutation = await db.get('pending_mutations', id);
+  if (!mutation) return;
+  const attempts = (mutation.attempts ?? 0) + 1;
+  mutation.attempts = attempts;
+  mutation.last_error = error.slice(0, 500);
+  mutation.next_retry_at = Date.now() + backoffDelay(attempts);
+  await db.put('pending_mutations', mutation);
+}
+
+/** Move a mutation to failed_sync and remove it from the live queue. */
+export async function moveToFailedSync(
+  id: number,
+  reason: 'max_retries' | 'conflict' | 'permanent',
+  error: string,
+) {
+  const db = await getOfflineDb();
+  const mutation = await db.get('pending_mutations', id);
+  if (!mutation) return;
+  await db.add('failed_sync', {
+    original_id: mutation.id,
+    table: mutation.table,
+    operation: mutation.operation,
+    data: mutation.data,
+    match: mutation.match,
+    attempts: mutation.attempts ?? 0,
+    first_failed_at: mutation.timestamp,
+    last_failed_at: Date.now(),
+    last_error: error.slice(0, 500),
+    reason,
+  } as any);
+  await db.delete('pending_mutations', id);
+}
+
+export async function getFailedSync() {
+  const db = await getOfflineDb();
+  return db.getAll('failed_sync');
+}
+
+export async function getFailedSyncCount(): Promise<number> {
+  const db = await getOfflineDb();
+  return db.count('failed_sync');
+}
+
+/** Move a failed entry back into pending_mutations for another try. */
+export async function retryFailedSync(failedId: number) {
+  const db = await getOfflineDb();
+  const f = await db.get('failed_sync', failedId);
+  if (!f) return;
+  const now = Date.now();
+  await db.add('pending_mutations', {
+    table: f.table,
+    operation: f.operation,
+    data: f.data,
+    match: f.match,
+    timestamp: now,
+    synced: false,
+    attempts: 0,
+    last_error: null,
+    next_retry_at: now,
+  } as any);
+  await db.delete('failed_sync', failedId);
+}
+
+export async function discardFailedSync(failedId: number) {
+  const db = await getOfflineDb();
+  await db.delete('failed_sync', failedId);
 }
 
 export async function clearSyncedMutations() {
