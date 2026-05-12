@@ -92,7 +92,7 @@ export async function getOfflineDb() {
   if (dbInstance) return dbInstance;
 
   dbInstance = await openDB<OfflineSchema>(DB_NAME, DB_VERSION, {
-    upgrade(db, oldVersion) {
+    upgrade(db, oldVersion, _newVersion, transaction) {
       // V1 stores
       if (oldVersion < 1) {
         const productStore = db.createObjectStore('products', { keyPath: 'id' });
@@ -133,6 +133,21 @@ export async function getOfflineDb() {
       if (oldVersion < 3) {
         if (!db.objectStoreNames.contains('query_cache')) {
           db.createObjectStore('query_cache', { keyPath: 'key' });
+        }
+      }
+
+      // V4 - failed_sync store + by-next-retry index on pending_mutations
+      if (oldVersion < 4) {
+        if (!db.objectStoreNames.contains('failed_sync')) {
+          db.createObjectStore('failed_sync', { keyPath: 'id', autoIncrement: true });
+        }
+        try {
+          const mutStore = transaction.objectStore('pending_mutations');
+          if (!mutStore.indexNames.contains('by-next-retry')) {
+            mutStore.createIndex('by-next-retry', 'next_retry_at');
+          }
+        } catch {
+          // index may already exist
         }
       }
     },
