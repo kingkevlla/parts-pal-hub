@@ -877,7 +877,7 @@ export default function OwnerDashboard() {
             <div className="flex items-center justify-between gap-3 min-w-0">
               <div className="min-w-0 flex-1">
                 <p className="text-sm font-medium text-muted-foreground truncate">Products</p>
-                <p className="text-xl sm:text-2xl lg:text-3xl font-bold tabular-nums truncate">{stats.totalProducts.toLocaleString()}</p>
+                <p className="text-xl sm:text-2xl lg:text-3xl font-bold tabular-nums truncate"><AccessibleKpi compact={compactNumber(stats.totalProducts)} full={`${stats.totalProducts.toLocaleString()} products`} /></p>
                 {stats.lowStockCount > 0 && (
                   <p className="text-xs text-destructive mt-1 flex items-center gap-1 truncate">
                     <AlertCircle className="h-3 w-3 shrink-0" />
