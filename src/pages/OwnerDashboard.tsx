@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
-import type { KeyboardEvent } from "react";
 import { supabase } from "@/integrations/supabase/client";
+import { AccessibleKpi } from "@/components/dashboard/AccessibleKpi";
 import { useAuth } from "@/contexts/AuthContext";
 import { useCurrency } from "@/hooks/useCurrency";
 import { usePermissions } from "@/hooks/usePermissions";
@@ -111,39 +111,12 @@ interface TopProduct {
   revenue: number;
 }
 
-/* Small helper: renders a compact value with an accessible tooltip showing the full formatted amount */
-function AccessibleKpi({ compact, full, className }: { compact: string; full: string; className?: string }) {
-  const [open, setOpen] = useState(false);
+/** Compact integer formatter for non-currency counts (e.g. users, products). */
+const compactNumber = (n: number) => {
+  const safe = Number.isFinite(n) ? n : 0;
+  return new Intl.NumberFormat(undefined, { notation: "compact", maximumFractionDigits: 1 }).format(safe);
+};
 
-  const handleKeyDown = (e: KeyboardEvent<HTMLSpanElement>) => {
-    if (e.key === "Enter" || e.key === " ") {
-      e.preventDefault();
-      setOpen((prev) => !prev);
-    }
-    if (e.key === "Escape") {
-      setOpen(false);
-    }
-  };
-
-  return (
-    <Tooltip open={open} onOpenChange={setOpen}>
-      <TooltipTrigger asChild>
-        <span
-          tabIndex={0}
-          role="button"
-          className={cn("outline-none cursor-help", className)}
-          aria-label={`Full amount: ${full}`}
-          onKeyDown={handleKeyDown}
-        >
-          {compact}
-        </span>
-      </TooltipTrigger>
-      <TooltipContent>
-        <p>{full}</p>
-      </TooltipContent>
-    </Tooltip>
-  );
-}
 
 export default function OwnerDashboard() {
   const { user } = useAuth();
@@ -891,7 +864,7 @@ export default function OwnerDashboard() {
             <div className="flex items-center justify-between gap-3 min-w-0">
               <div className="min-w-0 flex-1">
                 <p className="text-sm font-medium text-muted-foreground truncate">Total Users</p>
-                <p className="text-xl sm:text-2xl lg:text-3xl font-bold tabular-nums truncate">{stats.totalUsers.toLocaleString()}</p>
+                <p className="text-xl sm:text-2xl lg:text-3xl font-bold tabular-nums truncate"><AccessibleKpi compact={compactNumber(stats.totalUsers)} full={`${stats.totalUsers.toLocaleString()} users`} /></p>
                 <p className="text-xs text-muted-foreground mt-1 truncate">Active accounts</p>
               </div>
               <Users className="h-8 w-8 sm:h-10 sm:w-10 lg:h-12 lg:w-12 shrink-0 text-accent opacity-50" />
@@ -904,7 +877,7 @@ export default function OwnerDashboard() {
             <div className="flex items-center justify-between gap-3 min-w-0">
               <div className="min-w-0 flex-1">
                 <p className="text-sm font-medium text-muted-foreground truncate">Products</p>
-                <p className="text-xl sm:text-2xl lg:text-3xl font-bold tabular-nums truncate">{stats.totalProducts.toLocaleString()}</p>
+                <p className="text-xl sm:text-2xl lg:text-3xl font-bold tabular-nums truncate"><AccessibleKpi compact={compactNumber(stats.totalProducts)} full={`${stats.totalProducts.toLocaleString()} products`} /></p>
                 {stats.lowStockCount > 0 && (
                   <p className="text-xs text-destructive mt-1 flex items-center gap-1 truncate">
                     <AlertCircle className="h-3 w-3 shrink-0" />
@@ -925,7 +898,7 @@ export default function OwnerDashboard() {
             <div className="flex items-center justify-between gap-3 min-w-0">
               <div className="min-w-0 flex-1">
                 <p className="text-sm font-medium text-muted-foreground truncate">Active Loans</p>
-                <p className="text-xl sm:text-2xl lg:text-3xl font-bold tabular-nums truncate">{stats.activeLoans.toLocaleString()}</p>
+                <p className="text-xl sm:text-2xl lg:text-3xl font-bold tabular-nums truncate"><AccessibleKpi compact={compactNumber(stats.activeLoans)} full={`${stats.activeLoans.toLocaleString()} active loans`} /></p>
                 <p className="text-xs text-purple-600 dark:text-purple-400 mt-1 flex items-center gap-1 truncate">
                   <HandCoins className="h-3 w-3 shrink-0" />
                   <AccessibleKpi compact={`${formatCompact(totalLoanAmount)} outstanding`} full={`${formatAmount(totalLoanAmount)} outstanding`} />

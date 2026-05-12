@@ -55,7 +55,7 @@ export default function Dashboard() {
   const [lowStockItems, setLowStockItems] = useState<LowStockProduct[]>([]);
   const [loading, setLoading] = useState(true);
   const [isOfflineData, setIsOfflineData] = useState(false);
-  const { formatAmount } = useCurrency();
+  const { formatAmount, formatCompact } = useCurrency();
   const { settings } = useSystemSettings();
 
   useEffect(() => {
@@ -366,7 +366,8 @@ export default function Dashboard() {
         />
         <StatCard
           title={hasDateFilter ? "Revenue (Filtered)" : "Monthly Revenue"}
-          value={formatAmount(stats.monthlyRevenue)}
+          value={formatCompact(stats.monthlyRevenue)}
+          fullValue={formatAmount(stats.monthlyRevenue)}
           icon={DollarSign}
           variant="success"
         />
