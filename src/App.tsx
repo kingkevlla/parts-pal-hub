@@ -9,7 +9,14 @@ import { Header } from "@/components/layout/Header";
 import { AuthProvider, useAuth } from "@/contexts/AuthContext";
 import { usePermissions } from "@/hooks/usePermissions";
 import { OfflineBanner } from "@/components/layout/OfflineBanner";
+import { useSyncInventory } from "@/hooks/useSyncInventory";
 import React, { Suspense } from "react";
+
+/** Keeps the local SQLite (OPFS) store in sync with Supabase. Renders nothing. */
+const SqliteSyncBootstrap = () => {
+  useSyncInventory();
+  return null;
+};
 
 // Lazy load all pages for faster initial load
 const Dashboard = React.lazy(() => import("./pages/Dashboard"));
