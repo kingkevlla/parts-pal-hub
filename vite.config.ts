@@ -10,6 +10,15 @@ export default defineConfig(({ mode }) => ({
   server: {
     host: "::",
     port: 8080,
+    headers: {
+      // Helpful for OPFS in dev (harmless if not isolated). Note: not applied
+      // on hosted lovable.app — AccessHandlePoolVFS does not require isolation.
+      "Cross-Origin-Opener-Policy": "same-origin",
+    },
+  },
+  optimizeDeps: {
+    // wa-sqlite ships wasm + worker-style modules that break dep pre-bundling.
+    exclude: ["wa-sqlite"],
   },
   plugins: [react(), mode === "development" && componentTagger()].filter(Boolean),
   resolve: {
