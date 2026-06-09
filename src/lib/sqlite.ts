@@ -39,8 +39,7 @@ async function open(): Promise<{ db: number; sqlite3: SQLiteAPI }> {
   const vfs = new AccessHandlePoolVFS(VFS_DIR);
   // The pool VFS prepares its OPFS directory asynchronously.
   await (vfs as any).isReady;
-  // @ts-expect-error vfs_register accepts a VFS instance + makeDefault flag.
-  sqlite3.vfs_register(vfs, true);
+  (sqlite3.vfs_register as any)(vfs, true);
 
   const db = await sqlite3.open_v2(
     DB_NAME,
