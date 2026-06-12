@@ -1,15 +1,19 @@
-// SQLite + OPFS local database using wa-sqlite (v1.0.0).
+// SQLite — the SINGLE local store for the whole app (offline-first).
 //
-// Uses AccessHandlePoolVFS: a synchronous OPFS VFS that works with the
-// regular (non-Asyncify) WASM build and does NOT require cross-origin
-// isolation (no SharedArrayBuffer / COEP). This is the only local store
-// for offline inventory + the transaction queue. No IndexedDB anywhere.
+// Storage backend:
+//   - OPFS (AccessHandlePoolVFS) when the runtime supports synchronous OPFS
+//     access handles (Electron desktop + modern browsers). Persistent.
+//   - In-memory (MemoryVFS) as a graceful fallback when OPFS is unavailable
+//     (some hosted browser previews). The app still runs; data is per-session.
+//
+// No IndexedDB anywhere. This module is connection-only; the app schema lives
+// in offlineDb.ts which calls run()/all()/get().
 
 import SQLiteESMFactory from 'wa-sqlite/dist/wa-sqlite.mjs';
-// Let Vite resolve the wasm binary to a served URL.
 import wasmUrl from 'wa-sqlite/dist/wa-sqlite.wasm?url';
 import * as SQLite from 'wa-sqlite';
 import { AccessHandlePoolVFS } from 'wa-sqlite/src/examples/AccessHandlePoolVFS.js';
+import { MemoryVFS } from 'wa-sqlite/src/examples/MemoryVFS.js';
 
 type SQLiteAPI = ReturnType<typeof SQLite.Factory>;
 
@@ -19,41 +23,64 @@ const VFS_DIR = '/pos-inventory-opfs';
 let dbHandle: number | null = null;
 let api: SQLiteAPI | null = null;
 let initPromise: Promise<{ db: number; sqlite3: SQLiteAPI }> | null = null;
+let usingMemory = false;
 
-/** True when the runtime supports OPFS sync access handles (required by the VFS). */
+/** True when the runtime supports OPFS sync access handles (persistent storage). */
 export function isOpfsSupported(): boolean {
   return (
     typeof navigator !== 'undefined' &&
     !!navigator.storage &&
     typeof navigator.storage.getDirectory === 'function' &&
     typeof FileSystemFileHandle !== 'undefined' &&
-    // createSyncAccessHandle exists on the prototype in supporting browsers
     'createSyncAccessHandle' in (FileSystemFileHandle.prototype as any)
   );
+}
+
+/** True when the active connection is the non-persistent in-memory fallback. */
+export function isUsingMemoryFallback(): boolean {
+  return usingMemory;
 }
 
 async function open(): Promise<{ db: number; sqlite3: SQLiteAPI }> {
   const module = await SQLiteESMFactory({ locateFile: () => wasmUrl });
   const sqlite3 = SQLite.Factory(module);
 
-  const vfs = new AccessHandlePoolVFS(VFS_DIR);
-  // The pool VFS prepares its OPFS directory asynchronously.
-  await (vfs as any).isReady;
-  (sqlite3.vfs_register as any)(vfs, true);
+  let vfsName = 'memory';
+  if (isOpfsSupported()) {
+    try {
+      const vfs = new AccessHandlePoolVFS(VFS_DIR);
+      await (vfs as any).isReady;
+      (sqlite3.vfs_register as any)(vfs, true);
+      vfsName = (vfs as any).name ?? 'AccessHandlePoolVFS';
+      usingMemory = false;
+    } catch (err) {
+      console.warn('[SQLite] OPFS VFS failed, falling back to memory:', err);
+      const mem = new MemoryVFS();
+      await (mem as any).isReady;
+      (sqlite3.vfs_register as any)(mem, true);
+      vfsName = (mem as any).name ?? 'memory';
+      usingMemory = true;
+    }
+  } else {
+    const mem = new MemoryVFS();
+    await (mem as any).isReady;
+    (sqlite3.vfs_register as any)(mem, true);
+    vfsName = (mem as any).name ?? 'memory';
+    usingMemory = true;
+  }
 
   const db = await sqlite3.open_v2(
     DB_NAME,
     SQLite.SQLITE_OPEN_CREATE | SQLite.SQLITE_OPEN_READWRITE,
+    vfsName,
   );
-
-  await initSchema(sqlite3, db);
 
   api = sqlite3;
   dbHandle = db;
   return { db, sqlite3 };
 }
 
-/** Singleton accessor — opens (and migrates) the DB exactly once. */
+/** Singleton accessor — opens the DB exactly once. */
 export async function getDB(): Promise<{ db: number; sqlite3: SQLiteAPI }> {
   if (dbHandle != null && api) return { db: dbHandle, sqlite3: api };
   if (!initPromise) {
@@ -65,58 +92,7 @@ export async function getDB(): Promise<{ db: number; sqlite3: SQLiteAPI }> {
   return initPromise;
 }
 
-async function initSchema(sqlite3: SQLiteAPI, db: number) {
-  // Schema mirrors the live Supabase multi-warehouse model.
-  await sqlite3.exec(
-    db,
-    `
-    PRAGMA journal_mode = WAL;
-
-    CREATE TABLE IF NOT EXISTS products (
-      id TEXT PRIMARY KEY,
-      name TEXT NOT NULL,
-      sku TEXT,
-      barcode TEXT,
-      category_id TEXT,
-      selling_price REAL,
-      cost_price REAL,
-      image_url TEXT,
-      unit TEXT,
-      data TEXT,            -- full JSON row for fields not modeled as columns
-      updated_at TEXT
-    );
-
-    CREATE TABLE IF NOT EXISTS inventory (
-      id TEXT PRIMARY KEY,
-      product_id TEXT NOT NULL,
-      warehouse_id TEXT NOT NULL,
-      quantity REAL NOT NULL DEFAULT 0,
-      reorder_level REAL DEFAULT 5,
-      updated_at TEXT
-    );
-
-    CREATE TABLE IF NOT EXISTS pending_transactions (
-      id TEXT PRIMARY KEY,
-      payload TEXT NOT NULL,
-      created_at TEXT NOT NULL,
-      synced INTEGER NOT NULL DEFAULT 0,
-      attempts INTEGER NOT NULL DEFAULT 0,
-      last_error TEXT
-    );
-
-    CREATE INDEX IF NOT EXISTS idx_products_sku ON products(sku);
-    CREATE INDEX IF NOT EXISTS idx_products_barcode ON products(barcode);
-    CREATE INDEX IF NOT EXISTS idx_inventory_product ON inventory(product_id);
-    CREATE INDEX IF NOT EXISTS idx_inventory_warehouse ON inventory(warehouse_id);
-    CREATE INDEX IF NOT EXISTS idx_pending_synced ON pending_transactions(synced);
-  `,
-  );
-}
-
-/**
- * Run a statement with optional positional bind params. Returns affected behavior
- * via step; use for INSERT/UPDATE/DELETE/DDL.
- */
+/** Run statement(s). Pass params only with a SINGLE statement. */
 export async function run(sql: string, params: unknown[] = []): Promise<void> {
   const { db, sqlite3 } = await getDB();
   for await (const stmt of sqlite3.statements(db, sql)) {
@@ -125,7 +101,7 @@ export async function run(sql: string, params: unknown[] = []): Promise<void> {
   }
 }
 
-/** Query rows as arrays of objects keyed by column name. */
+/** Query rows as objects keyed by column name. */
 export async function all<T = Record<string, unknown>>(
   sql: string,
   params: unknown[] = [],
