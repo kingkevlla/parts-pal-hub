@@ -1,162 +1,85 @@
-import { openDB, DBSchema, IDBPDatabase } from 'idb';
+// Offline data layer — SINGLE SQLite store for the whole app.
+//
+// This module preserves the exact public API the app already depends on, but
+// every read/write now goes through SQLite (OPFS, with in-memory fallback).
+// No IndexedDB anywhere. All pages and the sync engine use these helpers.
 
-interface OfflineSchema extends DBSchema {
-  products: { key: string; value: any; indexes: { 'by-name': string } };
-  inventory: { key: string; value: any; indexes: { 'by-product': string; 'by-warehouse': string } };
-  categories: { key: string; value: any };
-  warehouses: { key: string; value: any };
-  customers: { key: string; value: any };
-  suppliers: { key: string; value: any };
-  transactions: { key: string; value: any; indexes: { 'by-date': string } };
-  transaction_items: { key: string; value: any; indexes: { 'by-transaction': string } };
-  stock_movements: { key: string; value: any };
-  employees: { key: string; value: any };
-  employee_attendance: { key: string; value: any };
-  employee_leave: { key: string; value: any };
-  employee_loans: { key: string; value: any };
-  employee_loan_payments: { key: string; value: any };
-  employee_payroll: { key: string; value: any };
-  expenses: { key: string; value: any };
-  expense_categories: { key: string; value: any };
-  budgets: { key: string; value: any };
-  loans: { key: string; value: any };
-  loan_payments: { key: string; value: any };
-  pending_bills: { key: string; value: any };
-  pending_bill_items: { key: string; value: any };
-  profiles: { key: string; value: any };
-  user_roles: { key: string; value: any };
-  system_settings: { key: string; value: any };
-  pending_mutations: {
-    key: number;
-    value: {
-      id?: number;
-      table: string;
-      operation: 'insert' | 'update' | 'delete' | 'upsert';
-      data: any;
-      match?: any;
-      timestamp: number;
-      synced: boolean;
-      attempts?: number;
-      last_error?: string | null;
-      next_retry_at?: number;
-      client_updated_at?: string;
-    };
-    indexes: { 'by-synced': number; 'by-next-retry': number };
-  };
-  failed_sync: {
-    key: number;
-    value: {
-      id?: number;
-      original_id?: number;
-      table: string;
-      operation: 'insert' | 'update' | 'delete' | 'upsert';
-      data: any;
-      match?: any;
-      attempts: number;
-      first_failed_at: number;
-      last_failed_at: number;
-      last_error: string;
-      reason: 'max_retries' | 'conflict' | 'permanent';
-    };
-  };
-  sync_meta: {
-    key: string;
-    value: { key: string; lastSync: number };
-  };
-  query_cache: {
-    key: string;
-    value: { key: string; data: any; lastSync: number };
-  };
+import { run, all, get } from './sqlite';
+
+// ---------------------------------------------------------------------------
+// Schema (created lazily, once)
+// ---------------------------------------------------------------------------
+
+let schemaPromise: Promise<void> | null = null;
+
+async function ensureSchema(): Promise<void> {
+  if (!schemaPromise) {
+    schemaPromise = (async () => {
+      await run(`CREATE TABLE IF NOT EXISTS cache_rows (
+        store TEXT NOT NULL,
+        id TEXT NOT NULL,
+        data TEXT NOT NULL,
+        PRIMARY KEY (store, id)
+      )`);
+      await run(`CREATE INDEX IF NOT EXISTS idx_cache_store ON cache_rows(store)`);
+      await run(`CREATE TABLE IF NOT EXISTS sync_meta (
+        key TEXT PRIMARY KEY,
+        last_sync INTEGER
+      )`);
+      await run(`CREATE TABLE IF NOT EXISTS query_cache (
+        key TEXT PRIMARY KEY,
+        data TEXT,
+        last_sync INTEGER
+      )`);
+      await run(`CREATE TABLE IF NOT EXISTS pending_mutations (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        tbl TEXT NOT NULL,
+        operation TEXT NOT NULL,
+        data TEXT,
+        match_data TEXT,
+        timestamp INTEGER NOT NULL,
+        synced INTEGER NOT NULL DEFAULT 0,
+        attempts INTEGER NOT NULL DEFAULT 0,
+        last_error TEXT,
+        next_retry_at INTEGER,
+        client_updated_at TEXT
+      )`);
+      await run(`CREATE INDEX IF NOT EXISTS idx_pm_synced ON pending_mutations(synced)`);
+      await run(`CREATE TABLE IF NOT EXISTS failed_sync (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        original_id INTEGER,
+        tbl TEXT NOT NULL,
+        operation TEXT NOT NULL,
+        data TEXT,
+        match_data TEXT,
+        attempts INTEGER NOT NULL DEFAULT 0,
+        first_failed_at INTEGER,
+        last_failed_at INTEGER,
+        last_error TEXT,
+        reason TEXT
+      )`);
+    })().catch((err) => {
+      schemaPromise = null;
+      throw err;
+    });
+  }
+  return schemaPromise;
 }
 
-const DB_NAME = 'parts-pal-offline';
-const DB_VERSION = 4;
-
+// ---------------------------------------------------------------------------
 // Retry policy
+// ---------------------------------------------------------------------------
+
 export const MAX_SYNC_ATTEMPTS = 6;
 const BACKOFF_BASE_MS = 5_000; // 5s, 10s, 20s, 40s, 80s, 160s
 export function backoffDelay(attempts: number): number {
   return BACKOFF_BASE_MS * Math.pow(2, Math.min(attempts, 8));
 }
 
-const SIMPLE_STORES = [
-  'suppliers', 'employees', 'employee_attendance', 'employee_leave',
-  'employee_loans', 'employee_loan_payments', 'employee_payroll',
-  'expenses', 'expense_categories', 'budgets', 'loans', 'loan_payments',
-  'pending_bills', 'pending_bill_items', 'profiles', 'user_roles', 'system_settings',
-] as const;
+// ---------------------------------------------------------------------------
+// Table types
+// ---------------------------------------------------------------------------
 
-let dbInstance: IDBPDatabase<OfflineSchema> | null = null;
-
-export async function getOfflineDb() {
-  if (dbInstance) return dbInstance;
-
-  dbInstance = await openDB<OfflineSchema>(DB_NAME, DB_VERSION, {
-    upgrade(db, oldVersion, _newVersion, transaction) {
-      // V1 stores
-      if (oldVersion < 1) {
-        const productStore = db.createObjectStore('products', { keyPath: 'id' });
-        productStore.createIndex('by-name', 'name');
-
-        const invStore = db.createObjectStore('inventory', { keyPath: 'id' });
-        invStore.createIndex('by-product', 'product_id');
-        invStore.createIndex('by-warehouse', 'warehouse_id');
-
-        db.createObjectStore('categories', { keyPath: 'id' });
-        db.createObjectStore('warehouses', { keyPath: 'id' });
-        db.createObjectStore('customers', { keyPath: 'id' });
-
-        const txStore = db.createObjectStore('transactions', { keyPath: 'id' });
-        txStore.createIndex('by-date', 'created_at');
-
-        const txItemStore = db.createObjectStore('transaction_items', { keyPath: 'id' });
-        txItemStore.createIndex('by-transaction', 'transaction_id');
-
-        db.createObjectStore('stock_movements', { keyPath: 'id' });
-
-        const mutStore = db.createObjectStore('pending_mutations', { keyPath: 'id', autoIncrement: true });
-        mutStore.createIndex('by-synced', 'synced');
-
-        db.createObjectStore('sync_meta', { keyPath: 'key' });
-      }
-
-      // V2 stores - add all remaining tables
-      if (oldVersion < 2) {
-        for (const name of SIMPLE_STORES) {
-          if (!db.objectStoreNames.contains(name)) {
-            db.createObjectStore(name, { keyPath: 'id' });
-          }
-        }
-      }
-
-      // V3 - add query_cache for keyed/filtered query results
-      if (oldVersion < 3) {
-        if (!db.objectStoreNames.contains('query_cache')) {
-          db.createObjectStore('query_cache', { keyPath: 'key' });
-        }
-      }
-
-      // V4 - failed_sync store + by-next-retry index on pending_mutations
-      if (oldVersion < 4) {
-        if (!db.objectStoreNames.contains('failed_sync')) {
-          db.createObjectStore('failed_sync', { keyPath: 'id', autoIncrement: true });
-        }
-        try {
-          const mutStore = transaction.objectStore('pending_mutations');
-          if (!mutStore.indexNames.contains('by-next-retry')) {
-            mutStore.createIndex('by-next-retry', 'next_retry_at');
-          }
-        } catch {
-          // index may already exist
-        }
-      }
-    },
-  });
-
-  return dbInstance;
-}
-
-// All cacheable table names
 export type CacheTable =
   | 'categories' | 'customers' | 'inventory' | 'products'
   | 'stock_movements' | 'transaction_items' | 'transactions' | 'warehouses'
@@ -165,33 +88,87 @@ export type CacheTable =
   | 'expenses' | 'expense_categories' | 'budgets' | 'loans' | 'loan_payments'
   | 'pending_bills' | 'pending_bill_items' | 'profiles' | 'user_roles' | 'system_settings';
 
-export async function cacheData(table: CacheTable, data: any[]) {
-  const db = await getOfflineDb();
-  const tx = db.transaction(table, 'readwrite');
-  const store = tx.objectStore(table);
-  await store.clear();
-  for (const item of data) {
-    await store.put(item);
-  }
-  await tx.done;
+export interface PendingMutation {
+  id?: number;
+  table: string;
+  operation: 'insert' | 'update' | 'delete' | 'upsert';
+  data: any;
+  match?: any;
+  timestamp: number;
+  synced: boolean;
+  attempts?: number;
+  last_error?: string | null;
+  next_retry_at?: number;
+  client_updated_at?: string;
+}
 
-  const metaTx = db.transaction('sync_meta', 'readwrite');
-  await metaTx.objectStore('sync_meta').put({ key: table as string, lastSync: Date.now() });
-  await metaTx.done;
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
+
+function parse<T = any>(s: unknown, fallback: T): T {
+  if (typeof s !== 'string') return fallback;
+  try {
+    return JSON.parse(s) as T;
+  } catch {
+    return fallback;
+  }
+}
+
+function mapMutation(row: any): PendingMutation {
+  return {
+    id: Number(row.id),
+    table: String(row.tbl),
+    operation: row.operation,
+    data: parse(row.data, null),
+    match: parse(row.match_data, undefined),
+    timestamp: Number(row.timestamp),
+    synced: Number(row.synced) === 1,
+    attempts: Number(row.attempts ?? 0),
+    last_error: row.last_error ?? null,
+    next_retry_at: row.next_retry_at != null ? Number(row.next_retry_at) : undefined,
+    client_updated_at: row.client_updated_at ?? undefined,
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Table cache (full-table snapshots)
+// ---------------------------------------------------------------------------
+
+export async function cacheData(table: CacheTable, data: any[]) {
+  await ensureSchema();
+  await run('DELETE FROM cache_rows WHERE store = ?', [table]);
+  for (let i = 0; i < data.length; i++) {
+    const item = data[i];
+    const id = String(item?.id ?? `idx_${i}`);
+    await run(
+      'INSERT OR REPLACE INTO cache_rows (store, id, data) VALUES (?,?,?)',
+      [table, id, JSON.stringify(item)],
+    );
+  }
+  await run(
+    'INSERT OR REPLACE INTO sync_meta (key, last_sync) VALUES (?,?)',
+    [table, Date.now()],
+  );
 }
 
 export async function getCachedData(table: CacheTable): Promise<any[]> {
-  const db = await getOfflineDb();
-  return db.getAll(table);
+  await ensureSchema();
+  const rows = await all('SELECT data FROM cache_rows WHERE store = ?', [table]);
+  return rows.map((r) => parse((r as any).data, null)).filter((x) => x != null);
 }
+
+// ---------------------------------------------------------------------------
+// Mutation queue
+// ---------------------------------------------------------------------------
 
 export async function queueMutation(
   table: string,
   operation: 'insert' | 'update' | 'delete' | 'upsert',
   data: any,
-  match?: any
+  match?: any,
 ) {
-  const db = await getOfflineDb();
+  await ensureSchema();
   const now = Date.now();
   const clientUpdatedAt = new Date(now).toISOString();
   // Stamp client_updated_at on row payloads for last-write-wins conflict resolution.
@@ -201,53 +178,58 @@ export async function queueMutation(
       ? data.map((r) => ({ ...r, client_updated_at: r?.client_updated_at ?? clientUpdatedAt }))
       : { ...data, client_updated_at: data?.client_updated_at ?? clientUpdatedAt };
   }
-  await db.add('pending_mutations', {
-    table,
-    operation,
-    data: stamped,
-    match,
-    timestamp: now,
-    synced: false,
-    attempts: 0,
-    last_error: null,
-    next_retry_at: now,
-    client_updated_at: clientUpdatedAt,
-  } as any);
+  await run(
+    `INSERT INTO pending_mutations
+      (tbl, operation, data, match_data, timestamp, synced, attempts, last_error, next_retry_at, client_updated_at)
+     VALUES (?,?,?,?,?,0,0,NULL,?,?)`,
+    [
+      table,
+      operation,
+      JSON.stringify(stamped ?? null),
+      match !== undefined ? JSON.stringify(match) : null,
+      now,
+      now,
+      clientUpdatedAt,
+    ],
+  );
 }
 
 /** Mutations whose next_retry_at <= now (or unset). Excludes synced. */
-export async function getDueMutations() {
-  const db = await getOfflineDb();
-  const all = await db.getAll('pending_mutations');
+export async function getDueMutations(): Promise<PendingMutation[]> {
+  await ensureSchema();
   const now = Date.now();
-  return all.filter((m) => !m.synced && (m.next_retry_at ?? 0) <= now);
+  const rows = await all(
+    `SELECT * FROM pending_mutations
+     WHERE synced = 0 AND (next_retry_at IS NULL OR next_retry_at <= ?)
+     ORDER BY id ASC`,
+    [now],
+  );
+  return rows.map(mapMutation);
 }
 
-export async function getPendingMutations() {
-  const db = await getOfflineDb();
-  const all = await db.getAll('pending_mutations');
-  return all.filter((m) => !m.synced);
+export async function getPendingMutations(): Promise<PendingMutation[]> {
+  await ensureSchema();
+  const rows = await all(
+    'SELECT * FROM pending_mutations WHERE synced = 0 ORDER BY id ASC',
+  );
+  return rows.map(mapMutation);
 }
 
 export async function markMutationSynced(id: number) {
-  const db = await getOfflineDb();
-  const mutation = await db.get('pending_mutations', id);
-  if (mutation) {
-    mutation.synced = true;
-    await db.put('pending_mutations', mutation);
-  }
+  await ensureSchema();
+  await run('UPDATE pending_mutations SET synced = 1 WHERE id = ?', [id]);
 }
 
 /** Record a failed attempt and schedule the next retry with exponential backoff. */
 export async function recordSyncFailure(id: number, error: string) {
-  const db = await getOfflineDb();
-  const mutation = await db.get('pending_mutations', id);
-  if (!mutation) return;
-  const attempts = (mutation.attempts ?? 0) + 1;
-  mutation.attempts = attempts;
-  mutation.last_error = error.slice(0, 500);
-  mutation.next_retry_at = Date.now() + backoffDelay(attempts);
-  await db.put('pending_mutations', mutation);
+  await ensureSchema();
+  const row = await get('SELECT attempts FROM pending_mutations WHERE id = ?', [id]);
+  if (!row) return;
+  const attempts = Number((row as any).attempts ?? 0) + 1;
+  await run(
+    'UPDATE pending_mutations SET attempts = ?, last_error = ?, next_retry_at = ? WHERE id = ?',
+    [attempts, error.slice(0, 500), Date.now() + backoffDelay(attempts), id],
+  );
 }
 
 /** Move a mutation to failed_sync and remove it from the live queue. */
@@ -256,86 +238,97 @@ export async function moveToFailedSync(
   reason: 'max_retries' | 'conflict' | 'permanent',
   error: string,
 ) {
-  const db = await getOfflineDb();
-  const mutation = await db.get('pending_mutations', id);
-  if (!mutation) return;
-  await db.add('failed_sync', {
-    original_id: mutation.id,
-    table: mutation.table,
-    operation: mutation.operation,
-    data: mutation.data,
-    match: mutation.match,
-    attempts: mutation.attempts ?? 0,
-    first_failed_at: mutation.timestamp,
-    last_failed_at: Date.now(),
-    last_error: error.slice(0, 500),
-    reason,
-  } as any);
-  await db.delete('pending_mutations', id);
+  await ensureSchema();
+  const m = await get('SELECT * FROM pending_mutations WHERE id = ?', [id]);
+  if (!m) return;
+  const row = m as any;
+  await run(
+    `INSERT INTO failed_sync
+      (original_id, tbl, operation, data, match_data, attempts, first_failed_at, last_failed_at, last_error, reason)
+     VALUES (?,?,?,?,?,?,?,?,?,?)`,
+    [
+      row.id,
+      row.tbl,
+      row.operation,
+      row.data,
+      row.match_data,
+      Number(row.attempts ?? 0),
+      Number(row.timestamp),
+      Date.now(),
+      error.slice(0, 500),
+      reason,
+    ],
+  );
+  await run('DELETE FROM pending_mutations WHERE id = ?', [id]);
 }
 
 export async function getFailedSync() {
-  const db = await getOfflineDb();
-  return db.getAll('failed_sync');
+  await ensureSchema();
+  const rows = await all('SELECT * FROM failed_sync ORDER BY id DESC');
+  return rows.map((r: any) => ({
+    id: Number(r.id),
+    original_id: r.original_id != null ? Number(r.original_id) : undefined,
+    table: String(r.tbl),
+    operation: r.operation,
+    data: parse(r.data, null),
+    match: parse(r.match_data, undefined),
+    attempts: Number(r.attempts ?? 0),
+    first_failed_at: Number(r.first_failed_at),
+    last_failed_at: Number(r.last_failed_at),
+    last_error: r.last_error,
+    reason: r.reason,
+  }));
 }
 
 export async function getFailedSyncCount(): Promise<number> {
-  const db = await getOfflineDb();
-  return db.count('failed_sync');
+  await ensureSchema();
+  const row = await get('SELECT COUNT(*) AS c FROM failed_sync');
+  return Number((row as any)?.c ?? 0);
 }
 
 /** Move a failed entry back into pending_mutations for another try. */
 export async function retryFailedSync(failedId: number) {
-  const db = await getOfflineDb();
-  const f = await db.get('failed_sync', failedId);
+  await ensureSchema();
+  const f = await get('SELECT * FROM failed_sync WHERE id = ?', [failedId]);
   if (!f) return;
+  const row = f as any;
   const now = Date.now();
-  await db.add('pending_mutations', {
-    table: f.table,
-    operation: f.operation,
-    data: f.data,
-    match: f.match,
-    timestamp: now,
-    synced: false,
-    attempts: 0,
-    last_error: null,
-    next_retry_at: now,
-  } as any);
-  await db.delete('failed_sync', failedId);
+  await run(
+    `INSERT INTO pending_mutations
+      (tbl, operation, data, match_data, timestamp, synced, attempts, last_error, next_retry_at, client_updated_at)
+     VALUES (?,?,?,?,?,0,0,NULL,?,NULL)`,
+    [row.tbl, row.operation, row.data, row.match_data, now, now],
+  );
+  await run('DELETE FROM failed_sync WHERE id = ?', [failedId]);
 }
 
 export async function discardFailedSync(failedId: number) {
-  const db = await getOfflineDb();
-  await db.delete('failed_sync', failedId);
+  await ensureSchema();
+  await run('DELETE FROM failed_sync WHERE id = ?', [failedId]);
 }
 
 export async function clearSyncedMutations() {
-  const db = await getOfflineDb();
-  const all = await db.getAll('pending_mutations');
-  const tx = db.transaction('pending_mutations', 'readwrite');
-  for (const m of all) {
-    if (m.synced && m.id) {
-      await tx.objectStore('pending_mutations').delete(m.id);
-    }
-  }
-  await tx.done;
+  await ensureSchema();
+  await run('DELETE FROM pending_mutations WHERE synced = 1');
 }
 
 export async function getLastSyncTime(table: string): Promise<number | null> {
-  const db = await getOfflineDb();
-  const meta = await db.get('sync_meta', table);
-  return meta?.lastSync ?? null;
+  await ensureSchema();
+  const row = await get('SELECT last_sync FROM sync_meta WHERE key = ?', [table]);
+  return row ? Number((row as any).last_sync) : null;
 }
 
 export async function getPendingCount(): Promise<number> {
-  const mutations = await getPendingMutations();
-  return mutations.length;
+  await ensureSchema();
+  const row = await get('SELECT COUNT(*) AS c FROM pending_mutations WHERE synced = 0');
+  return Number((row as any)?.c ?? 0);
 }
 
-/**
- * Stable cache key from a base name + filter object.
- * Sorts keys so order doesn't matter.
- */
+// ---------------------------------------------------------------------------
+// Keyed query cache (filtered / joined results)
+// ---------------------------------------------------------------------------
+
+/** Stable cache key from a base name + filter object. */
 export function makeCacheKey(base: string, filters?: Record<string, any>): string {
   if (!filters) return base;
   const norm = Object.keys(filters)
@@ -346,18 +339,23 @@ export function makeCacheKey(base: string, filters?: Record<string, any>): strin
   return norm ? `${base}?${norm}` : base;
 }
 
-export async function getCachedQuery<T = any>(key: string): Promise<{ data: T; lastSync: number } | null> {
-  const db = await getOfflineDb();
-  const row = await db.get('query_cache', key);
-  return row ? { data: row.data as T, lastSync: row.lastSync } : null;
+export async function getCachedQuery<T = any>(
+  key: string,
+): Promise<{ data: T; lastSync: number } | null> {
+  await ensureSchema();
+  const row = await get('SELECT data, last_sync FROM query_cache WHERE key = ?', [key]);
+  if (!row) return null;
+  return { data: parse((row as any).data, null) as T, lastSync: Number((row as any).last_sync) };
 }
 
 export async function setCachedQuery(key: string, data: any) {
-  const db = await getOfflineDb();
-  await db.put('query_cache', { key, data, lastSync: Date.now() });
+  await ensureSchema();
+  await run(
+    'INSERT OR REPLACE INTO query_cache (key, data, last_sync) VALUES (?,?,?)',
+    [key, JSON.stringify(data), Date.now()],
+  );
 }
 
-/** Default TTLs (ms) per cache-key base. Falls back to DEFAULT_TTL_MS. */
 export const DEFAULT_TTL_MS = 60_000;
 export const QUERY_TTL: Record<string, number> = {
   pos_products_with_stock: 30_000,
@@ -374,33 +372,20 @@ export function getTtlForKey(key: string): number {
   return QUERY_TTL[base] ?? DEFAULT_TTL_MS;
 }
 
-/** True if the cached row exists and is within its TTL. */
 export function isQueryFresh(
   cached: { lastSync: number } | null | undefined,
-  ttlMs: number
+  ttlMs: number,
 ): boolean {
   if (!cached) return false;
   return Date.now() - cached.lastSync < ttlMs;
 }
 
-/** Invalidate a single keyed cache entry (force next call to refresh). */
 export async function invalidateQuery(key: string) {
-  const db = await getOfflineDb();
-  await db.delete('query_cache', key);
+  await ensureSchema();
+  await run('DELETE FROM query_cache WHERE key = ?', [key]);
 }
 
-/** Invalidate every keyed cache entry whose key starts with `prefix`. */
 export async function invalidateQueryByPrefix(prefix: string) {
-  const db = await getOfflineDb();
-  const tx = db.transaction('query_cache', 'readwrite');
-  const store = tx.objectStore('query_cache');
-  let cursor = await store.openCursor();
-  while (cursor) {
-    if (typeof cursor.key === 'string' && cursor.key.startsWith(prefix)) {
-      await cursor.delete();
-    }
-    cursor = await cursor.continue();
-  }
-  await tx.done;
+  await ensureSchema();
+  await run('DELETE FROM query_cache WHERE key LIKE ?', [`${prefix}%`]);
 }
-
