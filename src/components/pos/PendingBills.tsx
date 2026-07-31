@@ -10,7 +10,7 @@ import { useToast } from '@/hooks/use-toast';
 import { useCurrency } from '@/hooks/useCurrency';
 import { useAuth } from '@/contexts/AuthContext';
 import { supabase } from '@/integrations/supabase/client';
-import { offlineMutate } from '@/lib/offlineHelpers';
+import { offlineMutate, offlineQuery, offlineInsertSingle } from '@/lib/offlineHelpers';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { ClipboardList, Plus, Trash2, ShoppingCart, UserPlus, Clock, Edit } from 'lucide-react';
 import { format } from 'date-fns';
