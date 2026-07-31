@@ -234,11 +234,12 @@ export default function PendingBills({ selectedWarehouse, warehouses, cart, onLo
 
   const loadBillToCart = async (bill: PendingBill) => {
     // Detect which items are manual by checking product descriptions
-    const productIds = bill.items.map(i => i.product_id);
-    const { data: productData } = await supabase
-      .from('products')
-      .select('id, description')
-      .in('id', productIds);
+    const productIds = new Set(bill.items.map(i => i.product_id));
+    const { data: allProducts } = await offlineQuery<any>('products', () =>
+      supabase.from('products').select('*')
+    );
+    const productData = (allProducts || []).filter((p: any) => productIds.has(p.id));
+
 
     const manualIds = new Set(
       (productData || [])
