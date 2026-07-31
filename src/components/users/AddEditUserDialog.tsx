@@ -109,24 +109,16 @@ export default function AddEditUserDialog({ open, onOpenChange, user, onSuccess 
 
         if (authData.user) {
           // Update profile
-          await supabase
-            .from("profiles")
-            .update({ phone: formData.phone })
-            .eq("id", authData.user.id);
+          await offlineMutate("profiles", "update", { phone: formData.phone }, { id: authData.user.id });
 
           // Assign role
           const role = roles.find(r => r.name === formData.role);
           if (role) {
-            await supabase
-              .from("user_roles")
-              .delete()
-              .eq("user_id", authData.user.id);
-            
-            await supabase
-              .from("user_roles")
-              .insert({ user_id: authData.user.id, role: role.name });
+            await offlineMutate("user_roles", "delete", null, { user_id: authData.user.id });
+            await offlineMutate("user_roles", "insert", { user_id: authData.user.id, role: role.name });
           }
         }
+
 
         toast({ title: "User created successfully" });
       }

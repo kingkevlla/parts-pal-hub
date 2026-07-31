@@ -7,6 +7,8 @@ import { Textarea } from "@/components/ui/textarea";
 import { Switch } from "@/components/ui/switch";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { supabase } from "@/integrations/supabase/client";
+import { offlineQuery, offlineMutate } from "@/lib/offlineHelpers";
+
 import { useToast } from "@/hooks/use-toast";
 
 interface ReceiptSettingsData {
@@ -41,11 +43,10 @@ export default function ReceiptSettings() {
 
   const fetchSettings = async () => {
     try {
-      const { data, error } = await supabase
-        .from("system_settings")
-        .select("key, value");
+      const { data } = await offlineQuery<any>("system_settings", () =>
+        supabase.from("system_settings").select("*")
+      );
 
-      if (error) throw error;
 
       const settingsMap: any = { ...settings };
       data?.forEach((setting) => {
@@ -98,24 +99,19 @@ export default function ReceiptSettings() {
     try {
       setLoading(true);
       
-      for (const [key, value] of Object.entries(settings)) {
-        const { data: existing } = await supabase
-          .from("system_settings")
-          .select("id")
-          .eq("key", key)
-          .maybeSingle();
+      const { data: existingRows } = await offlineQuery<any>("system_settings", () =>
+        supabase.from("system_settings").select("*")
+      );
 
+      for (const [key, value] of Object.entries(settings)) {
+        const existing = (existingRows || []).find((s: any) => s.key === key);
         if (existing) {
-          await supabase
-            .from("system_settings")
-            .update({ value: value })
-            .eq("key", key);
+          await offlineMutate("system_settings", "update", { value, updated_at: new Date().toISOString() }, { key });
         } else {
-          await supabase
-            .from("system_settings")
-            .insert({ key, value });
+          await offlineMutate("system_settings", "insert", { key, value });
         }
       }
+
 
       toast({ title: "Receipt settings saved successfully" });
     } catch (error: any) {

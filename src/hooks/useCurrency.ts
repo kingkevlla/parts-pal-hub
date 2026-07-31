@@ -1,5 +1,7 @@
 import { useState, useEffect } from "react";
 import { supabase } from "@/integrations/supabase/client";
+import { offlineQuery } from "@/lib/offlineHelpers";
+
 
 const CURRENCY_SYMBOLS: Record<string, string> = {
   USD: "$", EUR: "€", GBP: "£", JPY: "¥", CNY: "¥", INR: "₹",
@@ -35,25 +37,24 @@ export function useCurrency() {
 
   const fetchCurrency = async () => {
     try {
-      const { data, error } = await supabase
-        .from("system_settings")
-        .select("value")
-        .eq("key", "currency")
-        .single();
-
-      if (error) throw error;
-
-      const curr = data?.value as string || "USD";
+      // Offline-first: read from the local store, refresh in the background.
+      const { data } = await offlineQuery<any>("system_settings", () =>
+        supabase.from("system_settings").select("*")
+      );
+      const row = (data || []).find((s: any) => s.key === "currency");
+      const curr = (row?.value as string) || localStorage.getItem("cached_currency") || "USD";
+      localStorage.setItem("cached_currency", curr);
       setCurrency(curr);
       setCurrencySymbol(CURRENCY_SYMBOLS[curr] || "$");
     } catch (error) {
-      console.error("Error fetching currency:", error);
-      setCurrency("USD");
-      setCurrencySymbol("$");
+      const fallback = localStorage.getItem("cached_currency") || "USD";
+      setCurrency(fallback);
+      setCurrencySymbol(CURRENCY_SYMBOLS[fallback] || "$");
     } finally {
       setLoading(false);
     }
   };
+
 
   const formatAmount = (amount: number) => {
     const safe = Number.isFinite(amount) ? amount : 0;

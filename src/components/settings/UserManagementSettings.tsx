@@ -2,6 +2,8 @@ import { useState, useEffect } from "react";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { supabase } from "@/integrations/supabase/client";
+import { offlineQuery, offlineMutate } from "@/lib/offlineHelpers";
+
 import { useAuth } from "@/contexts/AuthContext";
 import { usePermissions } from "@/hooks/usePermissions";
 import {
@@ -58,26 +60,19 @@ export default function UserManagementSettings() {
 
   const fetchUsers = async () => {
     try {
-      const { data: profiles, error: profilesError } = await supabase
-        .from("profiles")
-        .select("id, full_name, phone");
-
-      if (profilesError) throw profilesError;
-
-      const { data: userRoles, error: rolesError } = await supabase
-        .from("user_roles")
-        .select("user_id, role");
-
-      if (rolesError) throw rolesError;
+      const [profilesRes, rolesRes] = await Promise.all([
+        offlineQuery<any>("profiles", () => supabase.from("profiles").select("*")),
+        offlineQuery<any>("user_roles", () => supabase.from("user_roles").select("*")),
+      ]);
 
       const rolesMap: Record<string, AppRole> = {};
-      userRoles?.forEach((ur) => {
+      (rolesRes.data || []).forEach((ur: any) => {
         rolesMap[ur.user_id] = ur.role as AppRole;
       });
 
-      const usersWithRoles: UserProfile[] = (profiles || []).map((profile) => ({
+      const usersWithRoles: UserProfile[] = (profilesRes.data || []).map((profile: any) => ({
         ...profile,
-        role: rolesMap[profile.id] || "user"
+        role: rolesMap[profile.id] || rolesMap[profile.user_id] || "user"
       }));
 
       setUsers(usersWithRoles);
@@ -90,19 +85,18 @@ export default function UserManagementSettings() {
 
   const handleRoleChange = async (userId: string, newRole: AppRole) => {
     try {
-      const { error } = await supabase
-        .from("user_roles")
-        .update({ role: newRole })
-        .eq("user_id", userId);
+      const res = await offlineMutate("user_roles", "update", { role: newRole }, { user_id: userId });
+      if (!res.success) throw res.error ?? new Error("Failed to update role");
 
-      if (error) throw error;
-
-      toast({ title: "User role updated successfully" });
+      toast({
+        title: res.offline ? "Role update queued (offline)" : "User role updated successfully",
+      });
       fetchUsers();
     } catch (error: any) {
       toast({ title: "Error updating user role", description: error.message, variant: "destructive" });
     }
   };
+
 
   if (permissionsLoading || loading) {
     return <div className="py-4">Loading...</div>;

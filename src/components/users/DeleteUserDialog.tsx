@@ -11,6 +11,8 @@ import {
 } from "@/components/ui/alert-dialog";
 import { useToast } from "@/hooks/use-toast";
 import { supabase } from "@/integrations/supabase/client";
+import { offlineMutate } from "@/lib/offlineHelpers";
+
 import { Loader2 } from "lucide-react";
 
 interface DeleteUserDialogProps {
@@ -35,20 +37,13 @@ export default function DeleteUserDialog({
     setLoading(true);
     try {
       // Delete user roles first
-      const { error: rolesError } = await supabase
-        .from("user_roles")
-        .delete()
-        .eq("user_id", userId);
-
-      if (rolesError) throw rolesError;
+      const rolesRes = await offlineMutate("user_roles", "delete", null, { user_id: userId });
+      if (!rolesRes.success) throw rolesRes.error ?? new Error("Failed to delete user roles");
 
       // Delete profile (this will cascade delete the auth user due to FK constraint)
-      const { error: profileError } = await supabase
-        .from("profiles")
-        .delete()
-        .eq("id", userId);
+      const profileRes = await offlineMutate("profiles", "delete", null, { id: userId });
+      if (!profileRes.success) throw profileRes.error ?? new Error("Failed to delete profile");
 
-      if (profileError) throw profileError;
 
       toast({ title: "User deleted successfully" });
       onSuccess();

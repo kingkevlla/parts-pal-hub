@@ -6,6 +6,8 @@ import { Button } from "@/components/ui/button";
 import { Avatar, AvatarImage, AvatarFallback } from "@/components/ui/avatar";
 import { useAuth } from "@/contexts/AuthContext";
 import { supabase } from "@/integrations/supabase/client";
+import { offlineQuery, offlineMutate } from "@/lib/offlineHelpers";
+
 import { useToast } from "@/hooks/use-toast";
 import { Upload, User } from "lucide-react";
 
@@ -28,20 +30,22 @@ export default function ProfileSettings() {
 
   const fetchProfile = async () => {
     try {
-      const { data, error } = await supabase
-        .from("profiles")
-        .select("*")
-        .eq("id", user?.id)
-        .single();
-
-      if (error) throw error;
-      if (data) {
-        setProfile(data);
+      const { data } = await offlineQuery<any>("profiles", () =>
+        supabase.from("profiles").select("*")
+      );
+      const row = (data || []).find((p: any) => p.id === user?.id || p.user_id === user?.id);
+      if (row) {
+        setProfile({
+          full_name: row.full_name ?? "",
+          phone: row.phone ?? "",
+          avatar_url: row.avatar_url ?? "",
+        });
       }
     } catch (error: any) {
       console.error("Error fetching profile:", error);
     }
   };
+
 
   const handleAvatarUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
     try {
@@ -62,12 +66,15 @@ export default function ProfileSettings() {
         .from("avatars")
         .getPublicUrl(fileName);
 
-      const { error: updateError } = await supabase
-        .from("profiles")
-        .update({ avatar_url: publicUrl })
-        .eq("id", user?.id);
+      const updateRes = await offlineMutate(
+        "profiles",
+        "update",
+        { avatar_url: publicUrl, updated_at: new Date().toISOString() },
+        { id: user?.id }
+      );
 
-      if (updateError) throw updateError;
+      if (!updateRes.success) throw updateRes.error ?? new Error("Failed to update avatar");
+
 
       setProfile({ ...profile, avatar_url: publicUrl });
       toast({ title: "Avatar updated successfully" });
@@ -83,15 +90,19 @@ export default function ProfileSettings() {
     setLoading(true);
 
     try {
-      const { error } = await supabase
-        .from("profiles")
-        .update({
+      const res = await offlineMutate(
+        "profiles",
+        "update",
+        {
           full_name: profile.full_name,
-          phone: profile.phone
-        })
-        .eq("id", user?.id);
+          phone: profile.phone,
+          updated_at: new Date().toISOString(),
+        },
+        { id: user?.id }
+      );
 
-      if (error) throw error;
+      if (!res.success) throw res.error ?? new Error("Failed to update profile");
+
 
       toast({ title: "Profile updated successfully" });
     } catch (error: any) {
