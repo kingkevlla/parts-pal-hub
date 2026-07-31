@@ -1,5 +1,7 @@
 import { useState, useEffect } from 'react';
 import { supabase } from '@/integrations/supabase/client';
+import { offlineQuery } from '@/lib/offlineHelpers';
+
 
 export interface Notification {
   id: string;
