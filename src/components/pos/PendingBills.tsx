@@ -136,19 +136,17 @@ export default function PendingBills({ selectedWarehouse, warehouses, cart, onLo
     try {
       const warehouseId = billWarehouseId;
 
-      const { data: bill, error: billError } = await supabase
-        .from('pending_bills')
-        .insert({
-          customer_name: billName.trim(),
-          customer_phone: billPhone.trim() || null,
-          warehouse_id: warehouseId,
-          notes: billNotes.trim() || null,
-          created_by: user?.id,
-        })
-        .select()
-        .single();
+      const { data: bill, error: billError } = await offlineInsertSingle<any>('pending_bills', {
+        customer_name: billName.trim(),
+        customer_phone: billPhone.trim() || null,
+        warehouse_id: warehouseId,
+        notes: billNotes.trim() || null,
+        created_by: user?.id,
+        status: 'open',
+        updated_at: new Date().toISOString(),
+      });
 
-      if (billError) throw billError;
+      if (billError || !bill) throw billError ?? new Error('Failed to create bill');
 
       const items = cart.map(item => ({
         bill_id: bill.id,
@@ -159,11 +157,9 @@ export default function PendingBills({ selectedWarehouse, warehouses, cart, onLo
         subtotal: item.subtotal,
       }));
 
-      const { error: itemsError } = await supabase
-        .from('pending_bill_items')
-        .insert(items);
+      const itemsRes = await offlineMutate('pending_bill_items', 'insert', items);
+      if (!itemsRes.success) throw itemsRes.error ?? new Error('Failed to save bill items');
 
-      if (itemsError) throw itemsError;
 
       toast({ title: 'Bill Created', description: `Pending bill for "${billName}" saved` });
       setShowCreateDialog(false);
