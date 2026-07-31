@@ -1,5 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import { supabase } from "@/integrations/supabase/client";
+import { offlineQuery } from "@/lib/offlineHelpers";
+
 import { useAuth } from "@/contexts/AuthContext";
 
 // Cache role globally so every hook instance shares it
