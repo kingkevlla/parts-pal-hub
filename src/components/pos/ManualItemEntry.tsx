@@ -73,35 +73,30 @@ export default function ManualItemEntry({ onItemAdded }: ManualItemEntryProps) {
     try {
       const warehouseId = await getOrCreateExtraWarehouse();
 
-      // Create product record
-      const { data: product, error: productError } = await supabase
-        .from('products')
-        .insert({
-          name,
-          selling_price: price,
-          purchase_price: 0,
-          is_active: true,
-          min_stock_level: 0,
-          description: 'Manually added via POS',
-        })
-        .select('id')
-        .single();
+      // Create product record (offline-first)
+      const { data: product, error: productError } = await offlineInsertSingle<any>('products', {
+        name,
+        selling_price: price,
+        purchase_price: 0,
+        is_active: true,
+        min_stock_level: 0,
+        description: 'Manually added via POS',
+      });
 
-      if (productError) throw productError;
+      if (productError || !product) throw productError ?? new Error('Failed to create product');
 
       // Create stock movement (in) to add inventory via trigger
-      const { error: movementError } = await supabase
-        .from('stock_movements')
-        .insert({
-          product_id: product.id,
-          warehouse_id: warehouseId,
-          quantity: qty,
-          movement_type: 'in',
-          notes: 'Manual POS item - auto stock',
-          created_by: user?.id,
-        });
+      const movement = await offlineMutate('stock_movements', 'insert', {
+        product_id: product.id,
+        warehouse_id: warehouseId,
+        quantity: qty,
+        movement_type: 'in',
+        notes: 'Manual POS item - auto stock',
+        created_by: user?.id,
+      });
 
-      if (movementError) throw movementError;
+      if (!movement.success) throw movement.error ?? new Error('Failed to record stock movement');
+
 
       onItemAdded({
         productId: product.id,
