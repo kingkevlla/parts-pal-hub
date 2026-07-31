@@ -66,12 +66,15 @@ export default function ProfileSettings() {
         .from("avatars")
         .getPublicUrl(fileName);
 
-      const { error: updateError } = await supabase
-        .from("profiles")
-        .update({ avatar_url: publicUrl })
-        .eq("id", user?.id);
+      const updateRes = await offlineMutate(
+        "profiles",
+        "update",
+        { avatar_url: publicUrl, updated_at: new Date().toISOString() },
+        { id: user?.id }
+      );
 
-      if (updateError) throw updateError;
+      if (!updateRes.success) throw updateRes.error ?? new Error("Failed to update avatar");
+
 
       setProfile({ ...profile, avatar_url: publicUrl });
       toast({ title: "Avatar updated successfully" });
