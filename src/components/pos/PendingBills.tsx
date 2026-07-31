@@ -76,25 +76,25 @@ export default function PendingBills({ selectedWarehouse, warehouses, cart, onLo
   const { user } = useAuth();
 
   const fetchBills = useCallback(async () => {
-    const { data: billsData, error } = await supabase
-      .from('pending_bills')
-      .select('*')
-      .eq('status', 'open')
-      .order('updated_at', { ascending: false });
+    const [billsRes, itemsRes] = await Promise.all([
+      offlineQuery<any>('pending_bills', () => supabase.from('pending_bills').select('*')),
+      offlineQuery<any>('pending_bill_items', () => supabase.from('pending_bill_items').select('*')),
+    ]);
 
-    if (error) return;
+    const billsData = (billsRes.data || [])
+      .filter((b: any) => b.status === 'open')
+      .sort((a: any, b: any) =>
+        new Date(b.updated_at || b.created_at || 0).getTime() -
+        new Date(a.updated_at || a.created_at || 0).getTime()
+      );
 
-    // Fetch items for all bills
-    const billIds = (billsData || []).map(b => b.id);
-    if (billIds.length === 0) {
+    if (billsData.length === 0) {
       setBills([]);
       return;
     }
 
-    const { data: itemsData } = await supabase
-      .from('pending_bill_items')
-      .select('*')
-      .in('bill_id', billIds);
+    const billIds = new Set(billsData.map((b: any) => b.id));
+    const itemsData = (itemsRes.data || []).filter((i: any) => billIds.has(i.bill_id));
 
     const itemsByBill = new Map<string, PendingBillItem[]>();
     (itemsData || []).forEach(item => {
@@ -104,6 +104,7 @@ export default function PendingBills({ selectedWarehouse, warehouses, cart, onLo
     });
 
     setBills((billsData || []).map(b => ({
+
       ...b,
       items: itemsByBill.get(b.id) || [],
     })));
