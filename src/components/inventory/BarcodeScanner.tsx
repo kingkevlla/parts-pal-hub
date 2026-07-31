@@ -53,13 +53,11 @@ export function BarcodeScanner({ onProductFound }: BarcodeScannerProps) {
   const searchByBarcode = async (code: string) => {
     setIsSearching(true);
     try {
-      const { data, error } = await supabase
-        .from('products')
-        .select('*, categories(name)')
-        .eq('barcode', code)
-        .maybeSingle();
+      const { data: products } = await offlineQuery<any>('products', () =>
+        supabase.from('products').select('*, categories(name)')
+      );
+      const data = (products || []).find((p: any) => p.barcode === code) || null;
 
-      if (error) throw error;
 
       if (data) {
         onProductFound(data);
