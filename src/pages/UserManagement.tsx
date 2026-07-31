@@ -64,37 +64,20 @@ export default function UserManagement() {
 
   const fetchUsers = async () => {
     setLoading(true);
-    
-    // Fetch profiles
-    const { data: profiles, error: profilesError } = await supabase
-      .from('profiles')
-      .select('*')
-      .order('created_at', { ascending: false });
 
-    if (profilesError) {
-      toast({
-        title: 'Error',
-        description: profilesError.message,
-        variant: 'destructive',
-      });
-      setLoading(false);
-      return;
-    }
+    // Offline-first: profiles + roles from the local SQLite store
+    const [profilesRes, rolesRes] = await Promise.all([
+      offlineQuery<any>('profiles', () =>
+        supabase.from('profiles').select('*').order('created_at', { ascending: false })
+      ),
+      offlineQuery<any>('user_roles', () => supabase.from('user_roles').select('user_id, role')),
+    ]);
 
-    // Fetch user roles
-    const { data: roleData, error: rolesError } = await supabase
-      .from('user_roles')
-      .select('user_id, role');
+    const profiles = [...(profilesRes.data || [])].sort(
+      (a, b) => new Date(b.created_at || 0).getTime() - new Date(a.created_at || 0).getTime()
+    );
+    const roleData = rolesRes.data || [];
 
-    if (rolesError) {
-      toast({
-        title: 'Error',
-        description: rolesError.message,
-        variant: 'destructive',
-      });
-      setLoading(false);
-      return;
-    }
 
     // Group roles by user_id
     const rolesMap: Record<string, string[]> = {};
