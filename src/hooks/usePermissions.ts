@@ -72,24 +72,29 @@ export function usePermissions(): UserPermissions {
 
   const fetchUserRole = async () => {
     if (!user) return;
+    const storageKey = `cached_role_${user.id}`;
     try {
-      const { data, error } = await supabase
-        .from("user_roles")
-        .select("role")
-        .eq("user_id", user.id)
-        .single();
-
-      const userRole: AppRole = error ? "user" : ((data?.role as AppRole) || "user");
+      // Offline-first: read roles from the local store so permissions survive
+      // a full offline session instead of silently degrading to "user".
+      const { data } = await offlineQuery<any>("user_roles", () =>
+        supabase.from("user_roles").select("*")
+      );
+      const row = (data || []).find((r: any) => r.user_id === user.id);
+      const persisted = localStorage.getItem(storageKey) as AppRole | null;
+      const userRole: AppRole = (row?.role as AppRole) || persisted || "user";
+      localStorage.setItem(storageKey, userRole);
       roleCache.set(user.id, { role: userRole, ts: Date.now() });
       setRole(userRole);
       setPermissions(ROLE_PERMISSIONS[userRole] || ROLE_PERMISSIONS.user);
     } catch {
-      setRole("user");
-      setPermissions(ROLE_PERMISSIONS.user);
+      const persisted = (localStorage.getItem(storageKey) as AppRole | null) || "user";
+      setRole(persisted);
+      setPermissions(ROLE_PERMISSIONS[persisted] || ROLE_PERMISSIONS.user);
     } finally {
       setLoading(false);
     }
   };
+
 
   const hasPermission = (permission: string): boolean => {
     return permissions.includes(permission);
