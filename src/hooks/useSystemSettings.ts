@@ -48,11 +48,10 @@ export function useSystemSettings() {
 
   const fetchSettings = async () => {
     try {
-      const { data, error } = await supabase
-        .from("system_settings")
-        .select("key, value");
+      const { data } = await offlineQuery<any>("system_settings", () =>
+        supabase.from("system_settings").select("*")
+      );
 
-      if (error) throw error;
 
       const settingsMap: any = { ...DEFAULT_SETTINGS };
       
