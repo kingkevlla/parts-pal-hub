@@ -32,27 +32,24 @@ export default function ManualItemEntry({ onItemAdded }: ManualItemEntryProps) {
   const { user } = useAuth();
 
   const getOrCreateExtraWarehouse = async (): Promise<string> => {
-    // Check if "Extra" warehouse exists
-    const { data: existing } = await supabase
-      .from('warehouses')
-      .select('id')
-      .eq('name', EXTRA_WAREHOUSE_NAME)
-      .limit(1);
-
-    if (existing && existing.length > 0) {
-      return existing[0].id;
-    }
+    // Check if "Extra" warehouse exists (offline-first)
+    const { data: warehouses } = await offlineQuery<any>('warehouses', () =>
+      supabase.from('warehouses').select('*')
+    );
+    const existing = (warehouses || []).find((w: any) => w.name === EXTRA_WAREHOUSE_NAME);
+    if (existing) return existing.id;
 
     // Create "Extra" warehouse
-    const { data: created, error } = await supabase
-      .from('warehouses')
-      .insert({ name: EXTRA_WAREHOUSE_NAME, location: 'Manual/Extra Items', is_active: true })
-      .select('id')
-      .single();
+    const { data: created, error } = await offlineInsertSingle<any>('warehouses', {
+      name: EXTRA_WAREHOUSE_NAME,
+      location: 'Manual/Extra Items',
+      is_active: true,
+    });
 
-    if (error) throw new Error('Failed to create Extra warehouse: ' + error.message);
+    if (error || !created) throw new Error('Failed to create Extra warehouse: ' + (error?.message ?? 'unknown'));
     return created.id;
   };
+
 
   const handleAdd = async () => {
     const name = itemName.trim();
