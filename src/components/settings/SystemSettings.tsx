@@ -20,14 +20,12 @@ export default function SystemSettings() {
 
   const fetchSettings = async () => {
     try {
-      const { data, error } = await supabase
-        .from("system_settings")
-        .select("key, value");
-
-      if (error) throw error;
+      const { data } = await offlineQuery<any>("system_settings", () =>
+        supabase.from("system_settings").select("*")
+      );
 
       const settingsMap: Record<string, any> = {};
-      data?.forEach((setting) => {
+      (data || []).forEach((setting: any) => {
         settingsMap[setting.key] = setting.value;
       });
       setSettings(settingsMap);
@@ -39,23 +37,17 @@ export default function SystemSettings() {
   const handleSaveAll = async () => {
     try {
       setLoading(true);
-      
-      for (const [key, value] of Object.entries(settings)) {
-        const { data: existing } = await supabase
-          .from("system_settings")
-          .select("id")
-          .eq("key", key)
-          .maybeSingle();
 
+      const { data: existingRows } = await offlineQuery<any>("system_settings", () =>
+        supabase.from("system_settings").select("*")
+      );
+
+      for (const [key, value] of Object.entries(settings)) {
+        const existing = (existingRows || []).find((s: any) => s.key === key);
         if (existing) {
-          await supabase
-            .from("system_settings")
-            .update({ value: value })
-            .eq("key", key);
+          await offlineMutate("system_settings", "update", { value, updated_at: new Date().toISOString() }, { key });
         } else {
-          await supabase
-            .from("system_settings")
-            .insert({ key, value });
+          await offlineMutate("system_settings", "insert", { key, value });
         }
       }
 
@@ -66,6 +58,7 @@ export default function SystemSettings() {
       setLoading(false);
     }
   };
+
 
   return (
     <div className="space-y-6">
