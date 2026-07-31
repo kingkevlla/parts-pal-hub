@@ -90,15 +90,19 @@ export default function ProfileSettings() {
     setLoading(true);
 
     try {
-      const { error } = await supabase
-        .from("profiles")
-        .update({
+      const res = await offlineMutate(
+        "profiles",
+        "update",
+        {
           full_name: profile.full_name,
-          phone: profile.phone
-        })
-        .eq("id", user?.id);
+          phone: profile.phone,
+          updated_at: new Date().toISOString(),
+        },
+        { id: user?.id }
+      );
 
-      if (error) throw error;
+      if (!res.success) throw res.error ?? new Error("Failed to update profile");
+
 
       toast({ title: "Profile updated successfully" });
     } catch (error: any) {
