@@ -4,6 +4,8 @@ import { Input } from '@/components/ui/input';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
 import { Barcode, Search } from 'lucide-react';
 import { supabase } from '@/integrations/supabase/client';
+import { offlineQuery } from '@/lib/offlineHelpers';
+
 import { useToast } from '@/hooks/use-toast';
 
 interface BarcodeScannerProps {
