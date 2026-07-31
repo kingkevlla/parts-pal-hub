@@ -6,6 +6,8 @@ import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { supabase } from "@/integrations/supabase/client";
+import { offlineQuery, offlineMutate } from "@/lib/offlineHelpers";
+
 import { useToast } from "@/hooks/use-toast";
 import { Building2, DollarSign, Package, Bell } from "lucide-react";
 
