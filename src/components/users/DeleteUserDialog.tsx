@@ -11,6 +11,8 @@ import {
 } from "@/components/ui/alert-dialog";
 import { useToast } from "@/hooks/use-toast";
 import { supabase } from "@/integrations/supabase/client";
+import { offlineMutate } from "@/lib/offlineHelpers";
+
 import { Loader2 } from "lucide-react";
 
 interface DeleteUserDialogProps {
