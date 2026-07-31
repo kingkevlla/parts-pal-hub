@@ -6,6 +6,8 @@ import { Button } from "@/components/ui/button";
 import { Avatar, AvatarImage, AvatarFallback } from "@/components/ui/avatar";
 import { useAuth } from "@/contexts/AuthContext";
 import { supabase } from "@/integrations/supabase/client";
+import { offlineQuery, offlineMutate } from "@/lib/offlineHelpers";
+
 import { useToast } from "@/hooks/use-toast";
 import { Upload, User } from "lucide-react";
 
