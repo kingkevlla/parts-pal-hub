@@ -1,5 +1,7 @@
 import { useState, useEffect } from "react";
 import { supabase } from "@/integrations/supabase/client";
+import { offlineQuery } from "@/lib/offlineHelpers";
+
 
 const CURRENCY_SYMBOLS: Record<string, string> = {
   USD: "$", EUR: "€", GBP: "£", JPY: "¥", CNY: "¥", INR: "₹",
