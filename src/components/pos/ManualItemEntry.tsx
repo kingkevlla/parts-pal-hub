@@ -5,6 +5,8 @@ import { Label } from '@/components/ui/label';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
 import { Plus, PenLine, Loader2 } from 'lucide-react';
 import { supabase } from '@/integrations/supabase/client';
+import { offlineQuery, offlineInsertSingle, offlineMutate } from '@/lib/offlineHelpers';
+
 import { useToast } from '@/hooks/use-toast';
 import { useAuth } from '@/contexts/AuthContext';
 
@@ -30,27 +32,24 @@ export default function ManualItemEntry({ onItemAdded }: ManualItemEntryProps) {
   const { user } = useAuth();
 
   const getOrCreateExtraWarehouse = async (): Promise<string> => {
-    // Check if "Extra" warehouse exists
-    const { data: existing } = await supabase
-      .from('warehouses')
-      .select('id')
-      .eq('name', EXTRA_WAREHOUSE_NAME)
-      .limit(1);
-
-    if (existing && existing.length > 0) {
-      return existing[0].id;
-    }
+    // Check if "Extra" warehouse exists (offline-first)
+    const { data: warehouses } = await offlineQuery<any>('warehouses', () =>
+      supabase.from('warehouses').select('*')
+    );
+    const existing = (warehouses || []).find((w: any) => w.name === EXTRA_WAREHOUSE_NAME);
+    if (existing) return existing.id;
 
     // Create "Extra" warehouse
-    const { data: created, error } = await supabase
-      .from('warehouses')
-      .insert({ name: EXTRA_WAREHOUSE_NAME, location: 'Manual/Extra Items', is_active: true })
-      .select('id')
-      .single();
+    const { data: created, error } = await offlineInsertSingle<any>('warehouses', {
+      name: EXTRA_WAREHOUSE_NAME,
+      location: 'Manual/Extra Items',
+      is_active: true,
+    });
 
-    if (error) throw new Error('Failed to create Extra warehouse: ' + error.message);
+    if (error || !created) throw new Error('Failed to create Extra warehouse: ' + (error?.message ?? 'unknown'));
     return created.id;
   };
+
 
   const handleAdd = async () => {
     const name = itemName.trim();
@@ -74,35 +73,30 @@ export default function ManualItemEntry({ onItemAdded }: ManualItemEntryProps) {
     try {
       const warehouseId = await getOrCreateExtraWarehouse();
 
-      // Create product record
-      const { data: product, error: productError } = await supabase
-        .from('products')
-        .insert({
-          name,
-          selling_price: price,
-          purchase_price: 0,
-          is_active: true,
-          min_stock_level: 0,
-          description: 'Manually added via POS',
-        })
-        .select('id')
-        .single();
+      // Create product record (offline-first)
+      const { data: product, error: productError } = await offlineInsertSingle<any>('products', {
+        name,
+        selling_price: price,
+        purchase_price: 0,
+        is_active: true,
+        min_stock_level: 0,
+        description: 'Manually added via POS',
+      });
 
-      if (productError) throw productError;
+      if (productError || !product) throw productError ?? new Error('Failed to create product');
 
       // Create stock movement (in) to add inventory via trigger
-      const { error: movementError } = await supabase
-        .from('stock_movements')
-        .insert({
-          product_id: product.id,
-          warehouse_id: warehouseId,
-          quantity: qty,
-          movement_type: 'in',
-          notes: 'Manual POS item - auto stock',
-          created_by: user?.id,
-        });
+      const movement = await offlineMutate('stock_movements', 'insert', {
+        product_id: product.id,
+        warehouse_id: warehouseId,
+        quantity: qty,
+        movement_type: 'in',
+        notes: 'Manual POS item - auto stock',
+        created_by: user?.id,
+      });
 
-      if (movementError) throw movementError;
+      if (!movement.success) throw movement.error ?? new Error('Failed to record stock movement');
+
 
       onItemAdded({
         productId: product.id,

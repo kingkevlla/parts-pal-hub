@@ -1,5 +1,7 @@
 import { useState, useEffect } from 'react';
 import { supabase } from '@/integrations/supabase/client';
+import { offlineQuery } from '@/lib/offlineHelpers';
+
 
 export interface Notification {
   id: string;
@@ -26,37 +28,43 @@ export function useNotifications() {
   const fetchNotifications = async () => {
     try {
       const notifs: Notification[] = [];
+      const today = new Date().toISOString().split('T')[0];
 
-      // Check for expired products
-      const { data: expiredProducts } = await supabase
-        .from('products')
-        .select('id, name, expiry_date')
-        .not('expiry_date', 'is', null)
-        .lt('expiry_date', new Date().toISOString().split('T')[0]);
+      // Offline-first reads from the local SQLite store
+      const [productsRes, inventoryRes, loansRes] = await Promise.all([
+        offlineQuery<any>('products', () => supabase.from('products').select('*')),
+        offlineQuery<any>('inventory', () => supabase.from('inventory').select('*')),
+        offlineQuery<any>('loans', () => supabase.from('loans').select('*')),
+      ]);
 
-      expiredProducts?.forEach(p => {
-        notifs.push({
-          id: `expired-${p.id}`,
-          type: 'alert',
-          title: 'Product Expired',
-          message: `${p.name} has expired`,
-          link: '/inventory',
-          read: false,
-          createdAt: new Date(),
+      const products = productsRes.data || [];
+      const inventory = inventoryRes.data || [];
+      const loans = loansRes.data || [];
+
+      // Expired products
+      products
+        .filter((p: any) => p.expiry_date && p.expiry_date < today)
+        .forEach((p: any) => {
+          notifs.push({
+            id: `expired-${p.id}`,
+            type: 'alert',
+            title: 'Product Expired',
+            message: `${p.name} has expired`,
+            link: '/inventory',
+            read: false,
+            createdAt: new Date(),
+          });
         });
-      });
 
-      // Check for expiring soon (within 30 days)
+      // Expiring soon (within 30 days)
       const futureDate = new Date();
       futureDate.setDate(futureDate.getDate() + 30);
-      const { data: expiringProducts } = await supabase
-        .from('products')
-        .select('id, name, expiry_date')
-        .not('expiry_date', 'is', null)
-        .gte('expiry_date', new Date().toISOString().split('T')[0])
-        .lte('expiry_date', futureDate.toISOString().split('T')[0]);
+      const futureStr = futureDate.toISOString().split('T')[0];
+      const expiringProducts = products.filter(
+        (p: any) => p.expiry_date && p.expiry_date >= today && p.expiry_date <= futureStr
+      );
 
-      if (expiringProducts && expiringProducts.length > 0) {
+      if (expiringProducts.length > 0) {
         notifs.push({
           id: 'expiring-soon',
           type: 'warning',
@@ -68,25 +76,14 @@ export function useNotifications() {
         });
       }
 
-      // Check for low stock products
-      const { data: products } = await supabase
-        .from('products')
-        .select('id, name, min_stock_level');
-
-      let lowStockCount = 0;
-      if (products) {
-        for (const product of products) {
-          const { data: inventory } = await supabase
-            .from('inventory')
-            .select('quantity')
-            .eq('product_id', product.id);
-
-          const totalQty = inventory?.reduce((sum, inv) => sum + (inv.quantity || 0), 0) || 0;
-          if (totalQty <= (product.min_stock_level || 0)) {
-            lowStockCount++;
-          }
-        }
-      }
+      // Low stock — aggregate inventory per product locally
+      const qtyByProduct = new Map<string, number>();
+      inventory.forEach((inv: any) => {
+        qtyByProduct.set(inv.product_id, (qtyByProduct.get(inv.product_id) || 0) + (inv.quantity || 0));
+      });
+      const lowStockCount = products.filter(
+        (p: any) => (qtyByProduct.get(p.id) || 0) <= (p.min_stock_level || 0)
+      ).length;
 
       if (lowStockCount > 0) {
         notifs.push({
@@ -100,32 +97,23 @@ export function useNotifications() {
         });
       }
 
-      // Check for pending loans
-      const { data: pendingLoans } = await supabase
-        .from('loans')
-        .select('id')
-        .in('status', ['pending', 'active']);
-
-      if (pendingLoans && pendingLoans.length > 0) {
+      // Active loans
+      const activeLoans = loans.filter((l: any) => ['pending', 'active'].includes(l.status));
+      if (activeLoans.length > 0) {
         notifs.push({
           id: 'pending-loans',
           type: 'info',
           title: 'Active Loans',
-          message: `${pendingLoans.length} loan(s) are currently active`,
+          message: `${activeLoans.length} loan(s) are currently active`,
           link: '/loans',
           read: false,
           createdAt: new Date(),
         });
       }
 
-      // Check for overdue loans
-      const { data: overdueLoans } = await supabase
-        .from('loans')
-        .select('id')
-        .in('status', ['pending', 'active'])
-        .lt('due_date', new Date().toISOString().split('T')[0]);
-
-      if (overdueLoans && overdueLoans.length > 0) {
+      // Overdue loans
+      const overdueLoans = activeLoans.filter((l: any) => l.due_date && l.due_date < today);
+      if (overdueLoans.length > 0) {
         notifs.push({
           id: 'overdue-loans',
           type: 'alert',
@@ -137,23 +125,28 @@ export function useNotifications() {
         });
       }
 
-      // Check for open support tickets
-      const { data: openTickets } = await supabase
-        .from('support_tickets' as any)
-        .select('id')
-        .eq('status', 'open');
+      // Open support tickets (online only — not part of the offline store)
+      if (navigator.onLine) {
+        try {
+          const { data: openTickets } = await supabase
+            .from('support_tickets' as any)
+            .select('id')
+            .eq('status', 'open');
 
-      if (openTickets && openTickets.length > 0) {
-        notifs.push({
-          id: 'open-tickets',
-          type: 'info',
-          title: 'Open Tickets',
-          message: `${openTickets.length} support ticket(s) need attention`,
-          link: '/support',
-          read: false,
-          createdAt: new Date(),
-        });
+          if (openTickets && openTickets.length > 0) {
+            notifs.push({
+              id: 'open-tickets',
+              type: 'info',
+              title: 'Open Tickets',
+              message: `${openTickets.length} support ticket(s) need attention`,
+              link: '/support',
+              read: false,
+              createdAt: new Date(),
+            });
+          }
+        } catch { /* ignore */ }
       }
+
 
       setNotifications(notifs);
     } catch (error) {

@@ -10,7 +10,7 @@ import { useToast } from '@/hooks/use-toast';
 import { useCurrency } from '@/hooks/useCurrency';
 import { useAuth } from '@/contexts/AuthContext';
 import { supabase } from '@/integrations/supabase/client';
-import { offlineMutate } from '@/lib/offlineHelpers';
+import { offlineMutate, offlineQuery, offlineInsertSingle } from '@/lib/offlineHelpers';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { ClipboardList, Plus, Trash2, ShoppingCart, UserPlus, Clock, Edit } from 'lucide-react';
 import { format } from 'date-fns';
@@ -76,25 +76,25 @@ export default function PendingBills({ selectedWarehouse, warehouses, cart, onLo
   const { user } = useAuth();
 
   const fetchBills = useCallback(async () => {
-    const { data: billsData, error } = await supabase
-      .from('pending_bills')
-      .select('*')
-      .eq('status', 'open')
-      .order('updated_at', { ascending: false });
+    const [billsRes, itemsRes] = await Promise.all([
+      offlineQuery<any>('pending_bills', () => supabase.from('pending_bills').select('*')),
+      offlineQuery<any>('pending_bill_items', () => supabase.from('pending_bill_items').select('*')),
+    ]);
 
-    if (error) return;
+    const billsData = (billsRes.data || [])
+      .filter((b: any) => b.status === 'open')
+      .sort((a: any, b: any) =>
+        new Date(b.updated_at || b.created_at || 0).getTime() -
+        new Date(a.updated_at || a.created_at || 0).getTime()
+      );
 
-    // Fetch items for all bills
-    const billIds = (billsData || []).map(b => b.id);
-    if (billIds.length === 0) {
+    if (billsData.length === 0) {
       setBills([]);
       return;
     }
 
-    const { data: itemsData } = await supabase
-      .from('pending_bill_items')
-      .select('*')
-      .in('bill_id', billIds);
+    const billIds = new Set(billsData.map((b: any) => b.id));
+    const itemsData = (itemsRes.data || []).filter((i: any) => billIds.has(i.bill_id));
 
     const itemsByBill = new Map<string, PendingBillItem[]>();
     (itemsData || []).forEach(item => {
@@ -104,6 +104,7 @@ export default function PendingBills({ selectedWarehouse, warehouses, cart, onLo
     });
 
     setBills((billsData || []).map(b => ({
+
       ...b,
       items: itemsByBill.get(b.id) || [],
     })));
@@ -135,19 +136,17 @@ export default function PendingBills({ selectedWarehouse, warehouses, cart, onLo
     try {
       const warehouseId = billWarehouseId;
 
-      const { data: bill, error: billError } = await supabase
-        .from('pending_bills')
-        .insert({
-          customer_name: billName.trim(),
-          customer_phone: billPhone.trim() || null,
-          warehouse_id: warehouseId,
-          notes: billNotes.trim() || null,
-          created_by: user?.id,
-        })
-        .select()
-        .single();
+      const { data: bill, error: billError } = await offlineInsertSingle<any>('pending_bills', {
+        customer_name: billName.trim(),
+        customer_phone: billPhone.trim() || null,
+        warehouse_id: warehouseId,
+        notes: billNotes.trim() || null,
+        created_by: user?.id,
+        status: 'open',
+        updated_at: new Date().toISOString(),
+      });
 
-      if (billError) throw billError;
+      if (billError || !bill) throw billError ?? new Error('Failed to create bill');
 
       const items = cart.map(item => ({
         bill_id: bill.id,
@@ -158,11 +157,9 @@ export default function PendingBills({ selectedWarehouse, warehouses, cart, onLo
         subtotal: item.subtotal,
       }));
 
-      const { error: itemsError } = await supabase
-        .from('pending_bill_items')
-        .insert(items);
+      const itemsRes = await offlineMutate('pending_bill_items', 'insert', items);
+      if (!itemsRes.success) throw itemsRes.error ?? new Error('Failed to save bill items');
 
-      if (itemsError) throw itemsError;
 
       toast({ title: 'Bill Created', description: `Pending bill for "${billName}" saved` });
       setShowCreateDialog(false);
@@ -237,11 +234,12 @@ export default function PendingBills({ selectedWarehouse, warehouses, cart, onLo
 
   const loadBillToCart = async (bill: PendingBill) => {
     // Detect which items are manual by checking product descriptions
-    const productIds = bill.items.map(i => i.product_id);
-    const { data: productData } = await supabase
-      .from('products')
-      .select('id, description')
-      .in('id', productIds);
+    const productIds = new Set(bill.items.map(i => i.product_id));
+    const { data: allProducts } = await offlineQuery<any>('products', () =>
+      supabase.from('products').select('*')
+    );
+    const productData = (allProducts || []).filter((p: any) => productIds.has(p.id));
+
 
     const manualIds = new Set(
       (productData || [])

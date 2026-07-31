@@ -4,6 +4,8 @@ import { Input } from '@/components/ui/input';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
 import { Barcode, Search } from 'lucide-react';
 import { supabase } from '@/integrations/supabase/client';
+import { offlineQuery } from '@/lib/offlineHelpers';
+
 import { useToast } from '@/hooks/use-toast';
 
 interface BarcodeScannerProps {
@@ -53,13 +55,11 @@ export function BarcodeScanner({ onProductFound }: BarcodeScannerProps) {
   const searchByBarcode = async (code: string) => {
     setIsSearching(true);
     try {
-      const { data, error } = await supabase
-        .from('products')
-        .select('*, categories(name)')
-        .eq('barcode', code)
-        .maybeSingle();
+      const { data: products } = await offlineQuery<any>('products', () =>
+        supabase.from('products').select('*, categories(name)')
+      );
+      const data = (products || []).find((p: any) => p.barcode === code) || null;
 
-      if (error) throw error;
 
       if (data) {
         onProductFound(data);
