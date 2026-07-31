@@ -22,17 +22,15 @@ export default function POSHeader({ cartItemCount, cartTotal, onRefresh }: POSHe
 
   useEffect(() => {
     const fetchCompanyName = async () => {
-      const { data } = await supabase
-        .from('system_settings')
-        .select('value')
-        .eq('key', 'company_name')
-        .maybeSingle();
-      if (data?.value) {
-        setCompanyName(String(data.value));
-      }
+      const { data } = await offlineQuery<any>('system_settings', () =>
+        supabase.from('system_settings').select('*')
+      );
+      const row = (data || []).find((s: any) => s.key === 'company_name');
+      if (row?.value) setCompanyName(String(row.value));
     };
     fetchCompanyName();
   }, []);
+
 
   useEffect(() => {
     const timer = setInterval(() => setCurrentTime(new Date()), 1000);
