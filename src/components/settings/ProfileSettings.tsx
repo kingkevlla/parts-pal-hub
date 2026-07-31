@@ -30,20 +30,22 @@ export default function ProfileSettings() {
 
   const fetchProfile = async () => {
     try {
-      const { data, error } = await supabase
-        .from("profiles")
-        .select("*")
-        .eq("id", user?.id)
-        .single();
-
-      if (error) throw error;
-      if (data) {
-        setProfile(data);
+      const { data } = await offlineQuery<any>("profiles", () =>
+        supabase.from("profiles").select("*")
+      );
+      const row = (data || []).find((p: any) => p.id === user?.id || p.user_id === user?.id);
+      if (row) {
+        setProfile({
+          full_name: row.full_name ?? "",
+          phone: row.phone ?? "",
+          avatar_url: row.avatar_url ?? "",
+        });
       }
     } catch (error: any) {
       console.error("Error fetching profile:", error);
     }
   };
+
 
   const handleAvatarUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
     try {
