@@ -5,6 +5,8 @@ import { Label } from '@/components/ui/label';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
 import { Plus, PenLine, Loader2 } from 'lucide-react';
 import { supabase } from '@/integrations/supabase/client';
+import { offlineQuery, offlineInsertSingle, offlineMutate } from '@/lib/offlineHelpers';
+
 import { useToast } from '@/hooks/use-toast';
 import { useAuth } from '@/contexts/AuthContext';
 
