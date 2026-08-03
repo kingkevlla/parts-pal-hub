@@ -81,6 +81,7 @@ export async function offlineKeyedQuery<T = any>(
   const runNetwork = async () => {
     const result = await queryFn();
     if (!result.error && result.data !== null && result.data !== undefined) {
+      memCache.set(key, result.data);
       await setCachedQuery(key, result.data);
       return result.data as T;
     }
@@ -88,6 +89,7 @@ export async function offlineKeyedQuery<T = any>(
   };
 
   if (cached) {
+    memCache.set(key, cached.data);
     // Skip background refresh entirely while still fresh — saves the round trip.
     if (isOnline && !fresh) {
       runNetwork()
@@ -104,6 +106,7 @@ export async function offlineKeyedQuery<T = any>(
     }
     return { data: cached.data, isOffline: !isOnline, fromCache: true, isFresh: fresh };
   }
+
 
   if (isOnline) {
     try {
