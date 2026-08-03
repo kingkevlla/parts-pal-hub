@@ -235,6 +235,38 @@ export default function SalesHistory() {
     }
   };
 
+  // ─── Offline exports from cached rows ───────────────────
+  const salesColumns: ExportColumn<Transaction>[] = [
+    { header: 'Transaction #', value: (t) => t.transaction_number || '-' },
+    { header: 'Date', value: (t) => format(new Date(t.created_at), 'yyyy-MM-dd HH:mm') },
+    { header: 'Customer', value: (t) => t.customers?.name || 'Walk-in' },
+    { header: 'Phone', value: (t) => t.customers?.phone || '' },
+    { header: 'Payment', value: (t) => t.payment_method || '-' },
+    { header: 'Status', value: (t) => t.status || '-' },
+    { header: 'Amount', value: (t) => Number(t.total_amount || 0) },
+  ];
+
+  const exportSales = (kind: 'pdf' | 'csv') => {
+    const rows = table.filteredData as Transaction[];
+    if (!rows.length) {
+      toast({ title: 'Nothing to export', description: 'No cached transactions for this filter.' });
+      return;
+    }
+    const name = `sales-history-${dateFilter}-${stamp()}`;
+    const n =
+      kind === 'csv'
+        ? exportToCSV(rows, salesColumns, name)
+        : exportToPDF(rows, salesColumns, name, {
+            title: 'Sales History',
+            subtitle: `Filter: ${dateFilter.replace(/_/g, ' ')}`,
+            summary: [
+              ['Transactions', String(rows.length)],
+              ['Total', formatAmount(rows.reduce((s, t) => s + Number(t.total_amount || 0), 0))],
+            ],
+          });
+    toast({ title: `Exported ${n} transactions`, description: `${kind.toUpperCase()} (offline-ready)` });
+  };
+
   return (
     <div className="space-y-6 p-6">
       <div className="flex items-center justify-between flex-wrap gap-4">
@@ -242,6 +274,19 @@ export default function SalesHistory() {
           <h1 className="text-3xl font-bold">Sales History</h1>
           <p className="text-muted-foreground">View and analyze all sales transactions</p>
         </div>
+        <div className="flex flex-wrap gap-2">
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <Button variant="outline" className="gap-2">
+              <Download className="h-4 w-4" /> Export Sales
+            </Button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end">
+            <DropdownMenuItem onClick={() => exportSales('pdf')}>Download as PDF</DropdownMenuItem>
+            <DropdownMenuItem onClick={() => exportSales('csv')}>Download as CSV</DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
+
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
             <Button variant="outline" className="gap-2">
