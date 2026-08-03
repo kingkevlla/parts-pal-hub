@@ -13,6 +13,7 @@ import {
 } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { getCachedData } from "@/lib/offlineDb";
+import { offlineQuery, offlineKeyedQuery, makeCacheKey } from "@/lib/offlineHelpers";
 import { useToast } from "@/hooks/use-toast";
 import { useCurrency } from "@/hooks/useCurrency";
 import { useSystemSettings } from "@/hooks/useSystemSettings";
@@ -108,15 +109,11 @@ export default function Reports() {
   const { formatAmount } = useCurrency();
   const { settings } = useSystemSettings();
 
-  // Fetch profiles once
+  // Fetch profiles once (cache-first)
   useEffect(() => {
-    if (navigator.onLine) {
-      supabase.from("profiles").select("user_id, full_name").then(({ data }) => {
-        if (data) setProfiles(data);
-      });
-    } else {
-      getCachedData('profiles').then(data => setProfiles(data as any));
-    }
+    offlineQuery<any>("profiles", () => supabase.from("profiles").select("*"))
+      .then(({ data }) => setProfiles((data || []) as any))
+      .catch(() => {});
   }, []);
 
   // Fetch report data when filters change
@@ -126,10 +123,26 @@ export default function Reports() {
 
   const dateRange = getDateRange(dateFilter, customStart, customEnd);
 
+  const applyPayload = (payload: any) => {
+    if (!payload) return;
+    setTransactions(payload.transactions || []);
+    setStockMovements(payload.stockMovements || []);
+    setExpenses(payload.expenses || []);
+    setProductCount(payload.productCount || 0);
+    setCustomerCount(payload.customerCount || 0);
+    setSupplierCount(payload.supplierCount || 0);
+  };
+
   const fetchData = async () => {
     setLoading(true);
     try {
-      if (navigator.onLine) {
+      const key = makeCacheKey("reports", {
+        filter: dateFilter,
+        start: dateRange ? dateRange.start.toISOString() : "",
+        end: dateRange ? dateRange.end.toISOString() : "",
+      });
+
+      const networkFetch = async () => {
         const applyDateFilter = (query: any, col = "created_at") => {
           if (dateRange) {
             query = query.gte(col, dateRange.start.toISOString()).lte(col, dateRange.end.toISOString());
@@ -160,48 +173,55 @@ export default function Reports() {
           supabase.from("suppliers").select("*", { count: "exact", head: true }),
         ]);
 
-        setTransactions(txData || []);
-        setStockMovements(smData || []);
-        setExpenses(exData || []);
-        setProductCount(pc || 0);
-        setCustomerCount(cc || 0);
-        setSupplierCount(sc || 0);
+        return {
+          data: {
+            transactions: txData || [],
+            stockMovements: smData || [],
+            expenses: exData || [],
+            productCount: pc || 0,
+            customerCount: cc || 0,
+            supplierCount: sc || 0,
+          },
+          error: null,
+        };
+      };
+
+      // Cache-first: render last-known report instantly, refresh in background.
+      const { data } = await offlineKeyedQuery<any>(key, networkFetch, (fresh) => applyPayload(fresh));
+
+      if (data) {
+        applyPayload(data);
       } else {
-        // Offline: use cached data
+        // No keyed cache yet (first offline visit) — derive from the table caches.
         const [txData, smData, exData, products, customers, suppliers] = await Promise.all([
-          getCachedData('transactions'),
-          getCachedData('stock_movements'),
-          getCachedData('expenses'),
-          getCachedData('products'),
-          getCachedData('customers'),
-          getCachedData('suppliers'),
+          getCachedData("transactions"),
+          getCachedData("stock_movements"),
+          getCachedData("expenses"),
+          getCachedData("products"),
+          getCachedData("customers"),
+          getCachedData("suppliers"),
         ]);
 
-        let filteredTx = txData;
-        let filteredSm = smData;
-        let filteredEx = exData;
+        const inRange = (value: any) => {
+          if (!dateRange) return true;
+          const d = new Date(value);
+          return d >= dateRange.start && d <= dateRange.end;
+        };
 
-        if (dateRange) {
-          filteredTx = txData.filter((t: any) => {
-            const d = new Date(t.created_at);
-            return d >= dateRange.start && d <= dateRange.end;
-          });
-          filteredSm = smData.filter((m: any) => {
-            const d = new Date(m.created_at);
-            return d >= dateRange.start && d <= dateRange.end;
-          });
-          filteredEx = exData.filter((e: any) => {
-            const d = new Date(e.expense_date);
-            return d >= dateRange.start && d <= dateRange.end;
-          });
-        }
-
-        setTransactions(filteredTx as any);
-        setStockMovements(filteredSm as any);
-        setExpenses(filteredEx as any);
-        setProductCount(products.length);
-        setCustomerCount(customers.length);
-        setSupplierCount(suppliers.length);
+        applyPayload({
+          transactions: txData
+            .filter((t: any) => inRange(t.created_at))
+            .sort((a: any, b: any) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()),
+          stockMovements: smData
+            .filter((m: any) => inRange(m.created_at))
+            .sort((a: any, b: any) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()),
+          expenses: exData
+            .filter((e: any) => inRange(e.expense_date))
+            .sort((a: any, b: any) => new Date(b.expense_date).getTime() - new Date(a.expense_date).getTime()),
+          productCount: products.length,
+          customerCount: customers.length,
+          supplierCount: suppliers.length,
+        });
       }
     } catch (err: any) {
       toast({ title: "Error loading reports", description: err.message, variant: "destructive" });
@@ -209,6 +229,7 @@ export default function Reports() {
       setLoading(false);
     }
   };
+
 
   // ─── Helpers ─────────────────────────────────────────────
   const getUserName = (userId: string | null) => {

@@ -10,6 +10,7 @@ import { ShoppingCart, DollarSign, TrendingUp, Calendar, Eye, Receipt, Download 
 import { useToast } from "@/hooks/use-toast";
 import { supabase } from "@/integrations/supabase/client";
 import { getCachedData } from "@/lib/offlineDb";
+import { offlineKeyedQuery, makeCacheKey } from "@/lib/offlineHelpers";
 import { useCurrency } from "@/hooks/useCurrency";
 import { useDataTable } from "@/hooks/useDataTable";
 import { DataTableSearch, DataTablePagination, SelectAllCheckbox } from "@/components/ui/data-table-controls";
@@ -93,45 +94,89 @@ export default function SalesHistory() {
   };
 
   const fetchTransactions = async () => {
-    if (navigator.onLine) {
+    const dateRange = getDateRange();
+    const key = makeCacheKey('sales_history', {
+      filter: dateFilter,
+      start: dateRange ? dateRange.start.toISOString() : '',
+      end: dateRange ? dateRange.end.toISOString() : '',
+    });
+
+    const networkFetch = () => {
       let query = supabase
         .from('transactions')
         .select('*, customers(name, phone)')
         .order('created_at', { ascending: false });
-
-      const dateRange = getDateRange();
       if (dateRange) {
         query = query
           .gte('created_at', dateRange.start.toISOString())
           .lte('created_at', dateRange.end.toISOString());
       }
+      return query;
+    };
 
-      const { data, error } = await query;
-      if (!error) setTransactions(data || []);
-    } else {
-      const cached = await getCachedData('transactions');
-      const dateRange = getDateRange();
-      let filtered = cached;
-      if (dateRange) {
-        filtered = cached.filter((t: any) => {
-          const d = new Date(t.created_at);
-          return d >= dateRange.start && d <= dateRange.end;
-        });
-      }
-      setTransactions(filtered.sort((a: any, b: any) => 
-        new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
-      ));
+    // Cache-first render, silent background refresh.
+    const { data } = await offlineKeyedQuery<any[]>(key, networkFetch, (fresh) => setTransactions(fresh || []));
+
+    if (data) {
+      setTransactions(data);
+      return;
     }
+
+    // Fall back to the cached transactions table on a first offline visit.
+    const [cached, customers] = await Promise.all([
+      getCachedData('transactions'),
+      getCachedData('customers'),
+    ]);
+    let filtered = cached;
+    if (dateRange) {
+      filtered = cached.filter((t: any) => {
+        const d = new Date(t.created_at);
+        return d >= dateRange.start && d <= dateRange.end;
+      });
+    }
+    setTransactions(
+      filtered
+        .map((t: any) => ({
+          ...t,
+          customers: t.customers ?? customers.find((c: any) => c.id === t.customer_id) ?? null,
+        }))
+        .sort((a: any, b: any) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())
+    );
   };
 
   const fetchTransactionItems = async (transactionId: string) => {
-    const { data, error } = await supabase
-      .from('transaction_items')
-      .select('*, products(name, sku)')
-      .eq('transaction_id', transactionId);
+    const key = makeCacheKey('sales_history_items', { transactionId });
 
-    if (!error) setTransactionItems(data || []);
+    const { data } = await offlineKeyedQuery<any[]>(
+      key,
+      () =>
+        supabase
+          .from('transaction_items')
+          .select('*, products(name, sku)')
+          .eq('transaction_id', transactionId),
+      (fresh) => setTransactionItems(fresh || [])
+    );
+
+    if (data) {
+      setTransactionItems(data);
+      return;
+    }
+
+    // Offline first-visit: join items to products from the local store.
+    const [items, products] = await Promise.all([
+      getCachedData('transaction_items'),
+      getCachedData('products'),
+    ]);
+    setTransactionItems(
+      items
+        .filter((i: any) => i.transaction_id === transactionId)
+        .map((i: any) => {
+          const p = products.find((pr: any) => pr.id === i.product_id);
+          return { ...i, products: p ? { name: p.name, sku: p.sku ?? null } : null };
+        })
+    );
   };
+
 
   const handleViewDetails = async (transaction: Transaction) => {
     setSelectedTransaction(transaction);
