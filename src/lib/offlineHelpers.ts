@@ -15,6 +15,48 @@ import {
 
 export { makeCacheKey, invalidateQuery, invalidateQueryByPrefix };
 
+// ─── In-memory mirror of the keyed SQLite cache ───────────────────────────
+// Lets a page paint a previously viewed filter SYNCHRONOUSLY (no await on the
+// SQLite read), so switching back to a filter you already opened is instant.
+const memCache = new Map<string, any>();
+
+/** Synchronously read a previously loaded keyed result (this session). */
+export function peekKeyedCache<T = any>(key: string): T | null {
+  return (memCache.get(key) as T) ?? null;
+}
+
+/** Seed the in-memory mirror from SQLite so later peeks are instant. */
+export async function warmKeyedCache(keys: string[]): Promise<void> {
+  await Promise.all(
+    keys.map(async (key) => {
+      if (memCache.has(key)) return;
+      try {
+        const cached = await getCachedQuery<any>(key);
+        if (cached?.data !== undefined && cached?.data !== null) memCache.set(key, cached.data);
+      } catch {
+        /* ignore */
+      }
+    })
+  );
+}
+
+/**
+ * Background-load a set of filter variants so they render instantly the first
+ * time the user selects them. Runs sequentially to avoid hammering the DB.
+ */
+export async function prefetchKeyedQueries(
+  entries: Array<{ key: string; queryFn: () => PromiseLike<{ data: any; error: any }> }>
+): Promise<void> {
+  for (const entry of entries) {
+    try {
+      await offlineKeyedQuery(entry.key, entry.queryFn);
+    } catch {
+      /* ignore */
+    }
+  }
+}
+
+
 /**
  * Stale-while-revalidate query for an arbitrary keyed result (filters,
  * date ranges, joins, search terms). Returns cached data instantly when
