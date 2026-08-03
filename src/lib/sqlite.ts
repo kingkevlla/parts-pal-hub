@@ -92,13 +92,25 @@ export async function getDB(): Promise<{ db: number; sqlite3: SQLiteAPI }> {
   return initPromise;
 }
 
+// wa-sqlite is single-threaded: concurrent statement iteration on the same
+// connection corrupts the WASM heap ("memory access out of bounds"). Every
+// read/write is serialized through this promise chain.
+let queue: Promise<any> = Promise.resolve();
+function serialize<T>(fn: () => Promise<T>): Promise<T> {
+  const next = queue.then(fn, fn);
+  queue = next.catch(() => {});
+  return next;
+}
+
 /** Run statement(s). Pass params only with a SINGLE statement. */
 export async function run(sql: string, params: unknown[] = []): Promise<void> {
-  const { db, sqlite3 } = await getDB();
-  for await (const stmt of sqlite3.statements(db, sql)) {
-    if (params.length) sqlite3.bind_collection(stmt, params as any);
-    await sqlite3.step(stmt);
-  }
+  return serialize(async () => {
+    const { db, sqlite3 } = await getDB();
+    for await (const stmt of sqlite3.statements(db, sql)) {
+      if (params.length) sqlite3.bind_collection(stmt, params as any);
+      await sqlite3.step(stmt);
+    }
+  });
 }
 
 /** Query rows as objects keyed by column name. */
@@ -106,20 +118,23 @@ export async function all<T = Record<string, unknown>>(
   sql: string,
   params: unknown[] = [],
 ): Promise<T[]> {
-  const { db, sqlite3 } = await getDB();
-  const rows: T[] = [];
-  for await (const stmt of sqlite3.statements(db, sql)) {
-    if (params.length) sqlite3.bind_collection(stmt, params as any);
-    const columns = sqlite3.column_names(stmt);
-    while ((await sqlite3.step(stmt)) === SQLite.SQLITE_ROW) {
-      const row = sqlite3.row(stmt);
-      const obj: Record<string, unknown> = {};
-      columns.forEach((c, i) => (obj[c] = row[i]));
-      rows.push(obj as T);
+  return serialize(async () => {
+    const { db, sqlite3 } = await getDB();
+    const rows: T[] = [];
+    for await (const stmt of sqlite3.statements(db, sql)) {
+      if (params.length) sqlite3.bind_collection(stmt, params as any);
+      const columns = sqlite3.column_names(stmt);
+      while ((await sqlite3.step(stmt)) === SQLite.SQLITE_ROW) {
+        const row = sqlite3.row(stmt);
+        const obj: Record<string, unknown> = {};
+        columns.forEach((c, i) => (obj[c] = row[i]));
+        rows.push(obj as T);
+      }
     }
-  }
-  return rows;
+    return rows;
+  });
 }
+
 
 /** Single-row helper. */
 export async function get<T = Record<string, unknown>>(

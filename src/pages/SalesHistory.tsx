@@ -10,7 +10,8 @@ import { ShoppingCart, DollarSign, TrendingUp, Calendar, Eye, Receipt, Download 
 import { useToast } from "@/hooks/use-toast";
 import { supabase } from "@/integrations/supabase/client";
 import { getCachedData } from "@/lib/offlineDb";
-import { offlineKeyedQuery, makeCacheKey } from "@/lib/offlineHelpers";
+import { offlineKeyedQuery, makeCacheKey, peekKeyedCache, warmKeyedCache } from "@/lib/offlineHelpers";
+import { exportToCSV, exportToPDF, stamp, type ExportColumn } from "@/lib/exportData";
 import { useCurrency } from "@/hooks/useCurrency";
 import { useDataTable } from "@/hooks/useDataTable";
 import { DataTableSearch, DataTablePagination, SelectAllCheckbox } from "@/components/ui/data-table-controls";
@@ -93,13 +94,42 @@ export default function SalesHistory() {
     }
   };
 
+  const buildKey = (filter: string, cs: string, ce: string) => {
+    const prev = { dateFilter, customStartDate, customEndDate };
+    // getDateRange reads state, so compute inline for the requested filter.
+    const now = new Date();
+    let r: { start: Date; end: Date } | null = null;
+    switch (filter) {
+      case 'today': r = { start: startOfDay(now), end: endOfDay(now) }; break;
+      case 'yesterday': { const y = subDays(now, 1); r = { start: startOfDay(y), end: endOfDay(y) }; break; }
+      case 'this_week': r = { start: startOfWeek(now, { weekStartsOn: 1 }), end: endOfWeek(now, { weekStartsOn: 1 }) }; break;
+      case 'this_month': r = { start: startOfMonth(now), end: endOfMonth(now) }; break;
+      case 'last_30_days': r = { start: subDays(now, 30), end: now }; break;
+      case 'custom': r = cs && ce ? { start: new Date(cs), end: new Date(ce + 'T23:59:59') } : null; break;
+      default: r = null;
+    }
+    void prev;
+    return makeCacheKey('sales_history', {
+      filter,
+      start: r ? r.start.toISOString() : '',
+      end: r ? r.end.toISOString() : '',
+    });
+  };
+
+  // Warm the in-memory mirror so revisiting a filter paints instantly.
+  useEffect(() => {
+    warmKeyedCache(
+      ['all', 'today', 'yesterday', 'this_week', 'this_month', 'last_30_days'].map((f) => buildKey(f, '', ''))
+    ).catch(() => {});
+  }, []);
+
   const fetchTransactions = async () => {
     const dateRange = getDateRange();
-    const key = makeCacheKey('sales_history', {
-      filter: dateFilter,
-      start: dateRange ? dateRange.start.toISOString() : '',
-      end: dateRange ? dateRange.end.toISOString() : '',
-    });
+    const key = buildKey(dateFilter, customStartDate, customEndDate);
+
+    // Instant paint from the session mirror before any async work.
+    const instant = peekKeyedCache<any[]>(key);
+    if (instant) setTransactions(instant);
 
     const networkFetch = () => {
       let query = supabase
@@ -121,6 +151,8 @@ export default function SalesHistory() {
       setTransactions(data);
       return;
     }
+    if (instant) return;
+
 
     // Fall back to the cached transactions table on a first offline visit.
     const [cached, customers] = await Promise.all([
@@ -203,6 +235,38 @@ export default function SalesHistory() {
     }
   };
 
+  // ─── Offline exports from cached rows ───────────────────
+  const salesColumns: ExportColumn<Transaction>[] = [
+    { header: 'Transaction #', value: (t) => t.transaction_number || '-' },
+    { header: 'Date', value: (t) => format(new Date(t.created_at), 'yyyy-MM-dd HH:mm') },
+    { header: 'Customer', value: (t) => t.customers?.name || 'Walk-in' },
+    { header: 'Phone', value: (t) => t.customers?.phone || '' },
+    { header: 'Payment', value: (t) => t.payment_method || '-' },
+    { header: 'Status', value: (t) => t.status || '-' },
+    { header: 'Amount', value: (t) => Number(t.total_amount || 0) },
+  ];
+
+  const exportSales = (kind: 'pdf' | 'csv') => {
+    const rows = table.filteredData as Transaction[];
+    if (!rows.length) {
+      toast({ title: 'Nothing to export', description: 'No cached transactions for this filter.' });
+      return;
+    }
+    const name = `sales-history-${dateFilter}-${stamp()}`;
+    const n =
+      kind === 'csv'
+        ? exportToCSV(rows, salesColumns, name)
+        : exportToPDF(rows, salesColumns, name, {
+            title: 'Sales History',
+            subtitle: `Filter: ${dateFilter.replace(/_/g, ' ')}`,
+            summary: [
+              ['Transactions', String(rows.length)],
+              ['Total', formatAmount(rows.reduce((s, t) => s + Number(t.total_amount || 0), 0))],
+            ],
+          });
+    toast({ title: `Exported ${n} transactions`, description: `${kind.toUpperCase()} (offline-ready)` });
+  };
+
   return (
     <div className="space-y-6 p-6">
       <div className="flex items-center justify-between flex-wrap gap-4">
@@ -210,6 +274,19 @@ export default function SalesHistory() {
           <h1 className="text-3xl font-bold">Sales History</h1>
           <p className="text-muted-foreground">View and analyze all sales transactions</p>
         </div>
+        <div className="flex flex-wrap gap-2">
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <Button variant="outline" className="gap-2">
+              <Download className="h-4 w-4" /> Export Sales
+            </Button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end">
+            <DropdownMenuItem onClick={() => exportSales('pdf')}>Download as PDF</DropdownMenuItem>
+            <DropdownMenuItem onClick={() => exportSales('csv')}>Download as CSV</DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
+
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
             <Button variant="outline" className="gap-2">
@@ -254,7 +331,9 @@ export default function SalesHistory() {
             </DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>
+        </div>
       </div>
+
 
       {/* Stats Cards */}
       <div className="grid gap-4 md:grid-cols-4">
