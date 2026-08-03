@@ -352,6 +352,65 @@ export default function Reports() {
   // Selected user detail
   const selectedUserActivity = selectedUser !== "all" ? userActivities.find((u) => u.userId === selectedUser) : null;
 
+  // ─── Offline exports (cached data only, no network) ─────
+  const rangeLabel = dateRange
+    ? `${format(dateRange.start, "MMM d, yyyy")} – ${format(dateRange.end, "MMM d, yyyy")}`
+    : "All time";
+
+  const txColumns: ExportColumn<TransactionRow>[] = [
+    { header: "Transaction #", value: (t) => t.transaction_number || "-" },
+    { header: "Date", value: (t) => format(new Date(t.created_at), "yyyy-MM-dd HH:mm") },
+    { header: "Customer", value: (t) => t.customers?.name || "Walk-in" },
+    { header: "Cashier", value: (t) => getUserName(t.created_by) },
+    { header: "Payment", value: (t) => t.payment_method || "-" },
+    { header: "Status", value: (t) => t.status || "-" },
+    { header: "Amount", value: (t) => Number(t.total_amount || 0) },
+  ];
+  const smColumns: ExportColumn<StockMovementRow>[] = [
+    { header: "Date", value: (s) => format(new Date(s.created_at), "yyyy-MM-dd HH:mm") },
+    { header: "Product", value: (s) => s.products?.name || "-" },
+    { header: "Warehouse", value: (s) => s.warehouses?.name || "-" },
+    { header: "Type", value: (s) => s.movement_type },
+    { header: "Quantity", value: (s) => s.quantity },
+    { header: "User", value: (s) => getUserName(s.created_by) },
+  ];
+  const exColumns: ExportColumn<ExpenseRow>[] = [
+    { header: "Date", value: (e) => e.expense_date },
+    { header: "Description", value: (e) => e.description },
+    { header: "Category", value: (e) => e.expense_categories?.name || "-" },
+    { header: "Status", value: (e) => e.status || "-" },
+    { header: "Amount", value: (e) => Number(e.amount || 0) },
+  ];
+
+  const summary: Array<[string, string]> = [
+    ["Total revenue", formatAmount(totalRevenue)],
+    ["Total expenses", formatAmount(totalExpenseAmount)],
+    ["Net profit", formatAmount(netProfit)],
+    ["Completed sales", String(completedSales)],
+    ["Stock in / out", `${stockInCount} / ${stockOutCount}`],
+  ];
+
+  const runExport = (kind: "pdf" | "csv", dataset: "sales" | "stock" | "expenses") => {
+    const base = `${(settings as any)?.company_name || "Report"}-${dataset}-${stamp()}`.replace(/\s+/g, "-");
+    const title = `${dataset === "sales" ? "Sales" : dataset === "stock" ? "Stock Movements" : "Expenses"} Report`;
+    const cfg =
+      dataset === "sales"
+        ? { rows: filteredTransactions as any[], cols: txColumns as any }
+        : dataset === "stock"
+        ? { rows: filteredStockMovements as any[], cols: smColumns as any }
+        : { rows: filteredExpenses as any[], cols: exColumns as any };
+
+    if (!cfg.rows.length) {
+      toast({ title: "Nothing to export", description: "No cached rows for this filter." });
+      return;
+    }
+    const n =
+      kind === "csv"
+        ? exportToCSV(cfg.rows, cfg.cols, base)
+        : exportToPDF(cfg.rows, cfg.cols, base, { title, subtitle: rangeLabel, summary });
+    toast({ title: `Exported ${n} rows`, description: `${title} • ${kind.toUpperCase()} (offline-ready)` });
+  };
+
   return (
     <div className="space-y-6">
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
@@ -359,7 +418,26 @@ export default function Reports() {
           <h1 className="text-3xl font-bold">Reports</h1>
           <p className="text-muted-foreground">Business insights, analytics & user activity</p>
         </div>
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <Button variant="outline" className="gap-2">
+              <Download className="h-4 w-4" /> Export
+            </Button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end" className="w-56">
+            <DropdownMenuLabel>PDF (works offline)</DropdownMenuLabel>
+            <DropdownMenuItem onClick={() => runExport("pdf", "sales")}>Sales report (PDF)</DropdownMenuItem>
+            <DropdownMenuItem onClick={() => runExport("pdf", "stock")}>Stock movements (PDF)</DropdownMenuItem>
+            <DropdownMenuItem onClick={() => runExport("pdf", "expenses")}>Expenses (PDF)</DropdownMenuItem>
+            <DropdownMenuSeparator />
+            <DropdownMenuLabel>CSV</DropdownMenuLabel>
+            <DropdownMenuItem onClick={() => runExport("csv", "sales")}>Sales report (CSV)</DropdownMenuItem>
+            <DropdownMenuItem onClick={() => runExport("csv", "stock")}>Stock movements (CSV)</DropdownMenuItem>
+            <DropdownMenuItem onClick={() => runExport("csv", "expenses")}>Expenses (CSV)</DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
       </div>
+
 
       {/* ─── Filters ─────────────────────────────────────── */}
       <Card>
