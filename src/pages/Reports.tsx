@@ -133,14 +133,29 @@ export default function Reports() {
     setSupplierCount(payload.supplierCount || 0);
   };
 
+  const buildKey = (filter: string, cs: string, ce: string) => {
+    const r = getDateRange(filter, cs, ce);
+    return makeCacheKey("reports", {
+      filter,
+      start: r ? r.start.toISOString() : "",
+      end: r ? r.end.toISOString() : "",
+    });
+  };
+
   const fetchData = async () => {
-    setLoading(true);
+    const key = buildKey(dateFilter, customStart, customEnd);
+
+    // Instant paint: a filter viewed earlier this session renders synchronously.
+    const instant = peekKeyedCache<any>(key);
+    if (instant) {
+      applyPayload(instant);
+      setLoading(false);
+    } else {
+      setLoading(true);
+    }
+
     try {
-      const key = makeCacheKey("reports", {
-        filter: dateFilter,
-        start: dateRange ? dateRange.start.toISOString() : "",
-        end: dateRange ? dateRange.end.toISOString() : "",
-      });
+
 
       const networkFetch = async () => {
         const applyDateFilter = (query: any, col = "created_at") => {
