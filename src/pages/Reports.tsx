@@ -118,10 +118,27 @@ export default function Reports() {
       .catch(() => {});
   }, []);
 
+  // Warm the in-memory mirror for every common filter so switching back to a
+  // previously viewed range paints instantly, even fully offline.
+  useEffect(() => {
+    const presets = ["all", "today", "yesterday", "this_week", "this_month", "last_30", "this_year"];
+    warmKeyedCache(
+      presets.map((p) => {
+        const r = getDateRange(p, "", "");
+        return makeCacheKey("reports", {
+          filter: p,
+          start: r ? r.start.toISOString() : "",
+          end: r ? r.end.toISOString() : "",
+        });
+      })
+    ).catch(() => {});
+  }, []);
+
   // Fetch report data when filters change
   useEffect(() => {
     fetchData();
   }, [dateFilter, customStart, customEnd]);
+
 
   const dateRange = getDateRange(dateFilter, customStart, customEnd);
 
