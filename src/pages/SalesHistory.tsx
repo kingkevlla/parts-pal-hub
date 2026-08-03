@@ -10,6 +10,7 @@ import { ShoppingCart, DollarSign, TrendingUp, Calendar, Eye, Receipt, Download 
 import { useToast } from "@/hooks/use-toast";
 import { supabase } from "@/integrations/supabase/client";
 import { getCachedData } from "@/lib/offlineDb";
+import { offlineKeyedQuery, makeCacheKey } from "@/lib/offlineHelpers";
 import { useCurrency } from "@/hooks/useCurrency";
 import { useDataTable } from "@/hooks/useDataTable";
 import { DataTableSearch, DataTablePagination, SelectAllCheckbox } from "@/components/ui/data-table-controls";
