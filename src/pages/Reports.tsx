@@ -13,7 +13,9 @@ import {
 } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { getCachedData } from "@/lib/offlineDb";
-import { offlineQuery, offlineKeyedQuery, makeCacheKey } from "@/lib/offlineHelpers";
+import { offlineQuery, offlineKeyedQuery, makeCacheKey, peekKeyedCache, warmKeyedCache } from "@/lib/offlineHelpers";
+import { exportToCSV, exportToPDF, stamp, type ExportColumn } from "@/lib/exportData";
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { useToast } from "@/hooks/use-toast";
 import { useCurrency } from "@/hooks/useCurrency";
 import { useSystemSettings } from "@/hooks/useSystemSettings";
