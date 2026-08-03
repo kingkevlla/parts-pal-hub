@@ -13,6 +13,7 @@ import {
 } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { getCachedData } from "@/lib/offlineDb";
+import { offlineQuery, offlineKeyedQuery, makeCacheKey } from "@/lib/offlineHelpers";
 import { useToast } from "@/hooks/use-toast";
 import { useCurrency } from "@/hooks/useCurrency";
 import { useSystemSettings } from "@/hooks/useSystemSettings";
