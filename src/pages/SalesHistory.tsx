@@ -93,13 +93,42 @@ export default function SalesHistory() {
     }
   };
 
+  const buildKey = (filter: string, cs: string, ce: string) => {
+    const prev = { dateFilter, customStartDate, customEndDate };
+    // getDateRange reads state, so compute inline for the requested filter.
+    const now = new Date();
+    let r: { start: Date; end: Date } | null = null;
+    switch (filter) {
+      case 'today': r = { start: startOfDay(now), end: endOfDay(now) }; break;
+      case 'yesterday': { const y = subDays(now, 1); r = { start: startOfDay(y), end: endOfDay(y) }; break; }
+      case 'this_week': r = { start: startOfWeek(now, { weekStartsOn: 1 }), end: endOfWeek(now, { weekStartsOn: 1 }) }; break;
+      case 'this_month': r = { start: startOfMonth(now), end: endOfMonth(now) }; break;
+      case 'last_30_days': r = { start: subDays(now, 30), end: now }; break;
+      case 'custom': r = cs && ce ? { start: new Date(cs), end: new Date(ce + 'T23:59:59') } : null; break;
+      default: r = null;
+    }
+    void prev;
+    return makeCacheKey('sales_history', {
+      filter,
+      start: r ? r.start.toISOString() : '',
+      end: r ? r.end.toISOString() : '',
+    });
+  };
+
+  // Warm the in-memory mirror so revisiting a filter paints instantly.
+  useEffect(() => {
+    warmKeyedCache(
+      ['all', 'today', 'yesterday', 'this_week', 'this_month', 'last_30_days'].map((f) => buildKey(f, '', ''))
+    ).catch(() => {});
+  }, []);
+
   const fetchTransactions = async () => {
     const dateRange = getDateRange();
-    const key = makeCacheKey('sales_history', {
-      filter: dateFilter,
-      start: dateRange ? dateRange.start.toISOString() : '',
-      end: dateRange ? dateRange.end.toISOString() : '',
-    });
+    const key = buildKey(dateFilter, customStartDate, customEndDate);
+
+    // Instant paint from the session mirror before any async work.
+    const instant = peekKeyedCache<any[]>(key);
+    if (instant) setTransactions(instant);
 
     const networkFetch = () => {
       let query = supabase
@@ -121,6 +150,8 @@ export default function SalesHistory() {
       setTransactions(data);
       return;
     }
+    if (instant) return;
+
 
     // Fall back to the cached transactions table on a first offline visit.
     const [cached, customers] = await Promise.all([
