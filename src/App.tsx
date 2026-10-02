@@ -10,6 +10,8 @@ import { AuthProvider, useAuth } from "@/contexts/AuthContext";
 import { usePermissions } from "@/hooks/usePermissions";
 import { OfflineBanner } from "@/components/layout/OfflineBanner";
 import React, { Suspense } from "react";
+import { TopNav } from "@/components/layout/TopNav";
+import { useAppConfig } from "@/lib/appConfig";
 
 
 // Lazy load all pages for faster initial load
@@ -85,20 +87,36 @@ const PermissionGuard = ({ permission, children }: { permission: string; childre
   return <>{children}</>;
 };
 
-const Layout = ({ children }: { children: React.ReactNode }) => (
-  <SidebarProvider>
-    <div className="flex min-h-screen w-full bg-background">
-      <Sidebar />
-      <div className="flex flex-1 flex-col overflow-hidden">
-        <Header />
+const Layout = ({ children }: { children: React.ReactNode }) => {
+  const config = useAppConfig();
+  const pos = config.layout.sidebar_position;
+  const density = config.theme.density === "compact" ? "p-3 md:p-4" : "p-4 md:p-6";
+
+  if (pos === "top") {
+    return (
+      <div className="flex min-h-screen w-full flex-col bg-background">
+        <TopNav />
         <OfflineBanner />
-        <main className="flex-1 overflow-y-auto p-4 md:p-6">
-          {children}
-        </main>
+        <main className={`flex-1 overflow-y-auto ${density}`}>{children}</main>
       </div>
-    </div>
-  </SidebarProvider>
-);
+    );
+  }
+
+  return (
+    <SidebarProvider defaultOpen={!config.layout.sidebar_collapsed}>
+      <div className={`flex min-h-screen w-full bg-background ${pos === "right" ? "flex-row-reverse" : ""}`}>
+        <Sidebar />
+        <div className="flex flex-1 flex-col overflow-hidden">
+          <Header />
+          <OfflineBanner />
+          <main className={`flex-1 overflow-y-auto ${density}`}>
+            {children}
+          </main>
+        </div>
+      </div>
+    </SidebarProvider>
+  );
+};
 
 const POSLayout = ({ children }: { children: React.ReactNode }) => (
   <div className="min-h-screen w-full bg-background">
