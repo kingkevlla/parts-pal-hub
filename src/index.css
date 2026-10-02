@@ -131,3 +131,33 @@ All colors MUST be HSL.
     @apply bg-background text-foreground;
   }
 }
+
+/* Admin-controlled templates & density */
+body { font-family: var(--app-font, ui-sans-serif, system-ui, sans-serif); }
+html[data-template="modern"]:not(.dark) {
+  --sidebar-background: 0 0% 100%;
+  --sidebar-foreground: 222 47% 11%;
+  --sidebar-accent: 210 40% 96%;
+  --sidebar-accent-foreground: 222 47% 11%;
+  --sidebar-border: 214 32% 91%;
+}
+html[data-template="minimal"]:not(.dark) {
+  --background: 0 0% 100%;
+  --sidebar-background: 0 0% 98%;
+  --sidebar-foreground: 222 20% 25%;
+  --sidebar-accent: 0 0% 94%;
+  --sidebar-accent-foreground: 222 47% 11%;
+  --sidebar-border: 0 0% 92%;
+  --shadow-md: none;
+  --shadow-lg: none;
+}
+html[data-template="bold"] {
+  --sidebar-background: var(--primary);
+  --sidebar-foreground: 0 0% 100%;
+  --sidebar-accent: 0 0% 100% / 0.15;
+  --sidebar-accent-foreground: 0 0% 100%;
+  --sidebar-border: 0 0% 100% / 0.15;
+  --sidebar-primary: 0 0% 100%;
+  --sidebar-primary-foreground: var(--primary);
+}
+html[data-density="compact"] { font-size: 14px; }
