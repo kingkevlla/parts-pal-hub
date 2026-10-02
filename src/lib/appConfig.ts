@@ -169,7 +169,8 @@ export function applyTheme(c: AppConfig) {
   root.style.setProperty("--primary", p);
   root.style.setProperty("--ring", p);
   root.style.setProperty("--accent", a);
-  root.style.setProperty("--sidebar-primary", p);
+  if (c.theme.template === "bold") root.style.removeProperty("--sidebar-primary");
+  else root.style.setProperty("--sidebar-primary", p);
   root.style.setProperty("--radius", `${c.theme.radius}rem`);
   root.style.setProperty("--gradient-primary", `linear-gradient(135deg, hsl(${p}) 0%, hsl(${a}) 100%)`);
   root.style.setProperty("--app-font", FONTS[c.theme.font]);

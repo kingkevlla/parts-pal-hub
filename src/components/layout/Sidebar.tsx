@@ -20,6 +20,7 @@ import {
 import { usePermissions } from "@/hooks/usePermissions";
 import { useSystemSettings } from "@/hooks/useSystemSettings";
 import { Skeleton } from "@/components/ui/skeleton";
+import { useAppConfig } from "@/lib/appConfig";
 
 interface NavItem {
   name: string;
@@ -63,12 +64,17 @@ const navigation: NavItem[] = [
   { name: "Settings", href: "/settings", icon: Settings, permission: "settings", group: "System" },
 ];
 
+export { navigation };
+export type { NavItem };
+
 export function Sidebar() {
   const { state } = useSidebar();
   const location = useLocation();
   const collapsed = state === "collapsed";
   const { hasPermission, loading } = usePermissions();
   const { settings } = useSystemSettings();
+  const config = useAppConfig();
+  const side = config.layout.sidebar_position === "right" ? "right" : "left";
   const appName = settings.company_name || 'Parts Manager';
   const appInitials = appName.split(' ').map(w => w[0]).join('').slice(0, 2).toUpperCase();
 
@@ -86,8 +92,11 @@ export function Sidebar() {
   const groupOrder = ["General", "Sales", "Inventory", "Finance", "People", "System"];
 
   return (
-    <SidebarComponent collapsible="icon" className="border-r border-sidebar-border">
-      <div className="flex h-16 items-center border-b border-sidebar-border px-6">
+    <SidebarComponent side={side} collapsible="icon" className="border-sidebar-border">
+      <div className="flex h-16 items-center gap-2 border-b border-sidebar-border px-4">
+        {config.theme.logo_url && (
+          <img src={config.theme.logo_url} alt="" className="h-8 w-8 shrink-0 rounded object-contain" />
+        )}
         {!collapsed ? (
           <h1 className="text-xl font-bold bg-gradient-primary bg-clip-text text-transparent truncate">
             {appName}

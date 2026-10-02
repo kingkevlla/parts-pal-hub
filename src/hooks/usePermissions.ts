@@ -3,6 +3,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { offlineQuery } from "@/lib/offlineHelpers";
 
 import { useAuth } from "@/contexts/AuthContext";
+import { useAppConfig } from "@/lib/appConfig";
 
 // Cache role globally so every hook instance shares it
 const roleCache = new Map<string, { role: AppRole; ts: number }>();
@@ -50,6 +51,7 @@ export interface UserPermissions {
 
 export function usePermissions(): UserPermissions {
   const { user } = useAuth();
+  const config = useAppConfig();
   const [role, setRole] = useState<AppRole | null>(null);
   const [permissions, setPermissions] = useState<string[]>([]);
   const [loading, setLoading] = useState(true);
@@ -98,13 +100,23 @@ export function usePermissions(): UserPermissions {
   };
 
 
+  const effective = role
+    ? (role === "admin"
+        ? ROLE_PERMISSIONS.admin
+        : (config.role_permissions[role] || permissions)
+      ).filter((p) => role === "admin" ? true : config.modules[p] !== false)
+    : permissions;
+
   const hasPermission = (permission: string): boolean => {
-    return permissions.includes(permission);
+    // Admin always keeps access to settings/users so they can never lock themselves out
+    if (role === "admin" && (permission === "settings" || permission === "users")) return true;
+    if (config.modules[permission] === false) return false;
+    return effective.includes(permission);
   };
 
   return {
     role,
-    permissions,
+    permissions: effective,
     isAdmin: role === "admin",
     isOwner: role === "owner",
     isManager: role === "manager",

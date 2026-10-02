@@ -23,6 +23,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { format, addDays } from 'date-fns';
 import PendingBills from '@/components/pos/PendingBills';
 import ManualItemEntry from '@/components/pos/ManualItemEntry';
+import { getAppConfig } from '@/lib/appConfig';
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetTrigger } from '@/components/ui/sheet';
 
 interface CartItem {
@@ -592,7 +593,9 @@ export default function POS() {
       </ScrollArea>
 
       {/* Manual Entry */}
-      <ManualItemEntry onItemAdded={(item) => setCart(prev => [...prev, { ...item, isManual: true }])} />
+      {getAppConfig().rules.pos_allow_manual_entry && (
+        <ManualItemEntry onItemAdded={(item) => setCart(prev => [...prev, { ...item, isManual: true }])} />
+      )}
 
       {/* Checkout Section */}
       <div className="border-t pt-3 mt-3 space-y-3">
