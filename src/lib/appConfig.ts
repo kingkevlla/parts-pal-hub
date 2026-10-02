@@ -58,10 +58,6 @@ export interface AppConfig {
   layout: { sidebar_position: SidebarPosition; sidebar_collapsed: boolean };
   rules: {
     pos_allow_manual_entry: boolean;
-    pos_allow_pending_bills: boolean;
-    pos_allow_credit_sales: boolean;
-    inventory_allow_negative_stock: boolean;
-    require_expense_receipt: boolean;
   };
 }
 
@@ -72,10 +68,6 @@ export const DEFAULT_CONFIG: AppConfig = {
   layout: { sidebar_position: "left", sidebar_collapsed: false },
   rules: {
     pos_allow_manual_entry: true,
-    pos_allow_pending_bills: true,
-    pos_allow_credit_sales: true,
-    inventory_allow_negative_stock: false,
-    require_expense_receipt: false,
   },
 };
 
