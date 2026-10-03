@@ -105,9 +105,81 @@ export async function loadAppConfig() {
     if (row) setCurrent(merge(row.value));
   } catch { /* keep cache */ }
   loaded = true;
+  flushAuditQueue();
 }
 
-export async function saveAppConfig(next: AppConfig) {
+// ---------- Audit log ----------
+const AUDIT_Q = "audit_log_queue";
+export const AUDIT_SECTIONS: Record<string, string> = {
+  modules: "Modules",
+  role_permissions: "Permissions",
+  theme: "Design",
+  layout: "Layout",
+  rules: "Module rules",
+};
+
+function diffSection(section: keyof AppConfig, before: any, after: any) {
+  const changes: Record<string, { from: any; to: any }> = {};
+  const keys = new Set([...Object.keys(before || {}), ...Object.keys(after || {})]);
+  keys.forEach((k) => {
+    const a = before?.[k], b = after?.[k];
+    const same = Array.isArray(a) && Array.isArray(b)
+      ? [...a].sort().join() === [...b].sort().join()
+      : JSON.stringify(a) === JSON.stringify(b);
+    if (!same) changes[k] = { from: a ?? null, to: b ?? null };
+  });
+  if (!Object.keys(changes).length) return null;
+  let summary = `${Object.keys(changes).length} change(s)`;
+  if (section === "modules") summary = Object.entries(changes).map(([k, c]) => `${k} ${c.to ? "on" : "off"}`).join(", ");
+  else if (section === "role_permissions") {
+    summary = Object.entries(changes).map(([role, c]) => {
+      const add = (c.to || []).filter((x: string) => !(c.from || []).includes(x));
+      const rem = (c.from || []).filter((x: string) => !(c.to || []).includes(x));
+      return `${role}: ${[...add.map((x: string) => "+" + x), ...rem.map((x: string) => "-" + x)].join(" ")}`;
+    }).join("; ");
+  } else summary = Object.keys(changes).join(", ") + " changed";
+  return { section, summary, changes };
+}
+
+async function flushAuditQueue() {
+  let q: any[] = [];
+  try { q = JSON.parse(localStorage.getItem(AUDIT_Q) || "[]"); } catch { q = []; }
+  if (!q.length || !navigator.onLine) return;
+  const { error } = await (supabase as any).from("audit_logs").insert(q);
+  if (!error) localStorage.removeItem(AUDIT_Q);
+}
+
+async function recordAudit(before: AppConfig, after: AppConfig, source?: string) {
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return;
+  let userName = user.email || "Unknown";
+  try {
+    const { data } = await offlineQuery<any>("profiles", () => supabase.from("profiles").select("*"));
+    const p = (data || []).find((r: any) => r.user_id === user.id);
+    if (p?.full_name) userName = p.full_name;
+  } catch { /* ignore */ }
+  const rows = (Object.keys(AUDIT_SECTIONS) as (keyof AppConfig)[])
+    .map((s) => diffSection(s, before[s], after[s]))
+    .filter(Boolean)
+    .map((d) => ({
+      user_id: user.id,
+      user_name: userName,
+      section: d!.section,
+      action: source || "update",
+      summary: d!.summary,
+      changes: d!.changes,
+      created_at: new Date().toISOString(),
+    }));
+  if (!rows.length) return;
+  try {
+    const q = JSON.parse(localStorage.getItem(AUDIT_Q) || "[]");
+    localStorage.setItem(AUDIT_Q, JSON.stringify([...q, ...rows]));
+  } catch { /* ignore */ }
+  await flushAuditQueue();
+}
+
+export async function saveAppConfig(next: AppConfig, source?: string) {
+  const before = current;
   setCurrent(next);
   const { data } = await offlineQuery<any>("system_settings", () => supabase.from("system_settings").select("*"));
   const exists = (data || []).some((r: any) => r.key === KEY);
@@ -115,6 +187,7 @@ export async function saveAppConfig(next: AppConfig) {
     ? await offlineMutate("system_settings", "update", { value: next, updated_at: new Date().toISOString() }, { key: KEY })
     : await offlineMutate("system_settings", "insert", { key: KEY, value: next });
   if (!res.success) throw res.error ?? new Error("Save failed");
+  recordAudit(before, next, source).catch(() => { /* never block saving */ });
   return res;
 }
 

@@ -14,6 +14,39 @@ export type Database = {
   }
   public: {
     Tables: {
+      audit_logs: {
+        Row: {
+          action: string
+          changes: Json
+          created_at: string
+          id: string
+          section: string
+          summary: string | null
+          user_id: string
+          user_name: string | null
+        }
+        Insert: {
+          action?: string
+          changes?: Json
+          created_at?: string
+          id?: string
+          section: string
+          summary?: string | null
+          user_id?: string
+          user_name?: string | null
+        }
+        Update: {
+          action?: string
+          changes?: Json
+          created_at?: string
+          id?: string
+          section?: string
+          summary?: string | null
+          user_id?: string
+          user_name?: string | null
+        }
+        Relationships: []
+      }
       budgets: {
         Row: {
           amount: number
@@ -1058,7 +1091,7 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
-      [_ in never]: never
+      is_admin_or_owner: { Args: { _user_id: string }; Returns: boolean }
     }
     Enums: {
       [_ in never]: never
