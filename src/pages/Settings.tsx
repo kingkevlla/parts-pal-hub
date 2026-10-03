@@ -7,9 +7,10 @@ import ReceiptSettings from "@/components/settings/ReceiptSettings";
 import {
   AppearancePanel, LayoutPanel, ModulesPanel, RolesPanel, RulesPanel,
 } from "@/components/settings/AdminControlPanels";
+import { AuditLogPanel, PolicyAdvisorPanel } from "@/components/settings/AuditAndAdvisor";
 import {
   User, Settings as SettingsIcon, Users, Shield, Receipt, Palette, LayoutTemplate,
-  Boxes, KeyRound, SlidersHorizontal,
+  Boxes, KeyRound, SlidersHorizontal, History, Sparkles,
 } from "lucide-react";
 import { usePermissions } from "@/hooks/usePermissions";
 import { cn } from "@/lib/utils";
@@ -25,6 +26,8 @@ const SECTIONS = [
   { key: "rules", label: "Module Rules", icon: SlidersHorizontal, group: "Control", admin: true, el: <RulesPanel /> },
   { key: "roles", label: "Roles & Permissions", icon: KeyRound, group: "Control", admin: true, el: <RolesPanel /> },
   { key: "users", label: "Users", icon: Users, group: "Control", admin: true, el: <UserManagementSettings /> },
+  { key: "advisor", label: "AI Policy Advisor", icon: Sparkles, group: "Control", admin: true, el: <PolicyAdvisorPanel /> },
+  { key: "audit", label: "Change History", icon: History, group: "Control", admin: true, el: <AuditLogPanel /> },
 ];
 
 export default function Settings() {
