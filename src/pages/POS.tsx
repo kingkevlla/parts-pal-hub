@@ -127,6 +127,9 @@ export default function POS() {
   const [selectedCustomerId, setSelectedCustomerId] = useState('');
   const [creditDueDays, setCreditDueDays] = useState('30');
   const [creditInterestRate, setCreditInterestRate] = useState('0');
+  const [creditDeposit, setCreditDeposit] = useState('');
+  const [creditDepositMethod, setCreditDepositMethod] = useState('cash');
+  const [settleAll, setSettleAll] = useState(false);
   const [customerSearchQuery, setCustomerSearchQuery] = useState('');
   const [showNewCustomerForm, setShowNewCustomerForm] = useState(false);
   const [newCustomerName, setNewCustomerName] = useState('');
@@ -266,8 +269,12 @@ export default function POS() {
       const { data, error } = await supabase.from('loans').select('*, customers(name, phone)').in('status', ['pending', 'partial']).order('due_date', { ascending: true });
       if (!error) setLoans(data || []);
     } else {
-      const cached = await getCachedData('loans');
-      setLoans(cached.filter((l: any) => l.status === 'pending' || l.status === 'partial') as any);
+      const [cached, custs] = await Promise.all([getCachedData('loans'), getCachedData('customers')]);
+      const byId = new Map((custs as any[]).map((c) => [c.id, c]));
+      setLoans((cached as any[])
+        .filter((l) => (l.status === 'pending' || l.status === 'partial') && l.amount - (l.paid_amount || 0) > 0.009)
+        .map((l) => ({ ...l, customers: l.customers || (byId.get(l.customer_id) ? { name: byId.get(l.customer_id).name, phone: byId.get(l.customer_id).phone } : null) }))
+        .sort((a, b) => String(a.due_date || '').localeCompare(String(b.due_date || ''))) as any);
     }
   };
 
@@ -279,8 +286,12 @@ export default function POS() {
   };
 
   const fetchLoanPayments = async (loanId: string) => {
-    const { data, error } = await supabase.from('loan_payments').select('*').eq('loan_id', loanId).order('created_at', { ascending: false });
-    if (!error) setLoanPayments(data || []);
+    if (navigator.onLine) {
+      const { data, error } = await supabase.from('loan_payments').select('*').eq('loan_id', loanId).order('created_at', { ascending: false });
+      if (!error) { setLoanPayments(data || []); return; }
+    }
+    const cached = await getCachedData('loan_payments');
+    setLoanPayments((cached as any[]).filter((p) => p.loan_id === loanId).sort((a, b) => String(b.created_at).localeCompare(String(a.created_at))));
   };
 
   const createQuickCustomer = async () => {
@@ -302,32 +313,66 @@ export default function POS() {
     else toast({ title: 'Product Found', description: `${product.name} - Not available in selected warehouse`, variant: 'destructive' });
   };
 
+  const customerKey = (l: Loan) => (l as any).customer_id || l.customers?.name || l.id;
+  const customerLoans = (loan: Loan | null) => loan
+    ? loans.filter((l) => customerKey(l) === customerKey(loan)).sort((a, b) => String(a.due_date || a.created_at || '').localeCompare(String(b.due_date || b.created_at || '')))
+    : [];
+  const remainingOf = (l: Loan) => Math.max(0, l.amount - (l.paid_amount || 0));
+  const payTargets = settleAll ? customerLoans(selectedLoan) : (selectedLoan ? [selectedLoan] : []);
+  const payDue = payTargets.reduce((s, l) => s + remainingOf(l), 0);
+
   const processLoanPayment = async () => {
     if (!selectedLoan) return;
     const amount = parseFloat(loanPaymentAmount);
     if (isNaN(amount) || amount <= 0) { toast({ title: 'Error', description: 'Enter a valid payment amount', variant: 'destructive' }); return; }
-    const remaining = selectedLoan.amount - (selectedLoan.paid_amount || 0);
-    if (amount > remaining) { toast({ title: 'Error', description: `Maximum payable: ${formatAmount(remaining)}`, variant: 'destructive' }); return; }
+    if (amount > payDue + 0.009) { toast({ title: 'Too much', description: `Maximum payable: ${formatAmount(payDue)}`, variant: 'destructive' }); return; }
     setIsProcessing(true);
     try {
-      const newPaidAmount = (selectedLoan.paid_amount || 0) + amount;
-      const newStatus = newPaidAmount >= selectedLoan.amount ? 'paid' : 'partial';
-      const pay = await offlineMutate('loan_payments', 'insert', { loan_id: selectedLoan.id, amount, payment_method: loanPaymentMethod, notes: 'Payment via POS', created_by: user?.id });
-      if (!pay.success) throw pay.error;
-      const upd = await offlineMutate('loans', 'update', { paid_amount: newPaidAmount, status: newStatus }, { id: selectedLoan.id });
-      if (!upd.success) throw upd.error;
-      toast({ title: 'Payment Successful', description: newStatus === 'paid' ? 'Loan fully paid!' : `${formatAmount(amount)} paid. Remaining: ${formatAmount(selectedLoan.amount - newPaidAmount)}` });
-      fetchLoanPayments(selectedLoan.id);
+      let left = amount;
+      const paidLines: { loan: Loan; paid: number; status: string }[] = [];
+      for (const loan of payTargets) {
+        if (left <= 0.009) break;
+        const pay = Math.min(left, remainingOf(loan));
+        if (pay <= 0) continue;
+        const newPaid = (loan.paid_amount || 0) + pay;
+        const status = newPaid >= loan.amount - 0.009 ? 'paid' : 'partial';
+        const r1 = await offlineMutate('loan_payments', 'insert', { loan_id: loan.id, amount: pay, payment_method: loanPaymentMethod, notes: settleAll ? 'Bulk payment via POS' : 'Payment via POS', created_by: user?.id });
+        if (!r1.success) throw r1.error;
+        const r2 = await offlineMutate('loans', 'update', { paid_amount: newPaid, status }, { id: loan.id });
+        if (!r2.success) throw r2.error;
+        paidLines.push({ loan, paid: pay, status });
+        left -= pay;
+      }
+      const stillOwed = payDue - amount;
+      toast({ title: stillOwed <= 0.009 ? 'Fully settled ✓' : 'Payment saved', description: stillOwed <= 0.009 ? `${selectedLoan.customers?.name || 'Customer'} has no remaining balance${settleAll ? '' : ' on this loan'}.` : `${formatAmount(amount)} received. Still owed: ${formatAmount(stillOwed)}` });
+      setLastSaleData({
+        id: `PAY-${Date.now()}`,
+        items: paidLines.map((p) => ({ name: `Loan payment${p.loan.due_date ? ` (due ${format(new Date(p.loan.due_date), 'PP')})` : ''}${p.status === 'paid' ? ' – settled' : ''}`, quantity: 1, unit_price: p.paid, subtotal: p.paid })),
+        total_amount: amount,
+        payment_method: `${loanPaymentMethod.replace('_', ' ')} · Balance left: ${formatAmount(Math.max(0, stillOwed))}`,
+        customer_name: selectedLoan.customers?.name,
+        customer_phone: selectedLoan.customers?.phone,
+        sale_date: new Date().toISOString(),
+      });
+      setShowReceipt(true);
       setLoanPaymentAmount('');
+      // Update local list immediately
+      const updated = new Map(paidLines.map((p) => [p.loan.id, p]));
+      setLoans((prev) => prev
+        .map((l) => updated.has(l.id) ? { ...l, paid_amount: (l.paid_amount || 0) + updated.get(l.id)!.paid, status: updated.get(l.id)!.status } : l)
+        .filter((l) => l.status !== 'paid'));
+      const self = updated.get(selectedLoan.id);
+      if (stillOwed <= 0.009 || self?.status === 'paid') { setSelectedLoan(null); setSettleAll(false); }
+      else { setSelectedLoan((prev) => prev ? { ...prev, paid_amount: (prev.paid_amount || 0) + (self?.paid || 0) } : null); fetchLoanPayments(selectedLoan.id); }
       fetchLoans();
-      setSelectedLoan(prev => prev ? { ...prev, paid_amount: newPaidAmount, status: newStatus } : null);
     } catch (error: any) { toast({ title: 'Error', description: error.message, variant: 'destructive' }); }
     finally { setIsProcessing(false); }
   };
 
   const handleSelectLoan = (loan: Loan) => {
     setSelectedLoan(loan);
-    setLoanPaymentAmount((loan.amount - (loan.paid_amount || 0)).toString());
+    setSettleAll(false);
+    setLoanPaymentAmount(String(Math.round(remainingOf(loan) * 100) / 100));
     fetchLoanPayments(loan.id);
   };
 
@@ -482,12 +527,14 @@ export default function POS() {
       const baseAmount = getTotalAmount();
       const interestRate = parseFloat(creditInterestRate) || 0;
       const dueDays = parseInt(creditDueDays) || 30;
-      const interestAmount = baseAmount * (interestRate / 100);
-      const totalLoanAmount = baseAmount + interestAmount;
+      const deposit = Math.min(Math.max(parseFloat(creditDeposit) || 0, 0), baseAmount);
+      if (deposit >= baseAmount) { toast({ title: 'Nothing to lend', description: 'The amount paid now covers the full total — use a normal payment instead.', variant: 'destructive' }); setIsProcessing(false); return; }
+      const interestAmount = (baseAmount - deposit) * (interestRate / 100);
+      const totalLoanAmount = baseAmount - deposit + interestAmount;
       const dueDate = addDays(new Date(), dueDays);
       const selectedCustomer = customers.find(c => c.id === selectedCustomerId);
 
-      const txRes = await offlineInsertSingle<any>('transactions', { transaction_number: transactionNumber, total_amount: baseAmount, payment_method: 'credit', status: 'completed', customer_id: selectedCustomerId, notes: `Credit Sale - Loan Amount: ${formatAmount(totalLoanAmount)} (includes ${interestRate}% interest)`, created_by: user?.id });
+      const txRes = await offlineInsertSingle<any>('transactions', { transaction_number: transactionNumber, total_amount: baseAmount, payment_method: 'credit', status: 'completed', customer_id: selectedCustomerId, notes: `Credit Sale - Loan Amount: ${formatAmount(totalLoanAmount)} (includes ${interestRate}% interest)${deposit > 0 ? ` · Paid now: ${formatAmount(deposit)} (${creditDepositMethod})` : ''}`, created_by: user?.id });
       if (txRes.error) throw txRes.error;
       const transaction = txRes.data!;
       const itemsRes = await offlineMutate('transaction_items', 'insert', cart.map(item => ({ transaction_id: transaction.id, product_id: item.productId, quantity: item.quantity, unit_price: item.price, total_price: item.subtotal })));
@@ -516,14 +563,14 @@ export default function POS() {
       const movRes = await offlineMutate('stock_movements', 'insert', stockMovements);
       if (!movRes.success) throw movRes.error;
 
-      const loanRes = await offlineMutate('loans', 'insert', { customer_id: selectedCustomerId, amount: totalLoanAmount, paid_amount: 0, due_date: format(dueDate, 'yyyy-MM-dd'), status: 'pending', notes: `Credit sale - TXN: ${transactionNumber}\nBase: ${formatAmount(baseAmount)}, Interest: ${interestRate}%`, created_by: user?.id });
+      const loanRes = await offlineMutate('loans', 'insert', { customer_id: selectedCustomerId, amount: totalLoanAmount, paid_amount: 0, due_date: format(dueDate, 'yyyy-MM-dd'), status: 'pending', notes: `Credit sale - TXN: ${transactionNumber}\nBase: ${formatAmount(baseAmount)}${deposit > 0 ? `, Paid now: ${formatAmount(deposit)}` : ''}, Interest: ${interestRate}%`, created_by: user?.id });
       if (!loanRes.success) throw loanRes.error;
 
-      setLastSaleData({ id: transaction.id, items: cart.map(item => ({ name: item.name, quantity: item.quantity, unit_price: item.price, subtotal: item.subtotal })), total_amount: baseAmount, payment_method: `Credit (Due: ${format(dueDate, 'PP')})`, customer_name: selectedCustomer?.name, customer_phone: selectedCustomer?.phone, sale_date: new Date().toISOString() });
+      setLastSaleData({ id: transaction.id, items: cart.map(item => ({ name: item.name, quantity: item.quantity, unit_price: item.price, subtotal: item.subtotal })), total_amount: baseAmount, payment_method: deposit > 0 ? `Paid ${formatAmount(deposit)} (${creditDepositMethod}) + Credit ${formatAmount(totalLoanAmount)} (Due: ${format(dueDate, 'PP')})` : `Credit ${formatAmount(totalLoanAmount)} (Due: ${format(dueDate, 'PP')})`, customer_name: selectedCustomer?.name, customer_phone: selectedCustomer?.phone, sale_date: new Date().toISOString() });
       setShowReceipt(true); setShowCreditDialog(false); setMobileCartOpen(false);
       toast({ title: 'Credit Sale Completed', description: `Loan of ${formatAmount(totalLoanAmount)} created for ${selectedCustomer?.name}` });
       if (activePendingBillId) { await offlineMutate('pending_bills', 'update', { status: 'closed' }, { id: activePendingBillId }); setActivePendingBillId(null); }
-      setCart([]); setCustomerName(''); setCustomerPhone(''); setPaymentMethod('cash'); setSelectedCustomerId(''); setCreditDueDays('30'); setCreditInterestRate('0');
+      setCart([]); setCustomerName(''); setCustomerPhone(''); setPaymentMethod('cash'); setSelectedCustomerId(''); setCreditDueDays('30'); setCreditInterestRate('0'); setCreditDeposit(''); setCustomerSearchQuery('');
       await invalidatePosProductCaches();
       fetchProductsWithStock({ force: true }); fetchLoans();
     } catch (error: any) { toast({ title: 'Error', description: error.message, variant: 'destructive' }); }
@@ -531,7 +578,17 @@ export default function POS() {
   };
 
   const handlePayNow = () => {
-    if (paymentMethod === 'credit') setShowCreditDialog(true);
+    if (paymentMethod === 'credit') {
+      if (cart.length === 0) { toast({ title: 'Error', description: 'Cart is empty', variant: 'destructive' }); return; }
+      const typed = (customerPhone || customerName).trim();
+      if (typed && !selectedCustomerId) {
+        setCustomerSearchQuery(typed);
+        const match = customers.find((c) => (customerPhone && c.phone === customerPhone.trim()) || c.name.toLowerCase() === customerName.trim().toLowerCase());
+        if (match) setSelectedCustomerId(match.id);
+        else { setNewCustomerName(customerName.trim()); setNewCustomerPhone(customerPhone.trim()); }
+      }
+      setShowCreditDialog(true);
+    }
     else processSale(false);
   };
 
@@ -783,7 +840,7 @@ export default function POS() {
                     ) : (
                       <div className="space-y-2">
                         {filteredLoans.map((loan) => {
-                          const remaining = loan.amount - (loan.paid_amount || 0);
+                          const remaining = remainingOf(loan);
                           const isOverdue = loan.due_date && new Date(loan.due_date) < new Date();
                           return (
                             <button key={loan.id} type="button" className={`w-full text-left p-3 rounded-xl border transition-all ${selectedLoan?.id === loan.id ? 'border-primary bg-primary/5' : 'hover:border-primary/50'}`} onClick={() => handleSelectLoan(loan)}>
@@ -818,7 +875,32 @@ export default function POS() {
                           <div className="col-span-2"><span className="text-muted-foreground">Remaining:</span><p className="font-semibold text-lg text-destructive">{formatAmount(selectedLoan.amount - (selectedLoan.paid_amount || 0))}</p></div>
                         </div>
                       </div>
-                      <div className="space-y-2"><Label>Payment Amount</Label><Input type="number" placeholder="Enter amount" value={loanPaymentAmount} onChange={(e) => setLoanPaymentAmount(e.target.value)} /></div>
+                      {customerLoans(selectedLoan).length > 1 && (
+                        <div className="grid grid-cols-2 gap-2">
+                          <Button size="sm" variant={!settleAll ? 'default' : 'outline'} onClick={() => { setSettleAll(false); setLoanPaymentAmount(String(remainingOf(selectedLoan))); }}>This loan</Button>
+                          <Button size="sm" variant={settleAll ? 'default' : 'outline'} onClick={() => { setSettleAll(true); setLoanPaymentAmount(String(customerLoans(selectedLoan).reduce((s, l) => s + remainingOf(l), 0))); }}>
+                            All {customerLoans(selectedLoan).length} loans
+                          </Button>
+                        </div>
+                      )}
+                      <div className="space-y-2">
+                        <div className="flex items-center justify-between"><Label>Amount received</Label><span className="text-xs text-muted-foreground">Due: {formatAmount(payDue)}</span></div>
+                        <Input type="number" inputMode="decimal" placeholder="Enter amount" value={loanPaymentAmount} onChange={(e) => setLoanPaymentAmount(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') processLoanPayment(); }} className="h-12 text-lg font-semibold" />
+                        <div className="grid grid-cols-4 gap-1">
+                          <Button type="button" size="sm" variant="secondary" onClick={() => setLoanPaymentAmount(String(payDue))}>Full</Button>
+                          <Button type="button" size="sm" variant="outline" onClick={() => setLoanPaymentAmount(String(Math.round(payDue / 2)))}>Half</Button>
+                          {[1000, 5000].map((v) => (
+                            <Button key={v} type="button" size="sm" variant="outline" onClick={() => setLoanPaymentAmount(String(Math.min(payDue, v)))}>{v.toLocaleString()}</Button>
+                          ))}
+                        </div>
+                        {(() => {
+                          const a = parseFloat(loanPaymentAmount) || 0;
+                          if (a <= 0) return null;
+                          if (a > payDue + 0.009) return <p className="text-xs text-destructive">More than owed — maximum {formatAmount(payDue)}</p>;
+                          const left = payDue - a;
+                          return <p className="text-xs text-muted-foreground">{left <= 0.009 ? 'This settles the balance completely.' : `Balance after payment: ${formatAmount(left)}`}</p>;
+                        })()}
+                      </div>
                       <div className="space-y-2">
                         <Label>Payment Method</Label>
                         <div className="grid grid-cols-4 gap-2">
@@ -844,7 +926,7 @@ export default function POS() {
                           </ScrollArea>
                         </div>
                       )}
-                      <Button className="w-full gap-2" size="lg" onClick={processLoanPayment} disabled={isProcessing}><CheckCircle className="h-5 w-5" />{isProcessing ? 'Processing...' : 'Process Payment'}</Button>
+                      <Button className="w-full gap-2" size="lg" onClick={processLoanPayment} disabled={isProcessing}><CheckCircle className="h-5 w-5" />{isProcessing ? 'Processing...' : (parseFloat(loanPaymentAmount) || 0) >= payDue - 0.009 ? 'Settle in full' : 'Record payment'}</Button>
                       <Button variant="outline" className="w-full" onClick={() => setSelectedLoan(null)}>Cancel</Button>
                     </div>
                   ) : (
@@ -971,28 +1053,62 @@ export default function POS() {
                 </>
               )}
             </div>
-            <div className="grid grid-cols-2 gap-4">
-              <div className="space-y-2">
-                <Label className="flex items-center gap-1"><Calendar className="h-4 w-4" />Due in (days)</Label>
-                <Select value={creditDueDays} onValueChange={setCreditDueDays}>
-                  <SelectTrigger><SelectValue /></SelectTrigger>
+            {selectedCustomerId && (() => {
+              const debt = loans.filter((l: any) => l.customer_id === selectedCustomerId);
+              const owed = debt.reduce((s, l) => s + remainingOf(l), 0);
+              const overdue = debt.some((l) => l.due_date && new Date(l.due_date) < new Date());
+              return owed > 0 ? (
+                <div className={`rounded-lg border p-3 text-sm ${overdue ? 'border-destructive/50 bg-destructive/10 text-destructive' : 'bg-muted/50'}`}>
+                  Already owes <strong>{formatAmount(owed)}</strong> on {debt.length} loan{debt.length > 1 ? 's' : ''}{overdue ? ' — some are overdue' : ''}.
+                </div>
+              ) : null;
+            })()}
+            <div className="space-y-2">
+              <Label className="flex items-center gap-1"><Calendar className="h-4 w-4" />Pay back in</Label>
+              <div className="grid grid-cols-5 gap-1">
+                {['7', '14', '30', '60', '90'].map((d) => (
+                  <Button key={d} type="button" size="sm" variant={creditDueDays === d ? 'default' : 'outline'} onClick={() => setCreditDueDays(d)}>{d}d</Button>
+                ))}
+              </div>
+            </div>
+            <div className="space-y-2">
+              <Label>Paid now (optional deposit)</Label>
+              <div className="flex gap-2">
+                <Input type="number" min="0" placeholder="0" value={creditDeposit} onChange={(e) => setCreditDeposit(e.target.value)} />
+                <Select value={creditDepositMethod} onValueChange={setCreditDepositMethod}>
+                  <SelectTrigger className="w-32"><SelectValue /></SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="7">7 days</SelectItem><SelectItem value="14">14 days</SelectItem><SelectItem value="30">30 days</SelectItem><SelectItem value="60">60 days</SelectItem><SelectItem value="90">90 days</SelectItem>
+                    {paymentMethods.filter((pm) => pm.value !== 'credit').map((pm) => <SelectItem key={pm.value} value={pm.value}>{pm.label}</SelectItem>)}
                   </SelectContent>
                 </Select>
               </div>
+              <div className="flex gap-1">
+                {[0.25, 0.5].map((f) => (
+                  <Button key={f} type="button" size="sm" variant="ghost" className="h-7 text-xs" onClick={() => setCreditDeposit(String(Math.round(getTotalAmount() * f)))}>{f * 100}%</Button>
+                ))}
+                <Button type="button" size="sm" variant="ghost" className="h-7 text-xs" onClick={() => setCreditDeposit('')}>None</Button>
+              </div>
+            </div>
+            <div className="grid grid-cols-1 gap-4">
               <div className="space-y-2">
                 <Label className="flex items-center gap-1"><Percent className="h-4 w-4" />Interest Rate (%)</Label>
                 <Input type="number" min="0" max="100" step="0.5" value={creditInterestRate} onChange={(e) => setCreditInterestRate(e.target.value)} placeholder="0" />
               </div>
             </div>
-            {parseFloat(creditInterestRate) > 0 && (
-              <div className="p-3 bg-primary/10 rounded-lg space-y-1">
-                <div className="flex justify-between text-sm"><span>Base Amount:</span><span>{formatAmount(getTotalAmount())}</span></div>
-                <div className="flex justify-between text-sm"><span>Interest ({creditInterestRate}%):</span><span>{formatAmount(getTotalAmount() * (parseFloat(creditInterestRate) / 100))}</span></div>
-                <div className="flex justify-between font-semibold border-t pt-1 mt-1"><span>Total Loan:</span><span>{formatAmount(getTotalAmount() * (1 + parseFloat(creditInterestRate) / 100))}</span></div>
-              </div>
-            )}
+            {(() => {
+              const total = getTotalAmount();
+              const dep = Math.min(Math.max(parseFloat(creditDeposit) || 0, 0), total);
+              const rate = parseFloat(creditInterestRate) || 0;
+              const interest = (total - dep) * rate / 100;
+              return (
+                <div className="p-3 bg-primary/10 rounded-lg space-y-1">
+                  <div className="flex justify-between text-sm"><span>Cart total:</span><span>{formatAmount(total)}</span></div>
+                  {dep > 0 && <div className="flex justify-between text-sm"><span>Paid now:</span><span>− {formatAmount(dep)}</span></div>}
+                  {rate > 0 && <div className="flex justify-between text-sm"><span>Interest ({rate}%):</span><span>+ {formatAmount(interest)}</span></div>}
+                  <div className="flex justify-between font-semibold border-t pt-1 mt-1"><span>Customer will owe:</span><span>{formatAmount(total - dep + interest)}</span></div>
+                </div>
+              );
+            })()}
             <div className="flex justify-between text-sm text-muted-foreground"><span>Due Date:</span><span>{format(addDays(new Date(), parseInt(creditDueDays) || 30), 'PPP')}</span></div>
             <Button className="w-full gap-2" size="lg" onClick={processCreditSale} disabled={isProcessing || !selectedCustomerId}>
               <Wallet className="h-5 w-5" />{isProcessing ? 'Processing...' : 'Complete Credit Sale'}
