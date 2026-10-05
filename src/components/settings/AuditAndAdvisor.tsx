@@ -6,7 +6,10 @@ import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { RefreshCw, Sparkles, Check, ChevronDown, ChevronRight } from "lucide-react";
+import { RefreshCw, Sparkles, Check, ChevronDown, ChevronRight, Download, AlertTriangle, ShieldAlert } from "lucide-react";
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
+import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
+import { exportToCSV, exportToPDF, stamp, ExportColumn } from "@/lib/exportData";
 import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
 import { AUDIT_SECTIONS, AppConfig, AppRole, MODULES, saveAppConfig, useAppConfig } from "@/lib/appConfig";
@@ -46,6 +49,27 @@ export function AuditLogPanel() {
     return true;
   });
 
+  const doExport = (kind: "pdf" | "csv") => {
+    const fmtChanges = (c: any) => Object.entries(c || {}).map(([k, v]: any) => `${k}: ${JSON.stringify(v.from)} -> ${JSON.stringify(v.to)}`).join(" | ");
+    const cols: ExportColumn<AuditRow>[] = [
+      { header: "Date & time", value: (r) => new Date(r.created_at).toLocaleString() },
+      { header: "Person", value: (r) => r.user_name || "Unknown" },
+      { header: "Section", value: (r) => AUDIT_SECTIONS[r.section] || r.section },
+      { header: "Source", value: (r) => (r.action === "ai" ? "AI suggestion" : "Manual") },
+      { header: "Summary", value: (r) => r.summary || "" },
+      ...(kind === "csv" ? [{ header: "Details", value: (r: AuditRow) => fmtChanges(r.changes) }] : []),
+    ];
+    const filters = [
+      section !== "all" ? `Section: ${AUDIT_SECTIONS[section]}` : "",
+      userFilter !== "all" ? `Person: ${userFilter}` : "",
+      from || to ? `Dates: ${from || "start"} to ${to || "today"}` : "",
+      search ? `Search: "${search}"` : "",
+    ].filter(Boolean).join(" · ") || "No filters (all records)";
+    const name = `change-history-${stamp()}`;
+    if (kind === "csv") exportToCSV(filtered, cols, name);
+    else exportToPDF(filtered, cols, name, { title: "Control Center Change History", subtitle: filters, summary: [["Records", String(filtered.length)]] });
+  };
+
   return (
     <Card>
       <CardHeader className="flex flex-row items-start justify-between gap-4 space-y-0">
@@ -53,9 +77,20 @@ export function AuditLogPanel() {
           <CardTitle>Change History</CardTitle>
           <CardDescription>Who changed modules, permissions, design, layout and rules — and when.</CardDescription>
         </div>
-        <Button variant="outline" size="sm" onClick={load} disabled={loading}>
-          <RefreshCw className={`mr-2 h-4 w-4 ${loading ? "animate-spin" : ""}`} />Refresh
-        </Button>
+        <div className="flex gap-2">
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button variant="outline" size="sm" disabled={!filtered.length}><Download className="mr-2 h-4 w-4" />Export</Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end">
+              <DropdownMenuItem onClick={() => doExport("pdf")}>Download PDF</DropdownMenuItem>
+              <DropdownMenuItem onClick={() => doExport("csv")}>Download CSV</DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
+          <Button variant="outline" size="sm" onClick={load} disabled={loading}>
+            <RefreshCw className={`mr-2 h-4 w-4 ${loading ? "animate-spin" : ""}`} />Refresh
+          </Button>
+        </div>
       </CardHeader>
       <CardContent className="space-y-4">
         <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
@@ -76,6 +111,10 @@ export function AuditLogPanel() {
           <Input type="date" value={from} onChange={(e) => setFrom(e.target.value)} aria-label="From date" />
           <Input type="date" value={to} onChange={(e) => setTo(e.target.value)} aria-label="To date" />
           <Input placeholder="Search..." value={search} onChange={(e) => setSearch(e.target.value)} />
+        </div>
+        <div className="flex items-center justify-between text-xs text-muted-foreground">
+          <span>Showing {filtered.length} of {rows.length} records</span>
+          <Button variant="ghost" size="sm" onClick={() => { setSection("all"); setUserFilter("all"); setFrom(""); setTo(""); setSearch(""); }}>Clear filters</Button>
         </div>
 
         {loading ? (
@@ -112,6 +151,68 @@ export function AuditLogPanel() {
             ))}
           </ol>
         )}
+
+        <AlertDialog open={confirmOpen} onOpenChange={setConfirmOpen}>
+          <AlertDialogContent className="max-h-[85vh] max-w-2xl overflow-y-auto">
+            <AlertDialogHeader>
+              <AlertDialogTitle>Confirm changes</AlertDialogTitle>
+              <AlertDialogDescription>Check what will change before applying. This is recorded in Change History.</AlertDialogDescription>
+            </AlertDialogHeader>
+            <div className="space-y-4 text-sm">
+              {risks.length > 0 ? (
+                <div className="space-y-2 rounded-md border border-destructive/50 bg-destructive/10 p-3">
+                  <p className="flex items-center gap-2 font-semibold text-destructive"><ShieldAlert className="h-4 w-4" />Access risks ({risks.length})</p>
+                  <ul className="space-y-1">
+                    {risks.map((r, i) => (
+                      <li key={i} className="flex gap-2">
+                        <AlertTriangle className={`mt-0.5 h-4 w-4 shrink-0 ${r.level === "high" ? "text-destructive" : "text-warning"}`} />
+                        <span><Badge variant={r.level === "high" ? "destructive" : "outline"} className="mr-1">{r.level === "high" ? "High" : "Check"}</Badge>{r.text}</span>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              ) : (
+                <p className="rounded-md border p-3 text-muted-foreground">No access risks found.</p>
+              )}
+
+              <div>
+                <p className="mb-2 font-semibold">Permission changes</p>
+                {roleDiffs.length === 0 ? <p className="text-muted-foreground">None</p> : (
+                  <div className="overflow-hidden rounded-md border">
+                    {roleDiffs.map((d) => (
+                      <div key={d.role} className="border-b p-3 last:border-b-0">
+                        <p className="mb-1 font-medium capitalize">{d.role}</p>
+                        <div className="flex flex-wrap gap-1">
+                          {d.add.map((x) => <Badge key={x} className={SENSITIVE.has(x) ? "bg-destructive text-destructive-foreground" : ""}>+ Gains {label(x)}</Badge>)}
+                          {d.rem.map((x) => <Badge key={x} variant="outline">− Loses {label(x)}</Badge>)}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              <div>
+                <p className="mb-2 font-semibold">Module changes</p>
+                {moduleChanges.length === 0 ? <p className="text-muted-foreground">None</p> : (
+                  <div className="flex flex-wrap gap-1">
+                    {moduleChanges.map((m) => <Badge key={m.key} variant={m.enabled ? "default" : "outline"}>{m.enabled ? "Turn on" : "Turn off"} {label(m.key)}</Badge>)}
+                  </div>
+                )}
+              </div>
+
+              {rec && rec.rules.pos_allow_manual_entry !== cfg.rules.pos_allow_manual_entry && (
+                <p>Point of Sale manual items: <strong>{cfg.rules.pos_allow_manual_entry ? "Allowed" : "Not allowed"} → {rec.rules.pos_allow_manual_entry ? "Allowed" : "Not allowed"}</strong></p>
+              )}
+            </div>
+            <AlertDialogFooter>
+              <AlertDialogCancel>Cancel</AlertDialogCancel>
+              <AlertDialogAction onClick={apply} className={risks.some((r) => r.level === "high") ? "bg-destructive text-destructive-foreground hover:bg-destructive/90" : ""}>
+                {risks.some((r) => r.level === "high") ? "Apply anyway" : "Apply changes"}
+              </AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
       </CardContent>
     </Card>
   );
@@ -127,6 +228,32 @@ interface Recommendation {
 const LOCKED = new Set(MODULES.filter((m) => m.locked).map((m) => m.key));
 const label = (k: string) => MODULES.find((m) => m.key === k)?.label || k;
 
+// Pages that expose money, staff data or system control
+const SENSITIVE = new Set(["settings", "users", "employees", "expenses", "loans", "reports", "owner_dashboard", "stock_adjustment", "transactions"]);
+const LOW_ROLES = new Set(["cashier", "user"]);
+
+function assessRisks(
+  rec: Recommendation, cfg: AppConfig,
+  diffs: { role: AppRole; add: string[]; rem: string[] }[],
+): { level: "high" | "medium"; text: string }[] {
+  const out: { level: "high" | "medium"; text: string }[] = [];
+  diffs.forEach((d) => {
+    d.add.filter((x) => SENSITIVE.has(x)).forEach((x) =>
+      out.push({ level: LOW_ROLES.has(d.role) || x === "settings" || x === "users" ? "high" : "medium",
+        text: `${d.role} would gain access to ${label(x)}.` }));
+    if (d.rem.includes("pos") && d.role === "cashier") out.push({ level: "high", text: "Cashiers would lose the Point of Sale — they may not be able to sell." });
+    const final = rec.role_permissions.find((r) => r.role === d.role)?.modules || [];
+    if (!final.includes("dashboard")) out.push({ level: "medium", text: `${d.role} would lose the Dashboard (their start page).` });
+  });
+  rec.modules.forEach((m) => {
+    if (!LOCKED.has(m.key) && !m.enabled && cfg.modules[m.key] !== false && ["pos", "inventory"].includes(m.key))
+      out.push({ level: "high", text: `${label(m.key)} would be turned off for everyone.` });
+  });
+  if (rec.rules.pos_allow_manual_entry && !cfg.rules.pos_allow_manual_entry)
+    out.push({ level: "medium", text: "Cashiers could sell items that are not in the product list." });
+  return out;
+}
+
 export function PolicyAdvisorPanel() {
   const cfg = useAppConfig();
   const { toast } = useToast();
@@ -135,6 +262,7 @@ export function PolicyAdvisorPanel() {
   const [error, setError] = useState("");
   const [rec, setRec] = useState<Recommendation | null>(null);
   const [applying, setApplying] = useState(false);
+  const [confirmOpen, setConfirmOpen] = useState(false);
 
   const ask = async () => {
     setLoading(true); setError(""); setRec(null);
@@ -160,6 +288,7 @@ export function PolicyAdvisorPanel() {
 
   const apply = async () => {
     if (!rec) return;
+    setConfirmOpen(false);
     setApplying(true);
     const modules = { ...cfg.modules };
     rec.modules.forEach((m) => { if (!LOCKED.has(m.key)) modules[m.key] = m.enabled; });
@@ -175,6 +304,11 @@ export function PolicyAdvisorPanel() {
     } finally { setApplying(false); }
   };
 
+  const roleDiffs = (rec?.role_permissions || []).filter((r) => r.role !== "admin").map((r) => {
+    const cur = cfg.role_permissions[r.role] || [];
+    return { role: r.role, add: r.modules.filter((x) => !cur.includes(x)), rem: cur.filter((x) => !r.modules.includes(x)) };
+  }).filter((d) => d.add.length + d.rem.length > 0);
+  const risks = rec ? assessRisks(rec, cfg, roleDiffs) : [];
   const moduleChanges = rec?.modules.filter((m) => !LOCKED.has(m.key) && (cfg.modules[m.key] !== false) !== m.enabled) || [];
 
   return (
@@ -242,10 +376,72 @@ export function PolicyAdvisorPanel() {
 
             <div className="flex justify-end gap-2">
               <Button variant="outline" onClick={() => setRec(null)}>Dismiss</Button>
-              <Button onClick={apply} disabled={applying}><Check className="mr-2 h-4 w-4" />{applying ? "Applying..." : "Apply recommendations"}</Button>
+              <Button onClick={() => setConfirmOpen(true)} disabled={applying}><Check className="mr-2 h-4 w-4" />{applying ? "Applying..." : "Review & apply"}</Button>
             </div>
           </div>
         )}
+
+        <AlertDialog open={confirmOpen} onOpenChange={setConfirmOpen}>
+          <AlertDialogContent className="max-h-[85vh] max-w-2xl overflow-y-auto">
+            <AlertDialogHeader>
+              <AlertDialogTitle>Confirm changes</AlertDialogTitle>
+              <AlertDialogDescription>Check what will change before applying. This is recorded in Change History.</AlertDialogDescription>
+            </AlertDialogHeader>
+            <div className="space-y-4 text-sm">
+              {risks.length > 0 ? (
+                <div className="space-y-2 rounded-md border border-destructive/50 bg-destructive/10 p-3">
+                  <p className="flex items-center gap-2 font-semibold text-destructive"><ShieldAlert className="h-4 w-4" />Access risks ({risks.length})</p>
+                  <ul className="space-y-1">
+                    {risks.map((r, i) => (
+                      <li key={i} className="flex gap-2">
+                        <AlertTriangle className={`mt-0.5 h-4 w-4 shrink-0 ${r.level === "high" ? "text-destructive" : "text-warning"}`} />
+                        <span><Badge variant={r.level === "high" ? "destructive" : "outline"} className="mr-1">{r.level === "high" ? "High" : "Check"}</Badge>{r.text}</span>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              ) : (
+                <p className="rounded-md border p-3 text-muted-foreground">No access risks found.</p>
+              )}
+
+              <div>
+                <p className="mb-2 font-semibold">Permission changes</p>
+                {roleDiffs.length === 0 ? <p className="text-muted-foreground">None</p> : (
+                  <div className="overflow-hidden rounded-md border">
+                    {roleDiffs.map((d) => (
+                      <div key={d.role} className="border-b p-3 last:border-b-0">
+                        <p className="mb-1 font-medium capitalize">{d.role}</p>
+                        <div className="flex flex-wrap gap-1">
+                          {d.add.map((x) => <Badge key={x} className={SENSITIVE.has(x) ? "bg-destructive text-destructive-foreground" : ""}>+ Gains {label(x)}</Badge>)}
+                          {d.rem.map((x) => <Badge key={x} variant="outline">− Loses {label(x)}</Badge>)}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              <div>
+                <p className="mb-2 font-semibold">Module changes</p>
+                {moduleChanges.length === 0 ? <p className="text-muted-foreground">None</p> : (
+                  <div className="flex flex-wrap gap-1">
+                    {moduleChanges.map((m) => <Badge key={m.key} variant={m.enabled ? "default" : "outline"}>{m.enabled ? "Turn on" : "Turn off"} {label(m.key)}</Badge>)}
+                  </div>
+                )}
+              </div>
+
+              {rec && rec.rules.pos_allow_manual_entry !== cfg.rules.pos_allow_manual_entry && (
+                <p>Point of Sale manual items: <strong>{cfg.rules.pos_allow_manual_entry ? "Allowed" : "Not allowed"} → {rec.rules.pos_allow_manual_entry ? "Allowed" : "Not allowed"}</strong></p>
+              )}
+            </div>
+            <AlertDialogFooter>
+              <AlertDialogCancel>Cancel</AlertDialogCancel>
+              <AlertDialogAction onClick={apply} className={risks.some((r) => r.level === "high") ? "bg-destructive text-destructive-foreground hover:bg-destructive/90" : ""}>
+                {risks.some((r) => r.level === "high") ? "Apply anyway" : "Apply changes"}
+              </AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
       </CardContent>
     </Card>
   );
