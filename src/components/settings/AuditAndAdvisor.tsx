@@ -151,68 +151,6 @@ export function AuditLogPanel() {
             ))}
           </ol>
         )}
-
-        <AlertDialog open={confirmOpen} onOpenChange={setConfirmOpen}>
-          <AlertDialogContent className="max-h-[85vh] max-w-2xl overflow-y-auto">
-            <AlertDialogHeader>
-              <AlertDialogTitle>Confirm changes</AlertDialogTitle>
-              <AlertDialogDescription>Check what will change before applying. This is recorded in Change History.</AlertDialogDescription>
-            </AlertDialogHeader>
-            <div className="space-y-4 text-sm">
-              {risks.length > 0 ? (
-                <div className="space-y-2 rounded-md border border-destructive/50 bg-destructive/10 p-3">
-                  <p className="flex items-center gap-2 font-semibold text-destructive"><ShieldAlert className="h-4 w-4" />Access risks ({risks.length})</p>
-                  <ul className="space-y-1">
-                    {risks.map((r, i) => (
-                      <li key={i} className="flex gap-2">
-                        <AlertTriangle className={`mt-0.5 h-4 w-4 shrink-0 ${r.level === "high" ? "text-destructive" : "text-warning"}`} />
-                        <span><Badge variant={r.level === "high" ? "destructive" : "outline"} className="mr-1">{r.level === "high" ? "High" : "Check"}</Badge>{r.text}</span>
-                      </li>
-                    ))}
-                  </ul>
-                </div>
-              ) : (
-                <p className="rounded-md border p-3 text-muted-foreground">No access risks found.</p>
-              )}
-
-              <div>
-                <p className="mb-2 font-semibold">Permission changes</p>
-                {roleDiffs.length === 0 ? <p className="text-muted-foreground">None</p> : (
-                  <div className="overflow-hidden rounded-md border">
-                    {roleDiffs.map((d) => (
-                      <div key={d.role} className="border-b p-3 last:border-b-0">
-                        <p className="mb-1 font-medium capitalize">{d.role}</p>
-                        <div className="flex flex-wrap gap-1">
-                          {d.add.map((x) => <Badge key={x} className={SENSITIVE.has(x) ? "bg-destructive text-destructive-foreground" : ""}>+ Gains {label(x)}</Badge>)}
-                          {d.rem.map((x) => <Badge key={x} variant="outline">− Loses {label(x)}</Badge>)}
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </div>
-
-              <div>
-                <p className="mb-2 font-semibold">Module changes</p>
-                {moduleChanges.length === 0 ? <p className="text-muted-foreground">None</p> : (
-                  <div className="flex flex-wrap gap-1">
-                    {moduleChanges.map((m) => <Badge key={m.key} variant={m.enabled ? "default" : "outline"}>{m.enabled ? "Turn on" : "Turn off"} {label(m.key)}</Badge>)}
-                  </div>
-                )}
-              </div>
-
-              {rec && rec.rules.pos_allow_manual_entry !== cfg.rules.pos_allow_manual_entry && (
-                <p>Point of Sale manual items: <strong>{cfg.rules.pos_allow_manual_entry ? "Allowed" : "Not allowed"} → {rec.rules.pos_allow_manual_entry ? "Allowed" : "Not allowed"}</strong></p>
-              )}
-            </div>
-            <AlertDialogFooter>
-              <AlertDialogCancel>Cancel</AlertDialogCancel>
-              <AlertDialogAction onClick={apply} className={risks.some((r) => r.level === "high") ? "bg-destructive text-destructive-foreground hover:bg-destructive/90" : ""}>
-                {risks.some((r) => r.level === "high") ? "Apply anyway" : "Apply changes"}
-              </AlertDialogAction>
-            </AlertDialogFooter>
-          </AlertDialogContent>
-        </AlertDialog>
       </CardContent>
     </Card>
   );
