@@ -16,6 +16,7 @@ import { useAuth } from '@/contexts/AuthContext';
 import { useCurrency } from '@/hooks/useCurrency';
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog';
 import { Checkbox } from '@/components/ui/checkbox';
+import { OverdueLoans } from '@/components/loans/OverdueLoans';
 import { useDataTable } from '@/hooks/useDataTable';
 import { DataTableSearch, DataTablePagination, DataTableBulkActions, SelectAllCheckbox } from '@/components/ui/data-table-controls';
 
@@ -230,6 +231,8 @@ export default function Loans() {
           </DialogContent>
         </Dialog>
       </div>
+
+      <OverdueLoans loans={loans} />
 
       <div className="grid gap-4 md:grid-cols-3">
         <Card>

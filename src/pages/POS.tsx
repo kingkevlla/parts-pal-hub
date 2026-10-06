@@ -889,7 +889,7 @@ export default function POS() {
                         <div className="grid grid-cols-4 gap-1">
                           <Button type="button" size="sm" variant="secondary" onClick={() => setLoanPaymentAmount(String(payDue))}>Full</Button>
                           <Button type="button" size="sm" variant="outline" onClick={() => setLoanPaymentAmount(String(Math.round(payDue / 2)))}>Half</Button>
-                          {[1000, 5000].map((v) => (
+                          {(getAppConfig().rules.loan_quick_amounts || []).filter((v) => v > 0).slice(0, 6).map((v) => (
                             <Button key={v} type="button" size="sm" variant="outline" onClick={() => setLoanPaymentAmount(String(Math.min(payDue, v)))}>{v.toLocaleString()}</Button>
                           ))}
                         </div>
