@@ -271,6 +271,37 @@ export function LayoutPanel() {
   );
 }
 
+function QuickAmounts({ values, onChange }: { values: number[]; onChange: (v: number[]) => void }) {
+  const [input, setInput] = useState("");
+  const add = () => {
+    const n = Math.round(parseFloat(input));
+    if (!n || n <= 0 || values.includes(n) || values.length >= 6) return;
+    onChange([...values, n].sort((a, b) => a - b));
+    setInput("");
+  };
+  return (
+    <div className="space-y-3 rounded-lg border p-3">
+      <div>
+        <Label>Loan repayment: quick amount buttons</Label>
+        <p className="text-xs text-muted-foreground">Shown next to "Full" and "Half" when recording a loan payment. Up to 6 amounts.</p>
+      </div>
+      <div className="flex flex-wrap gap-2">
+        {values.length === 0 && <span className="text-sm text-muted-foreground">No quick amounts — only Full and Half will show.</span>}
+        {values.map((v) => (
+          <Badge key={v} variant="secondary" className="gap-1 py-1 text-sm">
+            {v.toLocaleString()}
+            <button type="button" aria-label={`Remove ${v}`} className="ml-1 rounded hover:text-destructive" onClick={() => onChange(values.filter((x) => x !== v))}>×</button>
+          </Badge>
+        ))}
+      </div>
+      <div className="flex gap-2">
+        <Input type="number" min="1" placeholder="e.g. 2000" value={input} onChange={(e) => setInput(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); add(); } }} className="max-w-[10rem]" />
+        <Button type="button" variant="outline" onClick={add} disabled={values.length >= 6}>Add</Button>
+      </div>
+    </div>
+  );
+}
+
 export function RulesPanel() {
   const d = useDraft();
   const r = d.draft.rules;
@@ -288,6 +319,10 @@ export function RulesPanel() {
           </div>
           <Switch checked={r.pos_allow_manual_entry} onCheckedChange={(v) => d.setDraft({ ...d.draft, rules: { ...r, pos_allow_manual_entry: v } })} />
         </div>
+        <QuickAmounts
+          values={r.loan_quick_amounts || []}
+          onChange={(vals) => d.setDraft({ ...d.draft, rules: { ...r, loan_quick_amounts: vals } })}
+        />
         <SaveBar {...d} />
       </CardContent>
     </Card>

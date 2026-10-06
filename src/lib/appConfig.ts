@@ -58,6 +58,7 @@ export interface AppConfig {
   layout: { sidebar_position: SidebarPosition; sidebar_collapsed: boolean };
   rules: {
     pos_allow_manual_entry: boolean;
+    loan_quick_amounts: number[];
   };
 }
 
@@ -68,6 +69,7 @@ export const DEFAULT_CONFIG: AppConfig = {
   layout: { sidebar_position: "left", sidebar_collapsed: false },
   rules: {
     pos_allow_manual_entry: true,
+    loan_quick_amounts: [1000, 5000],
   },
 };
 
