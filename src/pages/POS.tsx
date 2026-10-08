@@ -432,12 +432,53 @@ export default function POS() {
 
   const removeSplitPayment = (index: number) => setSplitPayments(prev => prev.filter((_, i) => i !== index));
 
+  /** Load inventory rows for given products (network when online, else local cache). */
+  const loadInventoryRows = async (productIds: string[]): Promise<any[]> => {
+    if (navigator.onLine && productIds.length) {
+      try {
+        const { data, error } = await supabase.from('inventory').select('product_id, quantity, warehouse_id').in('product_id', productIds);
+        if (!error && data) return data;
+      } catch { /* fall back to cache */ }
+    }
+    return (await getCachedData('inventory')) as any[];
+  };
+
+  /** Split a sold quantity across warehouses. Specific warehouse → that one; All → largest stock first. */
+  const allocateWarehouses = (productId: string, qty: number, invRows: any[]): { warehouse_id: string; quantity: number }[] => {
+    if (selectedWarehouse && selectedWarehouse !== 'all') return [{ warehouse_id: selectedWarehouse, quantity: qty }];
+    const rows = invRows.filter((r) => r.product_id === productId && Number(r.quantity) > 0)
+      .sort((a, b) => Number(b.quantity) - Number(a.quantity));
+    const out: { warehouse_id: string; quantity: number }[] = [];
+    let left = qty;
+    for (const r of rows) {
+      if (left <= 0) break;
+      const take = Math.min(left, Number(r.quantity));
+      out.push({ warehouse_id: r.warehouse_id, quantity: take });
+      left -= take;
+    }
+    if (left > 0) {
+      const fallback = rows[0]?.warehouse_id || invRows.find((r) => r.product_id === productId)?.warehouse_id || warehouses[0]?.id;
+      if (fallback) {
+        const ex = out.find((o) => o.warehouse_id === fallback);
+        if (ex) ex.quantity += left; else out.push({ warehouse_id: fallback, quantity: left });
+      }
+    }
+    return out;
+  };
+
+  const buildStockMovements = (invRows: any[], transactionNumber: string, notePrefix: string, who: string, extraWarehouseId: string | null = null) =>
+    cart.flatMap((item) => {
+      const product = products.find(p => p.id === item.productId);
+      const convFactor = product?.unit_conversion_factor || 1;
+      const stockUnitQty = product && product.stock_unit !== product.selling_unit ? item.quantity / convFactor : item.quantity;
+      const base = { product_id: item.productId, movement_type: 'out', reference_number: transactionNumber, notes: `${notePrefix}: ${item.quantity} ${item.sellingUnit || 'pc'} to ${who}`, created_by: user?.id };
+      if (item.isManual && extraWarehouseId) return [{ ...base, warehouse_id: extraWarehouseId, quantity: stockUnitQty }];
+      return allocateWarehouses(item.productId, stockUnitQty, invRows).map((a) => ({ ...base, ...a }));
+    });
+
   const processSale = async (useSplit: boolean = false) => {
     if (cart.length === 0) { toast({ title: 'Error', description: 'Cart is empty', variant: 'destructive' }); return; }
     const hasRegularItems = cart.some(item => !item.isManual);
-    if (hasRegularItems && (!selectedWarehouse || selectedWarehouse === 'all')) {
-      toast({ title: 'Error', description: 'Please select a specific warehouse before checkout', variant: 'destructive' }); return;
-    }
     if (useSplit && getRemainingAmount() > 0.01) {
       toast({ title: 'Error', description: 'Split payments must cover full amount', variant: 'destructive' }); return;
     }
@@ -451,20 +492,12 @@ export default function POS() {
         const offlineId = `offline-${Date.now()}`;
         await queueMutation('transactions', 'insert', { ...transactionData, id: offlineId });
         await queueMutation('transaction_items', 'insert', cart.map(item => ({ transaction_id: offlineId, product_id: item.productId, quantity: item.quantity, unit_price: item.price, total_price: item.subtotal })));
-        const stockMovements = cart.map(item => {
-          const product = products.find(p => p.id === item.productId);
-          const convFactor = product?.unit_conversion_factor || 1;
-          const stockUnitQty = product && product.stock_unit !== product.selling_unit ? item.quantity / convFactor : item.quantity;
-          return { product_id: item.productId, warehouse_id: selectedWarehouse, quantity: stockUnitQty, movement_type: 'out', reference_number: transactionNumber, notes: `POS Sale (offline): ${item.quantity} ${item.sellingUnit || 'pc'} to ${customerName || 'Walk-in customer'}`, created_by: user?.id };
-        });
+        const cachedInventory = (await getCachedData('inventory')) as any[];
+        const stockMovements = buildStockMovements(cachedInventory, transactionNumber, 'POS Sale (offline)', customerName || 'Walk-in customer');
         await queueMutation('stock_movements', 'insert', stockMovements);
-        const cachedInventory = await getCachedData('inventory');
-        for (const item of cart) {
-          const product = products.find(p => p.id === item.productId);
-          const convFactor = product?.unit_conversion_factor || 1;
-          const stockUnitQty = product && product.stock_unit !== product.selling_unit ? item.quantity / convFactor : item.quantity;
-          const inv = cachedInventory.find((i: any) => i.product_id === item.productId && i.warehouse_id === selectedWarehouse);
-          if (inv) inv.quantity = Math.max(0, (inv.quantity || 0) - stockUnitQty);
+        for (const m of stockMovements) {
+          const inv = cachedInventory.find((i: any) => i.product_id === m.product_id && i.warehouse_id === m.warehouse_id);
+          if (inv) inv.quantity = Math.max(0, (inv.quantity || 0) - m.quantity);
         }
         await cacheData('inventory', cachedInventory);
         setLastSaleData({ id: offlineId, items: cart.map(item => ({ name: item.name, quantity: item.quantity, unit_price: item.price, subtotal: item.subtotal })), total_amount: getTotalAmount(), payment_method: finalPaymentMethod, customer_name: customerName, customer_phone: customerPhone, sale_date: new Date().toISOString() });
@@ -496,12 +529,8 @@ export default function POS() {
         }
       }
 
-      const stockMovements = cart.map(item => {
-        const product = products.find(p => p.id === item.productId);
-        const convFactor = product?.unit_conversion_factor || 1;
-        const stockUnitQty = product && product.stock_unit !== product.selling_unit ? item.quantity / convFactor : item.quantity;
-        return { product_id: item.productId, warehouse_id: item.isManual && extraWarehouseId ? extraWarehouseId : selectedWarehouse, quantity: stockUnitQty, movement_type: 'out', reference_number: transactionNumber, notes: `POS Sale: ${item.quantity} ${item.sellingUnit || 'pc'} to ${customerName || 'Walk-in customer'}`, created_by: user?.id };
-      });
+      const invRows = await loadInventoryRows(cart.filter(i => !i.isManual).map(i => i.productId));
+      const stockMovements = buildStockMovements(invRows, transactionNumber, 'POS Sale', customerName || 'Walk-in customer', extraWarehouseId);
       const movRes = await offlineMutate('stock_movements', 'insert', stockMovements);
       if (!movRes.success) throw movRes.error;
 
@@ -520,7 +549,6 @@ export default function POS() {
     if (cart.length === 0) { toast({ title: 'Error', description: 'Cart is empty', variant: 'destructive' }); return; }
     if (!selectedCustomerId) { toast({ title: 'Error', description: 'Please select a customer for credit sale', variant: 'destructive' }); return; }
     const hasRegularItems = cart.some(item => !item.isManual);
-    if (hasRegularItems && (!selectedWarehouse || selectedWarehouse === 'all')) { toast({ title: 'Error', description: 'Please select a specific warehouse before checkout', variant: 'destructive' }); return; }
     setIsProcessing(true);
     try {
       const transactionNumber = `TXN-${Date.now()}`;
@@ -554,12 +582,8 @@ export default function POS() {
         }
       }
 
-      const stockMovements = cart.map(item => {
-        const product = products.find(p => p.id === item.productId);
-        const convFactor = product?.unit_conversion_factor || 1;
-        const stockUnitQty = product && product.stock_unit !== product.selling_unit ? item.quantity / convFactor : item.quantity;
-        return { product_id: item.productId, warehouse_id: item.isManual && extraWarehouseId ? extraWarehouseId : selectedWarehouse, quantity: stockUnitQty, movement_type: 'out', reference_number: transactionNumber, notes: `Credit Sale: ${item.quantity} ${item.sellingUnit || 'pc'} to ${selectedCustomer?.name || 'Customer'}`, created_by: user?.id };
-      });
+      const invRows = await loadInventoryRows(cart.filter(i => !i.isManual).map(i => i.productId));
+      const stockMovements = buildStockMovements(invRows, transactionNumber, 'Credit Sale', selectedCustomer?.name || 'Customer', extraWarehouseId);
       const movRes = await offlineMutate('stock_movements', 'insert', stockMovements);
       if (!movRes.success) throw movRes.error;
 
