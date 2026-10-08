@@ -828,7 +828,7 @@ export default function POS() {
                     Cart
                     {cart.length > 0 && <Badge variant="secondary" className="text-xs">{cart.length}</Badge>}
                   </h2>
-                  <CartContent />
+                  {CartContent()}
                 </CardContent>
               </Card>
             </div>
@@ -995,7 +995,7 @@ export default function POS() {
               </SheetTitle>
             </SheetHeader>
             <div className="flex-1 min-h-0 overflow-hidden">
-              <CartContent />
+              {CartContent()}
             </div>
           </SheetContent>
         </Sheet>
