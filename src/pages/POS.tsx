@@ -223,15 +223,14 @@ export default function POS() {
           .from('products')
           .select('id, name, sku, barcode, selling_price, min_stock_level, image_url, stock_unit, selling_unit, unit_conversion_factor')
           .eq('is_active', true),
-        selectedWarehouse !== 'all'
-          ? supabase.from('inventory').select('product_id, quantity, warehouse_id').eq('warehouse_id', selectedWarehouse)
-          : supabase.from('inventory').select('product_id, quantity, warehouse_id'),
+        supabase.from('inventory').select('id, product_id, quantity, warehouse_id'),
         supabase.from('transaction_items').select('product_id, quantity'),
       ]);
 
       if (pRes.error) return;
       const productsData = pRes.data || [];
-      const inventoryData = iRes.data || [];
+      const allInventory = iRes.data || [];
+      const inventoryData = selectedWarehouse === 'all' ? allInventory : allInventory.filter((i: any) => i.warehouse_id === selectedWarehouse);
       const salesCountMap = new Map<string, number>();
       (sRes.data || []).forEach((s: any) => {
         salesCountMap.set(s.product_id, (salesCountMap.get(s.product_id) || 0) + Number(s.quantity || 1));
@@ -239,7 +238,7 @@ export default function POS() {
 
       // Refresh underlying caches for other screens.
       cacheData('products', productsData).catch(() => {});
-      if (selectedWarehouse === 'all') cacheData('inventory', inventoryData).catch(() => {});
+      if (!iRes.error) cacheData('inventory', allInventory).catch(() => {});
       cacheData('transaction_items', sRes.data || []).catch(() => {});
 
       const next = buildProductsWithStock(productsData, inventoryData, salesCountMap);
