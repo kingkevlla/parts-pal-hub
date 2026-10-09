@@ -169,7 +169,60 @@ export default function Receipt({ isOpen, onClose, saleData }: ReceiptProps) {
   };
 
   const handlePrint = () => {
-    window.print();
+    const esc = (v: any) => String(v ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' } as any)[c]);
+    const width = receiptSettings.receipt_paper_size === '58mm' ? '58mm' : '80mm';
+    const rows = saleData.items.map((it) => `
+      <div class="item"><div class="name">${esc(it.name)}</div>
+      <div class="row"><span>${esc(it.quantity)} x ${esc(formatAmount(it.unit_price))}</span><b>${esc(formatAmount(it.subtotal))}</b></div></div>`).join('');
+    const tax = systemSettings.tax_rate > 0
+      ? `<div class="row small"><span>Incl. ${esc(receiptSettings.receipt_tax_label)} (${esc(systemSettings.tax_rate)}%)</span><span>${esc(formatAmount(saleData.total_amount * systemSettings.tax_rate / 100))}</span></div>` : '';
+    const customer = receiptSettings.receipt_show_customer_info && (saleData.customer_name || saleData.customer_phone)
+      ? `<div class="sep"></div>${saleData.customer_name ? `<div class="row"><span>Customer</span><b>${esc(saleData.customer_name)}</b></div>` : ''}${saleData.customer_phone ? `<div class="row"><span>Phone</span><span>${esc(saleData.customer_phone)}</span></div>` : ''}` : '';
+    const company = receiptSettings.receipt_company_info
+      ? [systemSettings.company_name && `<div><b>${esc(systemSettings.company_name)}</b></div>`, systemSettings.company_email && `<div>${esc(systemSettings.company_email)}</div>`, systemSettings.company_phone && `<div>${esc(systemSettings.company_phone)}</div>`].filter(Boolean).join('') : '';
+    const html = `<!doctype html><html><head><meta charset="utf-8"><title>Receipt ${esc(saleData.id.substring(0, 8).toUpperCase())}</title>
+<style>
+  @page { size: ${width} auto; margin: 3mm; }
+  * { box-sizing: border-box; }
+  body { margin: 0; font-family: 'Courier New', monospace; font-size: 12px; color: #000; background: #fff; }
+  .r { width: ${width}; max-width: 100%; margin: 0 auto; padding: 4px; }
+  .c { text-align: center; }
+  h1 { font-size: 16px; margin: 4px 0; }
+  .row { display: flex; justify-content: space-between; gap: 8px; margin: 2px 0; }
+  .sep { border-top: 1px dashed #000; margin: 6px 0; }
+  .item { margin: 4px 0; } .name { font-weight: bold; word-break: break-word; }
+  .total { font-size: 15px; font-weight: bold; border-top: 2px solid #000; border-bottom: 2px solid #000; padding: 4px 0; margin-top: 6px; }
+  .small { font-size: 11px; } img.logo { max-height: 50px; max-width: 100%; } img.qr { width: 110px; height: 110px; }
+</style></head><body><div class="r">
+  ${receiptSettings.receipt_logo_url ? `<div class="c"><img class="logo" src="${esc(receiptSettings.receipt_logo_url)}"></div>` : ''}
+  <div class="c"><h1>${esc(receiptSettings.receipt_header_text || systemSettings.company_name || 'Receipt')}</h1>${company}</div>
+  <div class="sep"></div>
+  <div class="row"><span>Receipt No</span><b>${esc(saleData.id.substring(0, 8).toUpperCase())}</b></div>
+  <div class="row"><span>Date</span><span>${esc(new Date(saleData.sale_date).toLocaleString())}</span></div>
+  <div class="row"><span>Payment</span><span>${esc(saleData.payment_method.replace('_', ' ').toUpperCase())}</span></div>
+  ${customer}
+  <div class="sep"></div>${rows}
+  <div class="row total"><span>TOTAL</span><span>${esc(formatAmount(saleData.total_amount))}</span></div>${tax}
+  ${receiptSettings.receipt_show_qr && qrCodeUrl ? `<div class="sep"></div><div class="c"><img class="qr" src="${qrCodeUrl}"><div class="small"><b>APPROVED</b> - Scan to verify</div></div>` : ''}
+  ${receiptSettings.receipt_footer_text ? `<div class="sep"></div><div class="c small">${esc(receiptSettings.receipt_footer_text)}</div>` : ''}
+</div></body></html>`;
+    const frame = document.createElement('iframe');
+    frame.style.cssText = 'position:fixed;right:0;bottom:0;width:0;height:0;border:0;';
+    document.body.appendChild(frame);
+    const doc = frame.contentWindow!.document;
+    doc.open(); doc.write(html); doc.close();
+    const go = () => {
+      frame.contentWindow!.focus();
+      frame.contentWindow!.print();
+      setTimeout(() => frame.remove(), 1000);
+    };
+    const imgs = Array.from(doc.images);
+    if (!imgs.length) setTimeout(go, 100);
+    else {
+      let left = imgs.length;
+      const done = () => { if (--left <= 0) go(); };
+      imgs.forEach((im) => (im.complete ? done() : (im.onload = im.onerror = done)));
+    }
   };
 
   const paperWidth = receiptSettings.receipt_paper_size === "58mm" ? "58mm" : "80mm";
@@ -338,25 +391,6 @@ export default function Receipt({ isOpen, onClose, saleData }: ReceiptProps) {
         </div>
       </DialogContent>
 
-      <style>{`
-        @media print {
-          body * {
-            visibility: hidden;
-          }
-          ${receiptRef.current ? `
-            #receipt-content,
-            #receipt-content * {
-              visibility: visible;
-            }
-            #receipt-content {
-              position: absolute;
-              left: 0;
-              top: 0;
-              width: ${paperWidth};
-            }
-          ` : ''}
-        }
-      `}</style>
     </Dialog>
   );
 }
