@@ -73,19 +73,26 @@ export default function ReceiptSettings() {
 
     try {
       setUploading(true);
-      const fileExt = file.name.split('.').pop();
-      const fileName = `receipt-logo-${Date.now()}.${fileExt}`;
-
-      const { error: uploadError } = await supabase.storage
-        .from('avatars')
-        .upload(fileName, file);
-
-      if (uploadError) throw uploadError;
-
-      const { data: { publicUrl } } = supabase.storage
-        .from('avatars')
-        .getPublicUrl(fileName);
-
+      // Store the logo inside settings as a small image so receipts show it instantly, even offline.
+      const publicUrl = await new Promise<string>((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onerror = () => reject(new Error('Could not read the image'));
+        reader.onload = () => {
+          const src = reader.result as string;
+          if (file.type === 'image/svg+xml') return resolve(src);
+          const img = new Image();
+          img.onerror = () => reject(new Error('Unsupported image'));
+          img.onload = () => {
+            const scale = Math.min(1, 400 / Math.max(img.width, img.height));
+            const c = document.createElement('canvas');
+            c.width = Math.round(img.width * scale); c.height = Math.round(img.height * scale);
+            c.getContext('2d')!.drawImage(img, 0, 0, c.width, c.height);
+            resolve(c.toDataURL('image/png'));
+          };
+          img.src = src;
+        };
+        reader.readAsDataURL(file);
+      });
       setSettings({ ...settings, receipt_logo_url: publicUrl });
       toast({ title: "Logo uploaded successfully" });
     } catch (error: any) {

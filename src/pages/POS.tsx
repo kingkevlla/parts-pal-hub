@@ -507,7 +507,11 @@ export default function POS() {
         fetchProductsWithStock({ force: true }); setIsProcessing(false); return;
       }
 
-      const txRes = await offlineInsertSingle<any>('transactions', transactionData);
+      // Show the receipt instantly; saving continues in the background of this flow.
+      const saleId = (crypto as any).randomUUID ? crypto.randomUUID() : `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+      setLastSaleData({ id: saleId, items: cart.map(item => ({ name: item.name, quantity: item.quantity, unit_price: item.price, subtotal: item.subtotal })), total_amount: getTotalAmount(), payment_method: finalPaymentMethod, customer_name: customerName, customer_phone: customerPhone, sale_date: new Date().toISOString() });
+      setShowReceipt(true); setShowSplitPayment(false); setMobileCartOpen(false);
+      const txRes = await offlineInsertSingle<any>('transactions', { ...transactionData, id: saleId });
       if (txRes.error) throw txRes.error;
       const transaction = txRes.data!;
       const itemsRes = await offlineMutate('transaction_items', 'insert', cart.map(item => ({ transaction_id: transaction.id, product_id: item.productId, quantity: item.quantity, unit_price: item.price, total_price: item.subtotal })));
@@ -533,8 +537,7 @@ export default function POS() {
       const movRes = await offlineMutate('stock_movements', 'insert', stockMovements);
       if (!movRes.success) throw movRes.error;
 
-      setLastSaleData({ id: transaction.id, items: cart.map(item => ({ name: item.name, quantity: item.quantity, unit_price: item.price, subtotal: item.subtotal })), total_amount: getTotalAmount(), payment_method: finalPaymentMethod, customer_name: customerName, customer_phone: customerPhone, sale_date: new Date().toISOString() });
-      setShowReceipt(true); setShowSplitPayment(false); setSplitPayments([]); setMobileCartOpen(false);
+      setSplitPayments([]);
       toast({ title: 'Success', description: 'Sale completed successfully' });
       if (activePendingBillId) { await offlineMutate('pending_bills', 'update', { status: 'closed' }, { id: activePendingBillId }); setActivePendingBillId(null); }
       setCart([]); setCustomerName(''); setCustomerPhone(''); setPaymentMethod('cash');
