@@ -10,6 +10,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { offlineQuery, offlineMutate } from "@/lib/offlineHelpers";
 
 import { useToast } from "@/hooks/use-toast";
+import { imageToDataUrl } from "@/lib/imageToDataUrl";
 
 interface ReceiptSettingsData {
   receipt_logo_url: string;
@@ -73,28 +74,21 @@ export default function ReceiptSettings() {
 
     try {
       setUploading(true);
-      // Store the logo inside settings as a small image so receipts show it instantly, even offline.
-      const publicUrl = await new Promise<string>((resolve, reject) => {
-        const reader = new FileReader();
-        reader.onerror = () => reject(new Error('Could not read the image'));
-        reader.onload = () => {
-          const src = reader.result as string;
-          if (file.type === 'image/svg+xml') return resolve(src);
-          const img = new Image();
-          img.onerror = () => reject(new Error('Unsupported image'));
-          img.onload = () => {
-            const scale = Math.min(1, 400 / Math.max(img.width, img.height));
-            const c = document.createElement('canvas');
-            c.width = Math.round(img.width * scale); c.height = Math.round(img.height * scale);
-            c.getContext('2d')!.drawImage(img, 0, 0, c.width, c.height);
-            resolve(c.toDataURL('image/png'));
-          };
-          img.src = src;
-        };
-        reader.readAsDataURL(file);
-      });
-      setSettings({ ...settings, receipt_logo_url: publicUrl });
-      toast({ title: "Logo uploaded successfully" });
+      const publicUrl = await imageToDataUrl(file);
+      setSettings((prev) => ({ ...prev, receipt_logo_url: publicUrl }));
+      // Save right away so the logo is kept even without pressing Save.
+      const { data: rows } = await offlineQuery<any>("system_settings");
+      const exists = (rows || []).some((r: any) => r.key === "receipt_logo_url");
+      const res = exists
+        ? await offlineMutate("system_settings", "update", { value: publicUrl, updated_at: new Date().toISOString() }, { key: "receipt_logo_url" })
+        : await offlineMutate("system_settings", "insert", { key: "receipt_logo_url", value: publicUrl });
+      if (res && (res as any).success === false) throw (res as any).error || new Error("Could not save the logo");
+      try {
+        const cached = JSON.parse(localStorage.getItem("receipt_settings_cache_v1") || "{}");
+        localStorage.setItem("receipt_settings_cache_v1", JSON.stringify({ ...cached, receipt_logo_url: publicUrl }));
+      } catch {}
+      toast({ title: "Logo saved", description: "It will show on every receipt." });
+      e.target.value = "";
     } catch (error: any) {
       toast({ title: "Error uploading logo", description: error.message, variant: "destructive" });
     } finally {

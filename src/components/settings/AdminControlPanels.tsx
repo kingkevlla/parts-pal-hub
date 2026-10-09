@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { imageToDataUrl } from "@/lib/imageToDataUrl";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Switch } from "@/components/ui/switch";
 import { Button } from "@/components/ui/button";
@@ -190,8 +191,15 @@ export function AppearancePanel() {
             </div>
           </div>
           <div className="space-y-2 sm:col-span-2">
-            <Label>Logo link (image address)</Label>
-            <Input placeholder="https://..." value={t.logo_url} onChange={(e) => setT({ logo_url: e.target.value })} />
+            <Label>Logo</Label>
+            <div className="flex items-center gap-3">
+              {t.logo_url && <img src={t.logo_url} alt="Logo" className="h-10 w-10 rounded border object-contain" />}
+              <Input type="file" accept="image/*" className="cursor-pointer" onChange={async (e) => {
+                const f = e.target.files?.[0]; if (!f) return;
+                try { setT({ logo_url: await imageToDataUrl(f) }); } catch (err: any) { alert(err.message); }
+              }} />
+            </div>
+            <Input placeholder="or paste an image link https://..." value={(t.logo_url || '').startsWith('data:') ? '' : t.logo_url} onChange={(e) => setT({ logo_url: e.target.value })} />
           </div>
           <div className="space-y-2">
             <Label>Font</Label>

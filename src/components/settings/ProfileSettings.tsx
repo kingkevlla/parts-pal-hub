@@ -5,6 +5,7 @@ import { Label } from "@/components/ui/label";
 import { Button } from "@/components/ui/button";
 import { Avatar, AvatarImage, AvatarFallback } from "@/components/ui/avatar";
 import { useAuth } from "@/contexts/AuthContext";
+import { imageToDataUrl } from "@/lib/imageToDataUrl";
 import { supabase } from "@/integrations/supabase/client";
 import { offlineQuery, offlineMutate } from "@/lib/offlineHelpers";
 
@@ -53,18 +54,7 @@ export default function ProfileSettings() {
       const file = event.target.files?.[0];
       if (!file) return;
 
-      const fileExt = file.name.split(".").pop();
-      const fileName = `${user?.id}/${Math.random()}.${fileExt}`;
-
-      const { error: uploadError } = await supabase.storage
-        .from("avatars")
-        .upload(fileName, file, { upsert: true });
-
-      if (uploadError) throw uploadError;
-
-      const { data: { publicUrl } } = supabase.storage
-        .from("avatars")
-        .getPublicUrl(fileName);
+      const publicUrl = await imageToDataUrl(file, 256);
 
       const updateRes = await offlineMutate(
         "profiles",
