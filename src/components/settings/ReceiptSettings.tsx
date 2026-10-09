@@ -84,8 +84,8 @@ export default function ReceiptSettings() {
         : await offlineMutate("system_settings", "insert", { key: "receipt_logo_url", value: publicUrl });
       if (res && (res as any).success === false) throw (res as any).error || new Error("Could not save the logo");
       try {
-        const cached = JSON.parse(localStorage.getItem("receipt_settings_cache") || "{}");
-        localStorage.setItem("receipt_settings_cache", JSON.stringify({ ...cached, receipt_logo_url: publicUrl }));
+        const cached = JSON.parse(localStorage.getItem("receipt_settings_cache_v1") || "{}");
+        localStorage.setItem("receipt_settings_cache_v1", JSON.stringify({ ...cached, receipt_logo_url: publicUrl }));
       } catch {}
       toast({ title: "Logo saved", description: "It will show on every receipt." });
       e.target.value = "";
