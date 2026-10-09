@@ -199,7 +199,7 @@ export function AppearancePanel() {
                 try { setT({ logo_url: await imageToDataUrl(f) }); } catch (err: any) { alert(err.message); }
               }} />
             </div>
-            <Input placeholder="or paste an image link https://..." value={t.logo_url.startsWith('data:') ? '' : t.logo_url} onChange={(e) => setT({ logo_url: e.target.value })} />
+            <Input placeholder="or paste an image link https://..." value={(t.logo_url || '').startsWith('data:') ? '' : t.logo_url} onChange={(e) => setT({ logo_url: e.target.value })} />
           </div>
           <div className="space-y-2">
             <Label>Font</Label>
