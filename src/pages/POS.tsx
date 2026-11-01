@@ -626,6 +626,40 @@ export default function POS() {
     (l.customers?.name && fuzzySearch(l.customers.name, loanSearchQuery)) || (l.customers?.phone && fuzzySearch(l.customers.phone, loanSearchQuery))
   );
 
+  // One-tap "Pending": saves the cart as an open bill (or updates the loaded one) and clears the cart.
+  const holdAsPending = async () => {
+    if (cart.length === 0) return;
+    setIsProcessing(true);
+    try {
+      const name = customerName.trim() || `Bill ${format(new Date(), 'HH:mm')}`;
+      const warehouseId = selectedWarehouse !== 'all'
+        ? selectedWarehouse
+        : (warehouses.find((w) => w.name !== 'Extra')?.id || warehouses[0]?.id);
+      if (!warehouseId) throw new Error('No warehouse available');
+      const now = new Date().toISOString();
+      let billId = activePendingBillId;
+      if (billId) {
+        await offlineMutate('pending_bill_items', 'delete', null, { bill_id: billId });
+        await offlineMutate('pending_bills', 'update', { customer_name: name, customer_phone: customerPhone.trim() || null, updated_at: now }, { id: billId });
+      } else {
+        const { data: bill, error } = await offlineInsertSingle<any>('pending_bills', {
+          customer_name: name, customer_phone: customerPhone.trim() || null, warehouse_id: warehouseId,
+          created_by: user?.id, status: 'open', updated_at: now,
+        });
+        if (error || !bill) throw error ?? new Error('Could not save bill');
+        billId = bill.id;
+      }
+      const res = await offlineMutate('pending_bill_items', 'insert', cart.map((i) => ({
+        bill_id: billId, product_id: i.productId, product_name: i.name, quantity: i.quantity, unit_price: i.price, subtotal: i.subtotal,
+      })));
+      if (!res.success) throw res.error ?? new Error('Could not save bill items');
+      toast({ title: activePendingBillId ? 'Bill updated' : 'Saved as pending', description: `${name} — ${formatAmount(getTotalAmount())}` });
+      setCart([]); setCustomerName(''); setCustomerPhone(''); setActivePendingBillId(null); setMobileCartOpen(false);
+    } catch (error: any) {
+      toast({ title: 'Error', description: error.message, variant: 'destructive' });
+    } finally { setIsProcessing(false); }
+  };
+
   const handleRefresh = () => {
     invalidatePosProductCaches().then(() => fetchProductsWithStock({ force: true }));
     fetchWarehouses(); fetchLoans();
@@ -699,7 +733,16 @@ export default function POS() {
           </div>
         </div>
 
-        <div className="grid grid-cols-2 gap-2">
+        {activePendingBillId && (
+          <div className="flex items-center justify-between rounded-lg border border-primary/40 bg-primary/5 px-2 py-1.5 text-xs">
+            <span className="truncate">Open bill: <strong>{customerName || 'Pending bill'}</strong></span>
+            <Button variant="ghost" size="sm" className="h-6 px-2 text-xs" onClick={() => { setActivePendingBillId(null); setCart([]); setCustomerName(''); setCustomerPhone(''); }}>Leave</Button>
+          </div>
+        )}
+        <div className="grid grid-cols-3 gap-2">
+          <Button variant="outline" onClick={holdAsPending} disabled={isProcessing || cart.length === 0} className="gap-1 text-sm">
+            <ClipboardList className="h-4 w-4" /> {activePendingBillId ? 'Update' : 'Pending'}
+          </Button>
           <Button variant="outline" onClick={() => setShowSplitPayment(true)} disabled={cart.length === 0} className="gap-1 text-sm">
             <Split className="h-4 w-4" /> Split
           </Button>
@@ -843,9 +886,9 @@ export default function POS() {
               selectedWarehouse={selectedWarehouse}
               warehouses={warehouses}
               cart={cart}
-              onLoadBill={(items, billId, name, phone, warehouseId) => {
+              onLoadBill={(items, billId, name, phone) => {
                 setCart(items); setCustomerName(name); setCustomerPhone(phone);
-                setActivePendingBillId(billId); setSelectedWarehouse(warehouseId); setActiveTab('sales');
+                setActivePendingBillId(billId); setActiveTab('sales');
               }}
               onBillSaved={() => { setCart([]); setCustomerName(''); setCustomerPhone(''); }}
             />
