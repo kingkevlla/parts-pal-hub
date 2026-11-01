@@ -123,10 +123,6 @@ export default function PendingBills({ selectedWarehouse, warehouses, cart, onLo
       toast({ title: 'Error', description: 'Customer name is required', variant: 'destructive' });
       return;
     }
-    if (!billWarehouseId) {
-      toast({ title: 'Error', description: 'Please select a warehouse for this bill', variant: 'destructive' });
-      return;
-    }
     if (cart.length === 0) {
       toast({ title: 'Error', description: 'Cart is empty. Add items before creating a bill.', variant: 'destructive' });
       return;
@@ -134,7 +130,7 @@ export default function PendingBills({ selectedWarehouse, warehouses, cart, onLo
 
     setIsLoading(true);
     try {
-      const warehouseId = billWarehouseId;
+      const warehouseId = billWarehouseId || warehouses.find(w => w.name !== 'Extra')?.id || warehouses[0]?.id;
 
       const { data: bill, error: billError } = await offlineInsertSingle<any>('pending_bills', {
         customer_name: billName.trim(),
@@ -499,7 +495,7 @@ export default function PendingBills({ selectedWarehouse, warehouses, cart, onLo
               />
             </div>
             <div className="space-y-2">
-              <Label>Warehouse *</Label>
+              <Label>Warehouse (optional)</Label>
               <Select value={billWarehouseId} onValueChange={setBillWarehouseId}>
                 <SelectTrigger>
                   <SelectValue placeholder="Select warehouse" />
@@ -522,7 +518,7 @@ export default function PendingBills({ selectedWarehouse, warehouses, cart, onLo
             <Button
               className="w-full"
               onClick={createNewBill}
-              disabled={isLoading || !billName.trim() || !billWarehouseId}
+              disabled={isLoading || !billName.trim()}
             >
               {isLoading ? 'Saving...' : 'Save Bill'}
             </Button>
