@@ -1,4 +1,6 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
+import { Slider } from "@/components/ui/slider";
+import { AlignLeft, AlignCenter, AlignRight } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -21,6 +23,9 @@ interface ReceiptSettingsData {
   receipt_tax_label: string;
   receipt_paper_size: string;
   receipt_show_customer_info: boolean;
+  receipt_logo_align: string;
+  receipt_logo_width: number;
+  receipt_logo_offset_x: number;
 }
 
 export default function ReceiptSettings() {
@@ -36,7 +41,26 @@ export default function ReceiptSettings() {
     receipt_tax_label: "VAT",
     receipt_paper_size: "80mm",
     receipt_show_customer_info: true,
+    receipt_logo_align: "center",
+    receipt_logo_width: 120,
+    receipt_logo_offset_x: 0,
   });
+  const dragRef = useRef<{ startX: number; startOffset: number } | null>(null);
+  const logoWidth = Number(settings.receipt_logo_width) || 120;
+  const logoOffset = Number(settings.receipt_logo_offset_x) || 0;
+  const paperPx = settings.receipt_paper_size === "58mm" ? 220 : 300;
+  const maxOffset = Math.max(0, paperPx - 32 - logoWidth);
+  const clampOffset = (v: number) => Math.max(-maxOffset, Math.min(maxOffset, Math.round(v)));
+  const onDragStart = (e: React.PointerEvent) => {
+    (e.target as HTMLElement).setPointerCapture(e.pointerId);
+    dragRef.current = { startX: e.clientX, startOffset: logoOffset };
+  };
+  const onDragMove = (e: React.PointerEvent) => {
+    if (!dragRef.current) return;
+    const next = clampOffset(dragRef.current.startOffset + e.clientX - dragRef.current.startX);
+    setSettings((p) => ({ ...p, receipt_logo_offset_x: next }));
+  };
+  const onDragEnd = () => { dragRef.current = null; };
 
   useEffect(() => {
     fetchSettings();
@@ -53,7 +77,9 @@ export default function ReceiptSettings() {
       data?.forEach((setting) => {
         if (setting.key.startsWith('receipt_')) {
           const value = setting.value;
-          if (typeof value === 'boolean') {
+          if (setting.key === 'receipt_logo_width' || setting.key === 'receipt_logo_offset_x') {
+            settingsMap[setting.key] = Number(value) || (setting.key === 'receipt_logo_width' ? 120 : 0);
+          } else if (typeof value === 'boolean') {
             settingsMap[setting.key] = value;
           } else if (typeof value === 'string') {
             settingsMap[setting.key] = value;
@@ -114,6 +140,7 @@ export default function ReceiptSettings() {
       }
 
 
+      try { localStorage.setItem("receipt_settings_cache_v1", JSON.stringify(settings)); } catch {}
       toast({ title: "Receipt settings saved successfully" });
     } catch (error: any) {
       toast({ title: "Error saving settings", description: error.message, variant: "destructive" });
@@ -155,6 +182,50 @@ export default function ReceiptSettings() {
               </div>
             </div>
           </div>
+
+          {settings.receipt_logo_url && (
+            <div className="space-y-4 rounded-lg border p-4">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <Label>Logo position &amp; size</Label>
+                <div className="flex gap-1">
+                  {([["left", AlignLeft], ["center", AlignCenter], ["right", AlignRight]] as const).map(([a, Icon]) => (
+                    <Button key={a} type="button" size="sm" aria-label={`Align logo ${a}`}
+                      variant={settings.receipt_logo_align === a ? "default" : "outline"}
+                      onClick={() => setSettings((p) => ({ ...p, receipt_logo_align: a, receipt_logo_offset_x: 0 }))}>
+                      <Icon className="h-4 w-4" />
+                    </Button>
+                  ))}
+                </div>
+              </div>
+              <div className="space-y-2">
+                <div className="flex justify-between text-sm"><span>Size</span><span className="text-muted-foreground">{logoWidth}px</span></div>
+                <Slider min={30} max={paperPx - 32} step={2} value={[logoWidth]}
+                  onValueChange={([v]) => setSettings((p) => ({ ...p, receipt_logo_width: v, receipt_logo_offset_x: 0 }))} />
+              </div>
+              <div className="space-y-2">
+                <div className="flex justify-between text-sm"><span>Fine position (drag the logo below)</span><span className="text-muted-foreground">{logoOffset > 0 ? "+" : ""}{logoOffset}px</span></div>
+                <Slider min={-maxOffset} max={maxOffset} step={1} value={[logoOffset]}
+                  onValueChange={([v]) => setSettings((p) => ({ ...p, receipt_logo_offset_x: v }))} />
+              </div>
+              <div className="flex justify-center rounded-md bg-muted p-4">
+                <div className="bg-card text-card-foreground shadow-sm p-4 font-mono text-xs" style={{ width: paperPx }}>
+                  <div style={{ textAlign: settings.receipt_logo_align as any }} className="overflow-hidden">
+                    <img src={settings.receipt_logo_url} alt="Logo preview" draggable={false}
+                      onPointerDown={onDragStart} onPointerMove={onDragMove} onPointerUp={onDragEnd} onPointerCancel={onDragEnd}
+                      className="inline-block cursor-grab active:cursor-grabbing touch-none select-none outline-dashed outline-1 outline-primary/40"
+                      style={{ width: logoWidth, position: "relative", left: logoOffset }} />
+                  </div>
+                  <div className="text-center font-bold text-sm mt-2">{settings.receipt_header_text}</div>
+                  <div className="border-t border-dashed my-2" />
+                  <div className="flex justify-between"><span>Item × 1</span><span>1,000</span></div>
+                  <div className="border-t border-dashed my-2" />
+                  <div className="flex justify-between font-bold"><span>TOTAL</span><span>1,000</span></div>
+                  <div className="text-center mt-2">{settings.receipt_footer_text}</div>
+                </div>
+              </div>
+              <p className="text-xs text-muted-foreground">Preview of your {settings.receipt_paper_size} receipt. Press Save to keep the changes.</p>
+            </div>
+          )}
 
           <div className="space-y-2">
             <Label htmlFor="paper_size">Paper Size</Label>
