@@ -48,6 +48,9 @@ interface ReceiptSettings {
   receipt_tax_label: string;
   receipt_paper_size: string;
   receipt_show_customer_info: boolean;
+  receipt_logo_align?: string;
+  receipt_logo_width?: number;
+  receipt_logo_offset_x?: number;
 }
 
 const RECEIPT_SETTINGS_CACHE_KEY = "receipt_settings_cache_v1";
@@ -194,7 +197,7 @@ export default function Receipt({ isOpen, onClose, saleData }: ReceiptProps) {
   .total { font-size: 15px; font-weight: bold; border-top: 2px solid #000; border-bottom: 2px solid #000; padding: 4px 0; margin-top: 6px; }
   .small { font-size: 11px; } img.logo { max-height: 50px; max-width: 100%; } img.qr { width: 110px; height: 110px; }
 </style></head><body><div class="r">
-  ${receiptSettings.receipt_logo_url ? `<div class="c"><img class="logo" src="${esc(receiptSettings.receipt_logo_url)}"></div>` : ''}
+  ${receiptSettings.receipt_logo_url ? `<div style="text-align:${esc(receiptSettings.receipt_logo_align || 'center')};overflow:hidden"><img src="${esc(receiptSettings.receipt_logo_url)}" style="width:${Number(receiptSettings.receipt_logo_width) || 120}px;max-width:100%;position:relative;left:${Number(receiptSettings.receipt_logo_offset_x) || 0}px"></div>` : ''}
   <div class="c"><h1>${esc(receiptSettings.receipt_header_text || systemSettings.company_name || 'Receipt')}</h1>${company}</div>
   <div class="sep"></div>
   <div class="row"><span>Receipt No</span><b>${esc(saleData.id.substring(0, 8).toUpperCase())}</b></div>
@@ -268,11 +271,12 @@ export default function Receipt({ isOpen, onClose, saleData }: ReceiptProps) {
             <CardContent className="p-6 space-y-4">
               {/* Logo */}
               {receiptSettings.receipt_logo_url && (
-                <div className="flex justify-center">
+                <div className="overflow-hidden" style={{ textAlign: (receiptSettings.receipt_logo_align || "center") as any }}>
                   <img 
                     src={receiptSettings.receipt_logo_url} 
                     alt="Company Logo" 
-                    className="h-16 object-contain"
+                    className="inline-block max-w-full object-contain"
+                    style={{ width: Number(receiptSettings.receipt_logo_width) || 120, position: "relative", left: Number(receiptSettings.receipt_logo_offset_x) || 0 }}
                   />
                 </div>
               )}
