@@ -627,37 +627,37 @@ export default function POS() {
   );
 
   // One-tap "Pending": saves the cart as an open bill (or updates the loaded one) and clears the cart.
-  const holdAsPending = async () => {
+  const holdAsPending = () => {
     if (cart.length === 0) return;
-    setIsProcessing(true);
-    try {
-      const name = customerName.trim() || `Bill ${format(new Date(), 'HH:mm')}`;
-      const warehouseId = selectedWarehouse !== 'all'
-        ? selectedWarehouse
-        : (warehouses.find((w) => w.name !== 'Extra')?.id || warehouses[0]?.id);
-      if (!warehouseId) throw new Error('No warehouse available');
-      const now = new Date().toISOString();
-      let billId = activePendingBillId;
-      if (billId) {
-        await offlineMutate('pending_bill_items', 'delete', null, { bill_id: billId });
-        await offlineMutate('pending_bills', 'update', { customer_name: name, customer_phone: customerPhone.trim() || null, updated_at: now }, { id: billId });
+    const name = customerName.trim() || `Bill ${format(new Date(), 'HH:mm')}`;
+    const warehouseId = selectedWarehouse !== 'all'
+      ? selectedWarehouse
+      : (warehouses.find((w) => w.name !== 'Extra')?.id || warehouses[0]?.id);
+    if (!warehouseId) { toast({ title: 'Error', description: 'No warehouse available', variant: 'destructive' }); return; }
+    const now = new Date().toISOString();
+    const items = cart; const phone = customerPhone.trim() || null; const existingId = activePendingBillId;
+    const billId = existingId || crypto.randomUUID();
+    // Instant: clear cart and confirm now; save in background.
+    toast({ title: existingId ? 'Bill updated' : 'Saved as pending', description: `${name} — ${formatAmount(getTotalAmount())}` });
+    setCart([]); setCustomerName(''); setCustomerPhone(''); setActivePendingBillId(null); setMobileCartOpen(false);
+    (async () => {
+      if (existingId) {
+        await Promise.all([
+          offlineMutate('pending_bill_items', 'delete', null, { bill_id: billId }),
+          offlineMutate('pending_bills', 'update', { customer_name: name, customer_phone: phone, updated_at: now }, { id: billId }),
+        ]);
       } else {
-        const { data: bill, error } = await offlineInsertSingle<any>('pending_bills', {
-          customer_name: name, customer_phone: customerPhone.trim() || null, warehouse_id: warehouseId,
+        const { error } = await offlineInsertSingle<any>('pending_bills', {
+          id: billId, customer_name: name, customer_phone: phone, warehouse_id: warehouseId,
           created_by: user?.id, status: 'open', updated_at: now,
         });
-        if (error || !bill) throw error ?? new Error('Could not save bill');
-        billId = bill.id;
+        if (error) throw error;
       }
-      const res = await offlineMutate('pending_bill_items', 'insert', cart.map((i) => ({
+      const res = await offlineMutate('pending_bill_items', 'insert', items.map((i) => ({
         bill_id: billId, product_id: i.productId, product_name: i.name, quantity: i.quantity, unit_price: i.price, subtotal: i.subtotal,
       })));
       if (!res.success) throw res.error ?? new Error('Could not save bill items');
-      toast({ title: activePendingBillId ? 'Bill updated' : 'Saved as pending', description: `${name} — ${formatAmount(getTotalAmount())}` });
-      setCart([]); setCustomerName(''); setCustomerPhone(''); setActivePendingBillId(null); setMobileCartOpen(false);
-    } catch (error: any) {
-      toast({ title: 'Error', description: error.message, variant: 'destructive' });
-    } finally { setIsProcessing(false); }
+    })().catch((error: any) => toast({ title: 'Pending bill not saved', description: error?.message, variant: 'destructive' }));
   };
 
   const handleRefresh = () => {
