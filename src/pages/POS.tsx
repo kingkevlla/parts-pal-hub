@@ -22,6 +22,7 @@ import { BarcodeScanner } from '@/components/inventory/BarcodeScanner';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { format, addDays } from 'date-fns';
 import PendingBills from '@/components/pos/PendingBills';
+import { enqueuePendingSave } from '@/lib/pendingBillQueue';
 import ManualItemEntry from '@/components/pos/ManualItemEntry';
 import { getAppConfig } from '@/lib/appConfig';
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetTrigger } from '@/components/ui/sheet';
@@ -640,24 +641,20 @@ export default function POS() {
     // Instant: clear cart and confirm now; save in background.
     toast({ title: existingId ? 'Bill updated' : 'Saved as pending', description: `${name} — ${formatAmount(getTotalAmount())}` });
     setCart([]); setCustomerName(''); setCustomerPhone(''); setActivePendingBillId(null); setMobileCartOpen(false);
-    (async () => {
-      if (existingId) {
-        await Promise.all([
-          offlineMutate('pending_bill_items', 'delete', null, { bill_id: billId }),
-          offlineMutate('pending_bills', 'update', { customer_name: name, customer_phone: phone, updated_at: now }, { id: billId }),
-        ]);
-      } else {
-        const { error } = await offlineInsertSingle<any>('pending_bills', {
-          id: billId, customer_name: name, customer_phone: phone, warehouse_id: warehouseId,
-          created_by: user?.id, status: 'open', updated_at: now,
-        });
-        if (error) throw error;
-      }
-      const res = await offlineMutate('pending_bill_items', 'insert', items.map((i) => ({
-        bill_id: billId, product_id: i.productId, product_name: i.name, quantity: i.quantity, unit_price: i.price, subtotal: i.subtotal,
-      })));
-      if (!res.success) throw res.error ?? new Error('Could not save bill items');
-    })().catch((error: any) => toast({ title: 'Pending bill not saved', description: error?.message, variant: 'destructive' }));
+    const onErr = (error: any) => toast({ title: 'Pending bill not saved', description: error?.message, variant: 'destructive' });
+    const rows = items.map((i) => ({
+      id: crypto.randomUUID(), bill_id: billId, product_id: i.productId, product_name: i.name, quantity: i.quantity, unit_price: i.price, subtotal: i.subtotal,
+    }));
+    if (existingId) {
+      enqueuePendingSave(() => offlineMutate('pending_bill_items', 'delete', null, { bill_id: billId }), onErr);
+      enqueuePendingSave(() => offlineMutate('pending_bills', 'update', { customer_name: name, customer_phone: phone, updated_at: now }, { id: billId }), onErr);
+    } else {
+      enqueuePendingSave(() => offlineInsertSingle<any>('pending_bills', {
+        id: billId, customer_name: name, customer_phone: phone, warehouse_id: warehouseId,
+        created_by: user?.id, status: 'open', updated_at: now,
+      }), onErr);
+    }
+    enqueuePendingSave(() => offlineMutate('pending_bill_items', 'insert', rows), onErr);
   };
 
   const handleRefresh = () => {
