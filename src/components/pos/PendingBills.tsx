@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback , useRef} from 'react';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -110,8 +110,12 @@ export default function PendingBills({ selectedWarehouse, warehouses, cart, onLo
     })));
   }, []);
 
+  const manualIdsRef = useRef<Set<string>>(new Set());
   useEffect(() => {
     fetchBills();
+    offlineQuery<any>('products', () => supabase.from('products').select('id, description')).then(({ data }) => {
+      manualIdsRef.current = new Set((data || []).filter((p: any) => p.description === 'Manually added via POS').map((p: any) => p.id));
+    }).catch(() => {});
   }, [fetchBills]);
 
   const getBillTotal = (items: PendingBillItem[]) => {
@@ -171,123 +175,74 @@ export default function PendingBills({ selectedWarehouse, warehouses, cart, onLo
     }
   };
 
-  const addCartToBill = async (billId: string) => {
+  // Instant: update the list + clear cart right away, save in the background.
+  const addCartToBill = (billId: string) => {
     if (cart.length === 0) {
       toast({ title: 'Error', description: 'Cart is empty', variant: 'destructive' });
       return;
     }
-
-    setIsLoading(true);
-    try {
-      const bill = bills.find(b => b.id === billId);
-      if (!bill) return;
-
-      // Merge: if product already exists in bill, update quantity; otherwise insert
-      const existingItems = bill.items;
-      const toUpdate: { id: string; quantity: number; subtotal: number }[] = [];
-      const toInsert: { bill_id: string; product_id: string; product_name: string; quantity: number; unit_price: number; subtotal: number }[] = [];
-
-      for (const cartItem of cart) {
-        const existing = existingItems.find(ei => ei.product_id === cartItem.productId);
-        if (existing) {
-          const newQty = existing.quantity + cartItem.quantity;
-          toUpdate.push({ id: existing.id, quantity: newQty, subtotal: newQty * existing.unit_price });
-        } else {
-          toInsert.push({
-            bill_id: billId,
-            product_id: cartItem.productId,
-            product_name: cartItem.name,
-            quantity: cartItem.quantity,
-            unit_price: cartItem.price,
-            subtotal: cartItem.subtotal,
-          });
-        }
+    const bill = bills.find(b => b.id === billId);
+    if (!bill) return;
+    const items = bill.items.map(i => ({ ...i }));
+    const toUpdate: PendingBillItem[] = [];
+    const toInsert: PendingBillItem[] = [];
+    for (const c of cart) {
+      const ex = items.find(ei => ei.product_id === c.productId);
+      if (ex) {
+        ex.quantity += c.quantity; ex.subtotal = ex.quantity * ex.unit_price;
+        if (!toUpdate.includes(ex)) toUpdate.push(ex);
+      } else {
+        const ni: PendingBillItem = { id: crypto.randomUUID(), bill_id: billId, product_id: c.productId, product_name: c.name, quantity: c.quantity, unit_price: c.price, subtotal: c.subtotal };
+        items.push(ni); toInsert.push(ni);
       }
-
-      // Perform updates
-      for (const upd of toUpdate) {
-        await offlineMutate('pending_bill_items', 'update', { quantity: upd.quantity, subtotal: upd.subtotal }, { id: upd.id });
-      }
-
-      // Perform inserts
-      if (toInsert.length > 0) {
-        const r = await offlineMutate('pending_bill_items', 'insert', toInsert);
-        if (!r.success) throw r.error;
-      }
-
-      // Touch updated_at
-      await offlineMutate('pending_bills', 'update', { updated_at: new Date().toISOString() }, { id: billId });
-
-      toast({ title: 'Items Added', description: `${cart.length} item(s) added to ${bill.customer_name}'s bill` });
-      fetchBills();
-      onBillSaved(); // clears cart
-    } catch (error: any) {
-      toast({ title: 'Error', description: error.message, variant: 'destructive' });
-    } finally {
-      setIsLoading(false);
     }
+    const now = new Date().toISOString();
+    setBills(prev => [{ ...bill, items, updated_at: now } as PendingBill, ...prev.filter(b => b.id !== billId)]);
+    toast({ title: 'Items Added', description: `${cart.length} item(s) added to ${bill.customer_name}'s bill` });
+    onBillSaved();
+    Promise.all([
+      ...toUpdate.map(u => offlineMutate('pending_bill_items', 'update', { quantity: u.quantity, subtotal: u.subtotal }, { id: u.id })),
+      toInsert.length ? offlineMutate('pending_bill_items', 'insert', toInsert) : Promise.resolve({ success: true } as any),
+      offlineMutate('pending_bills', 'update', { updated_at: now }, { id: billId }),
+    ]).then(rs => {
+      if (rs.some((r: any) => r && r.success === false)) throw new Error('Could not save some items');
+    }).catch((e: any) => { toast({ title: 'Error', description: e.message, variant: 'destructive' }); fetchBills(); });
   };
 
-  const loadBillToCart = async (bill: PendingBill) => {
-    // Detect which items are manual by checking product descriptions
-    const productIds = new Set(bill.items.map(i => i.product_id));
-    const { data: allProducts } = await offlineQuery<any>('products', () =>
-      supabase.from('products').select('*')
-    );
-    const productData = (allProducts || []).filter((p: any) => productIds.has(p.id));
-
-
-    const manualIds = new Set(
-      (productData || [])
-        .filter(p => p.description === 'Manually added via POS')
-        .map(p => p.id)
-    );
-
+  const loadBillToCart = (bill: PendingBill) => {
     const items: CartItem[] = bill.items.map(item => ({
-      productId: item.product_id,
-      name: item.product_name,
-      quantity: item.quantity,
-      price: item.unit_price,
-      subtotal: item.subtotal,
-      isManual: manualIds.has(item.product_id),
+      productId: item.product_id, name: item.product_name, quantity: item.quantity,
+      price: item.unit_price, subtotal: item.subtotal, isManual: manualIdsRef.current.has(item.product_id),
     }));
     setActiveBillId(bill.id);
     onLoadBill(items, bill.id, bill.customer_name, bill.customer_phone || '', bill.warehouse_id);
   };
 
-  const closeBill = async (billId: string) => {
-    try {
-      await offlineMutate('pending_bills', 'update', { status: 'closed' }, { id: billId });
-      setActiveBillId(null);
-      fetchBills();
-      toast({ title: 'Bill Closed', description: 'Pending bill has been closed' });
-    } catch (error: any) {
-      toast({ title: 'Error', description: error.message, variant: 'destructive' });
-    }
+  const runBg = (p: Promise<any>) => p.catch((e: any) => { toast({ title: 'Error', description: e?.message || 'Save failed', variant: 'destructive' }); fetchBills(); });
+
+  const closeBill = (billId: string) => {
+    setBills(prev => prev.filter(b => b.id !== billId));
+    setActiveBillId(null);
+    toast({ title: 'Bill Closed', description: 'Pending bill has been closed' });
+    runBg(offlineMutate('pending_bills', 'update', { status: 'closed' }, { id: billId }));
   };
 
-  const deleteBill = async (billId: string) => {
-    try {
-      // Items cascade delete
-      await offlineMutate('pending_bills', 'delete', null, { id: billId });
-      if (activeBillId === billId) setActiveBillId(null);
-      setShowDeleteConfirm(null);
-      fetchBills();
-      toast({ title: 'Bill Deleted', description: 'Pending bill removed' });
-    } catch (error: any) {
-      toast({ title: 'Error', description: error.message, variant: 'destructive' });
-    }
+  const deleteBill = (billId: string) => {
+    setBills(prev => prev.filter(b => b.id !== billId));
+    if (activeBillId === billId) setActiveBillId(null);
+    setShowDeleteConfirm(null);
+    toast({ title: 'Bill Deleted', description: 'Pending bill removed' });
+    runBg(offlineMutate('pending_bills', 'delete', null, { id: billId }));
   };
 
-  const removeItemFromBill = async (billId: string, itemId: string) => {
-    try {
-      await offlineMutate('pending_bill_items', 'delete', null, { id: itemId });
-      await offlineMutate('pending_bills', 'update', { updated_at: new Date().toISOString() }, { id: billId });
-      fetchBills();
-      toast({ title: 'Item Removed' });
-    } catch (error: any) {
-      toast({ title: 'Error', description: error.message, variant: 'destructive' });
-    }
+  const removeItemFromBill = (billId: string, itemId: string) => {
+    const now = new Date().toISOString();
+    setBills(prev => prev.map(b => b.id === billId ? { ...b, items: b.items.filter(i => i.id !== itemId), updated_at: now } : b));
+    toast({ title: 'Item Removed' });
+    runBg(Promise.all([
+      offlineMutate('pending_bill_items', 'delete', null, { id: itemId }),
+      offlineMutate('pending_bills', 'update', { updated_at: now }, { id: billId }),
+    ]));
   };
 
   const filteredBills = bills.filter(b =>
