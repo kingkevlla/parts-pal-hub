@@ -12,6 +12,7 @@ import { OfflineBanner } from "@/components/layout/OfflineBanner";
 import React, { Suspense } from "react";
 import { TopNav } from "@/components/layout/TopNav";
 import { useAppConfig } from "@/lib/appConfig";
+import { WelcomeGuide } from "@/components/layout/WelcomeGuide";
 
 
 // Lazy load all pages for faster initial load
@@ -37,6 +38,7 @@ const Employees = React.lazy(() => import("./pages/Employees"));
 const SalesHistory = React.lazy(() => import("./pages/SalesHistory"));
 const StockAdjustment = React.lazy(() => import("./pages/StockAdjustment"));
 const NotFound = React.lazy(() => import("./pages/NotFound"));
+const ResetPassword = React.lazy(() => import("./pages/ResetPassword"));
 
 const PageLoader = () => (
   <div className="flex items-center justify-center min-h-[60vh]">
@@ -109,6 +111,7 @@ const Layout = ({ children }: { children: React.ReactNode }) => {
         <div className="flex flex-1 flex-col overflow-hidden">
           <Header />
           <OfflineBanner />
+          <WelcomeGuide />
           <main className={`flex-1 overflow-y-auto ${density}`}>
             {children}
           </main>
@@ -148,6 +151,7 @@ const App = () => (
           <Suspense fallback={<PageLoader />}>
           <Routes>
             <Route path="/auth" element={<Auth />} />
+            <Route path="/reset-password" element={<ResetPassword />} />
 
             {/* Dashboard - all authenticated users */}
             <Route path="/" element={<ProtectedPage permission="dashboard"><Dashboard /></ProtectedPage>} />

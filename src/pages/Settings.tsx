@@ -10,8 +10,9 @@ import {
 import { AuditLogPanel, PolicyAdvisorPanel } from "@/components/settings/AuditAndAdvisor";
 import {
   User, Settings as SettingsIcon, Users, Shield, Receipt, Palette, LayoutTemplate,
-  Boxes, KeyRound, SlidersHorizontal, History, Sparkles,
+  Boxes, KeyRound, SlidersHorizontal, History, Sparkles, DatabaseBackup,
 } from "lucide-react";
+import BackupPanel from "@/components/settings/BackupPanel";
 import { usePermissions } from "@/hooks/usePermissions";
 import { cn } from "@/lib/utils";
 
@@ -28,6 +29,7 @@ const SECTIONS = [
   { key: "users", label: "Users", icon: Users, group: "Control", admin: true, el: <UserManagementSettings /> },
   { key: "advisor", label: "AI Policy Advisor", icon: Sparkles, group: "Control", admin: true, el: <PolicyAdvisorPanel /> },
   { key: "audit", label: "Change History", icon: History, group: "Control", admin: true, el: <AuditLogPanel /> },
+  { key: "backup", label: "Backup", icon: DatabaseBackup, group: "Control", admin: true, el: <BackupPanel /> },
 ];
 
 export default function Settings() {
