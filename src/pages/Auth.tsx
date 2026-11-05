@@ -8,6 +8,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { useToast } from '@/hooks/use-toast';
 import { z } from 'zod';
+import { supabase } from '@/integrations/supabase/client';
 
 const loginSchema = z.object({
   email: z.string().email('Invalid email address'),
@@ -70,6 +71,22 @@ export default function Auth() {
     } finally {
       setIsLoading(false);
     }
+  };
+
+  const handleForgot = async () => {
+    const input = document.getElementById('login-email') as HTMLInputElement | null;
+    const email = input?.value.trim() || '';
+    if (!z.string().email().safeParse(email).success) {
+      toast({ title: 'Enter your email first', description: 'Type your email above, then tap "Forgot password?".', variant: 'destructive' });
+      input?.focus();
+      return;
+    }
+    const { error } = await supabase.auth.resetPasswordForEmail(email, {
+      redirectTo: `${window.location.origin}/reset-password`,
+    });
+    toast(error
+      ? { title: 'Could not send email', description: error.message, variant: 'destructive' }
+      : { title: 'Check your email', description: `We sent a password reset link to ${email}.` });
   };
 
   const handleSignup = async (e: React.FormEvent<HTMLFormElement>) => {
@@ -151,6 +168,13 @@ export default function Auth() {
                 <Button type="submit" className="w-full" disabled={isLoading}>
                   {isLoading ? 'Signing in...' : 'Sign In'}
                 </Button>
+                <button
+                  type="button"
+                  className="w-full text-center text-sm text-primary hover:underline"
+                  onClick={handleForgot}
+                >
+                  Forgot password?
+                </button>
               </form>
             </TabsContent>
 
