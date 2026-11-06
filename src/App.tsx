@@ -99,6 +99,7 @@ const Layout = ({ children }: { children: React.ReactNode }) => {
       <div className="flex min-h-screen w-full flex-col bg-background">
         <TopNav />
         <OfflineBanner />
+        <WelcomeGuide />
         <main className={`flex-1 overflow-y-auto ${density}`}>{children}</main>
       </div>
     );
