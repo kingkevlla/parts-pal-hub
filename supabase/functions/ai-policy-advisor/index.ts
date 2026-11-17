@@ -20,7 +20,8 @@ Deno.serve(async (req) => {
     });
     const { data: { user } } = await sb.auth.getUser();
     if (!user) return json({ error: "Please sign in." }, 401);
-    const { data: isAdmin } = await sb.rpc("is_admin_or_owner", { _user_id: user.id });
+    const { data: roleRows } = await sb.from("user_roles").select("role").eq("user_id", user.id).in("role", ["admin", "owner"]);
+    const isAdmin = (roleRows?.length ?? 0) > 0;
     if (!isAdmin) return json({ error: "Only admins and owners can use the advisor." }, 403);
 
     const { policy, modules, current } = await req.json();
