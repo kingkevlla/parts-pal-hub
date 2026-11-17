@@ -1,3 +1,4 @@
+import { neutralizeFormula } from "@/lib/exportData";
 // Helpers for working with locally queued POS receipts (offline-friendly).
 
 export const QUEUED_RECEIPTS_KEY = "queued_receipts";
@@ -96,7 +97,7 @@ export function exportQueuedReceipts(
       "subtotal",
       "total_amount",
     ].join(",");
-    const escape = (v: any) => `"${String(v ?? "").replace(/"/g, '""')}"`;
+    const escape = (v: any) => `"${String(neutralizeFormula(v ?? "")).replace(/"/g, '""')}"`;
     const rows: string[] = [header];
     receipts.forEach((r) => {
       r.items.forEach((i) => {

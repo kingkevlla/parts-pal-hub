@@ -1,3 +1,4 @@
+import { neutralizeFormula } from '@/lib/exportData';
 import { useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
@@ -139,7 +140,7 @@ export function ExportImportDialog({ onImportComplete, categories }: ExportImpor
     setIsExporting(true);
     try {
       const { headers, dataRows, count } = await fetchExportData();
-      const ws = XLSX.utils.json_to_sheet(dataRows, { header: headers });
+      const ws = XLSX.utils.json_to_sheet(dataRows.map((r: any) => Object.fromEntries(Object.entries(r).map(([k, v]) => [k, neutralizeFormula(v)]))), { header: headers });
 
       // Auto-size columns
       ws['!cols'] = headers.map(h => ({ wch: Math.max(h.length + 2, 12) }));
@@ -162,7 +163,7 @@ export function ExportImportDialog({ onImportComplete, categories }: ExportImpor
       const { headers, dataRows, count } = await fetchExportData();
 
       const rows = dataRows.map(r =>
-        headers.map(h => escapeCSV(r[h])).join(',')
+        headers.map(h => escapeCSV(neutralizeFormula(r[h]))).join(',')
       );
       const csvContent = [headers.join(','), ...rows].join('\n');
       const blob = new Blob(['\uFEFF' + csvContent], { type: 'text/csv;charset=utf-8;' });

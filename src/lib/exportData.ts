@@ -19,8 +19,14 @@ function download(blob: Blob, filename: string) {
   setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 
+/** Prefix text that spreadsheets would treat as a formula so it shows as plain text. */
+export function neutralizeFormula<T>(v: T): T | string {
+  if (typeof v !== 'string') return v;
+  return /^[=+\-@\t\r]/.test(v) ? `'${v}` : v;
+}
+
 const escapeCsv = (v: unknown) => {
-  const s = v == null ? '' : String(v);
+  const s = v == null ? '' : String(neutralizeFormula(v));
   return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
 };
 
